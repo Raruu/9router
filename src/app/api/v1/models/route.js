@@ -258,16 +258,23 @@ function buildProviderIdByPrefix(connections) {
   return byPrefix;
 }
 
-function comboMemberCapabilities(member, providerIdByPrefix, modelAliases) {
+// Combos can list other combos as members, so resolution recurses. The cap is
+// a guard against a pathological chain, not a supported nesting depth.
+const MAX_COMBO_NESTING_DEPTH = 5;
+
+function comboMemberCapabilities(member, ctx, depth, visited) {
   if (typeof member !== "string") return null;
   let fullModel = member.trim();
   if (!fullModel) return null;
 
-  // A bare member is a model alias (routing resolves it the same way). Anything
-  // else bare is a provider-as-model entry or a nested combo — no member model
-  // to read limits from, so it contributes nothing.
+  // A bare member is a nested combo or a model alias — routing resolves it in
+  // that order (getModelInfo checks combos before aliases), so match it here.
+  // Anything else bare is a provider-as-model entry with no member model to
+  // read limits from, so it contributes nothing.
   if (!fullModel.includes("/")) {
-    const resolved = modelAliases?.[fullModel];
+    const nested = ctx.comboByName.get(fullModel);
+    if (nested) return comboCapabilities(nested, ctx, depth + 1, visited);
+    const resolved = ctx.modelAliases?.[fullModel];
     if (typeof resolved !== "string" || !resolved.includes("/")) return null;
     fullModel = resolved;
   }
@@ -277,7 +284,27 @@ function comboMemberCapabilities(member, providerIdByPrefix, modelAliases) {
   const modelId = fullModel.slice(separator + 1).trim();
   if (!modelId) return null;
 
-  return getCapabilitiesForModel(providerIdByPrefix.get(prefix) || prefix, modelId);
+  return getCapabilitiesForModel(ctx.providerIdByPrefix.get(prefix) || prefix, modelId);
+}
+
+// Merged capabilities for one combo, recursing into combo members. `visited`
+// tracks the current chain only (removed on the way out), so a combo reached
+// twice by different paths still contributes — only a cycle is cut.
+function comboCapabilities(combo, ctx, depth = 0, visited = new Set()) {
+  if (depth >= MAX_COMBO_NESTING_DEPTH) return null;
+  const name = typeof combo?.name === "string" ? combo.name : null;
+  if (name !== null) {
+    if (visited.has(name)) return null;
+    visited.add(name);
+  }
+  try {
+    const memberCapabilities = (combo?.models || [])
+      .map((member) => comboMemberCapabilities(member, ctx, depth, visited))
+      .filter(Boolean);
+    return mergeMemberCapabilities(memberCapabilities);
+  } finally {
+    if (name !== null) visited.delete(name);
+  }
 }
 
 // null means "no clamp", so a member without a range constrains nothing; the
@@ -378,7 +405,19 @@ export async function buildModelsList(kindFilter, options = {}) {
   }
 
   const models = [];
-  const providerIdByPrefix = buildProviderIdByPrefix(connections);
+  // Only LLM combos are nestable targets: a web combo answers a different kind
+  // of request and has no member limits to inherit.
+  const comboByName = new Map();
+  for (const combo of combos) {
+    if (typeof combo?.name !== "string") continue;
+    if ((combo.kind || LLM_KIND) !== LLM_KIND) continue;
+    if (!comboByName.has(combo.name)) comboByName.set(combo.name, combo);
+  }
+  const capabilityContext = {
+    providerIdByPrefix: buildProviderIdByPrefix(connections),
+    modelAliases,
+    comboByName,
+  };
 
   // Combos first (filtered by kind). Web combos expose `kind` so AI knows search vs fetch.
   for (const combo of combos) {
@@ -393,10 +432,7 @@ export async function buildModelsList(kindFilter, options = {}) {
     } else if ((combo.kind || LLM_KIND) === LLM_KIND) {
       // Inherit from the members: without this a combo is an id with no limits,
       // so clients guess its window from the name and guess high.
-      const memberCapabilities = (combo.models || [])
-        .map((member) => comboMemberCapabilities(member, providerIdByPrefix, modelAliases))
-        .filter(Boolean);
-      const caps = mergeMemberCapabilities(memberCapabilities);
+      const caps = comboCapabilities(combo, capabilityContext);
       if (caps) {
         entry.capabilities = caps;
         if (Number.isFinite(caps.contextWindow)) entry.context_length = caps.contextWindow;
