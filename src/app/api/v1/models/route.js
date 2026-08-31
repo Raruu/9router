@@ -5,8 +5,9 @@ import {
   isAnthropicCompatibleProvider,
   isOpenAICompatibleProvider,
 } from "@/shared/constants/providers";
-import { getProviderConnections, getCombos, getCustomModels, getModelAliases } from "@/lib/localDb";
+import { getProviderConnections, getCombos, getCustomModels, getModelAliases, getSettings } from "@/lib/localDb";
 import { getDisabledModels } from "@/lib/disabledModelsDb";
+import { hasValidCliToken } from "@/lib/auth/cliToken";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
 import { resolveQoderModels } from "open-sse/services/qoderModels.js";
@@ -135,6 +136,15 @@ const INTERNAL_MODELS_FETCH_HEADER = "x-9r-internal-models-fetch";
 
 // LLM kind sentinel — combos/models with no explicit kind default to LLM
 const LLM_KIND = "llm";
+
+// `modelsExposure` setting → which sources GET /v1/models draws from. Applies to
+// the default LLM list only; /v1/models/{kind} always advertises everything, so
+// a client narrowing the chat catalog does not lose its tts/image/embedding ids.
+export const MODELS_EXPOSURE = {
+  all: { combos: true, models: true },
+  combos: { combos: true, models: false },
+  models: { combos: false, models: true },
+};
 
 // Map per-model `type` field (in PROVIDER_MODELS) to service kind.
 // Models without `type` are treated as LLM.
@@ -360,12 +370,19 @@ export function mergeMemberCapabilities(memberCapabilities) {
 /**
  * Build OpenAI-format models list filtered by service kinds.
  * @param {string[]} kindFilter - List of service kinds to include (e.g. ["llm"], ["webSearch","webFetch"]).
+ * @param {object} [options]
+ * @param {boolean} [options.skipDynamicFetch] - Skip upstream /models fetches.
+ * @param {"all"|"combos"|"models"} [options.exposure] - Which entries to advertise.
  */
 export async function buildModelsList(kindFilter, options = {}) {
   // When this header is present, the /v1/models request came from another
   // 9router instance's fetchCompatibleModelIds — skip dynamic fetch to break
   // cross-instance recursive loops.
   const skipDynamicFetch = options.skipDynamicFetch === true;
+  // Gate each source before it runs rather than filtering the result, so
+  // combos-only also skips the live-catalog and compatible-provider fetches
+  // instead of paying for models it would throw away.
+  const exposure = MODELS_EXPOSURE[options.exposure] || MODELS_EXPOSURE.all;
   let connections = [];
   try {
     connections = await getProviderConnections();
@@ -426,7 +443,7 @@ export async function buildModelsList(kindFilter, options = {}) {
   };
 
   // Combos first (filtered by kind). Web combos expose `kind` so AI knows search vs fetch.
-  for (const combo of combos) {
+  for (const combo of exposure.combos ? combos : []) {
     if (!comboMatchesKinds(combo, kindFilter)) continue;
     const entry = {
       id: combo.name,
@@ -448,7 +465,10 @@ export async function buildModelsList(kindFilter, options = {}) {
     models.push(entry);
   }
 
-  if (connections.length === 0) {
+  if (!exposure.models) {
+    // Combos-only: nothing else to add, and the live-catalog / compatible-provider
+    // fetches below are skipped entirely rather than run and discarded.
+  } else if (connections.length === 0) {
     // DB unavailable -> return static models, filtered by per-model kind
     const aliasToProviderId = Object.fromEntries(
       Object.entries(PROVIDER_ID_TO_ALIAS).map(([id, alias]) => [alias, id])
@@ -696,6 +716,25 @@ export async function OPTIONS() {
   });
 }
 
+// The CLI's own model pickers read this endpoint and partition on
+// `owned_by === "combo"`, most of them discarding the combos — so a
+// combos-only setting would leave every CLI Tools picker empty. A valid CLI
+// token already unlocks /api/settings and every provider route, so exempting it
+// from a display filter grants nothing new.
+async function resolveExposure(request) {
+  try {
+    if (await hasValidCliToken(request)) return "all";
+  } catch {
+    // Token check failed (no machine-id file yet) — fall through to the setting.
+  }
+  try {
+    const { modelsExposure } = await getSettings();
+    return modelsExposure;
+  } catch {
+    return "all";
+  }
+}
+
 /**
  * GET /v1/models - OpenAI compatible models list (LLM/chat models only by default).
  * For other capabilities use /v1/models/{kind} (image, tts, stt, embedding, image-to-text, web).
@@ -704,7 +743,8 @@ export async function GET(request) {
   try {
     // Detect cross-instance recursive /models fetch (another 9router fetching our /models)
     const skipDynamicFetch = request?.headers?.get(INTERNAL_MODELS_FETCH_HEADER) === "1";
-    const data = await buildModelsList([LLM_KIND], { skipDynamicFetch });
+    const exposure = await resolveExposure(request);
+    const data = await buildModelsList([LLM_KIND], { skipDynamicFetch, exposure });
     return Response.json({ object: "list", data }, {
       headers: { "Access-Control-Allow-Origin": "*" },
     });

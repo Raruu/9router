@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { Card, Button, Toggle, Input } from "@/shared/components";
+import { Card, Button, Toggle, Input, Select } from "@/shared/components";
 import Modal, { ConfirmModal } from "@/shared/components/Modal";
 import LanguageSwitcher from "@/shared/components/LanguageSwitcher";
 import { useTheme } from "@/shared/hooks/useTheme";
@@ -319,6 +319,21 @@ export default function ProfilePage() {
       }
     } catch (err) {
       console.error("Failed to update combo sticky limit:", err);
+    }
+  };
+
+  const updateModelsExposure = async (modelsExposure) => {
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelsExposure }),
+      });
+      if (res.ok) {
+        setSettings(prev => ({ ...prev, modelsExposure }));
+      }
+    } catch (err) {
+      console.error("Failed to update models exposure:", err);
     }
   };
 
@@ -1516,6 +1531,39 @@ export default function ProfilePage() {
               {settings.comboStrategy === "round-robin"
                 ? ` Combos rotate after ${settings.comboStickyRoundRobinLimit || 1} call${(settings.comboStickyRoundRobinLimit || 1) === 1 ? "" : "s"} per model.`
                 : " Combos always start with their first model."}
+            </p>
+          </div>
+        </Card>
+
+        {/* Model List */}
+        <Card>
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-2 rounded-lg bg-teal-500/10 text-teal-500 shrink-0">
+              <span className="material-symbols-outlined text-[20px]">format_list_bulleted</span>
+            </div>
+            <h3 className="text-base sm:text-lg font-semibold">Model List</h3>
+          </div>
+
+          <div className="flex flex-col gap-4">
+            <Select
+              label="Expose in /v1/models"
+              value={settings.modelsExposure || "all"}
+              onChange={(e) => updateModelsExposure(e.target.value)}
+              disabled={loading}
+              options={[
+                { value: "all", label: "Combos + Models" },
+                { value: "combos", label: "Combos only" },
+                { value: "models", label: "Models only" },
+              ]}
+              hint="Applies to GET /v1/models only. The per-kind lists (/v1/models/image, /tts, /stt, /embedding, /web) always expose everything, and the CLI Tools model pickers are unaffected."
+            />
+
+            <p className="text-xs text-text-muted italic pt-2 border-t border-border/50">
+              {settings.modelsExposure === "combos"
+                ? "Clients see combo names only — provider models stay routable, just unlisted."
+                : settings.modelsExposure === "models"
+                  ? "Clients see provider models only — combos stay routable, just unlisted."
+                  : "Clients see every combo and provider model."}
             </p>
           </div>
         </Card>
