@@ -308,21 +308,27 @@ function comboCapabilities(combo, ctx, depth = 0, visited = new Set()) {
 }
 
 // null means "no clamp", so a member without a range constrains nothing; the
-// combo's range is the overlap of the members that do clamp.
-function intersectThinkingRanges(ranges) {
+// combo's range spans every member that does clamp.
+function unionThinkingRanges(ranges) {
   const bounded = ranges.filter((r) => Number.isFinite(r?.min) && Number.isFinite(r?.max));
   if (bounded.length === 0) return null;
-  const min = Math.max(...bounded.map((r) => r.min));
-  const max = Math.min(...bounded.map((r) => r.max));
-  return min <= max ? { min, max } : null;
+  return {
+    min: Math.min(...bounded.map((r) => r.min)),
+    max: Math.max(...bounded.map((r) => r.max)),
+  };
 }
 
-// A combo routes to whichever member is reachable, so it can only promise what
-// EVERY member delivers: booleans intersect, limits take the minimum.
-// Advertising the best member's window would let a client send a prompt the
-// fallback member cannot accept — the same over-guessing this route already
-// avoids by emitting context_length for single models.
-function mergeMemberCapabilities(memberCapabilities) {
+// A combo is named after the model it is built to serve, and auto-switch floats
+// the member that fits the request to the front, so it advertises what its BEST
+// member delivers: booleans union, limits take the maximum. Intersecting
+// instead lets one small text-only fallback erase the headline model's window —
+// a glm-5.3-flash combo reported 200k/no-vision because two of its seven
+// members were plain GLM-5.2.
+//
+// The tradeoff: a prompt sized for the best member hard-fails if routing falls
+// through to a smaller one. Fallback is by availability, so keep members within
+// a comparable size class.
+export function mergeMemberCapabilities(memberCapabilities) {
   if (memberCapabilities.length === 0) return null;
 
   // A budget range only means something alongside the format it belongs to, so
@@ -335,11 +341,11 @@ function mergeMemberCapabilities(memberCapabilities) {
     const values = memberCapabilities.map((caps) => caps[key]);
     if (key === "contextWindow" || key === "maxOutput") {
       const numbers = values.filter((value) => Number.isFinite(value));
-      merged[key] = numbers.length > 0 ? Math.min(...numbers) : DEFAULT_CAPABILITIES[key];
+      merged[key] = numbers.length > 0 ? Math.max(...numbers) : DEFAULT_CAPABILITIES[key];
     } else if (key === "thinkingRange") {
-      merged[key] = sharesThinkingFormat ? intersectThinkingRanges(values) : null;
+      merged[key] = sharesThinkingFormat ? unionThinkingRanges(values) : null;
     } else if (values.every((value) => typeof value === "boolean")) {
-      merged[key] = values.every((value) => value === true);
+      merged[key] = values.some((value) => value === true);
     } else if (values.every((value) => value === values[0])) {
       merged[key] = values[0];
     } else {
