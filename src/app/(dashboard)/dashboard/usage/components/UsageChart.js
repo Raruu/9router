@@ -105,7 +105,7 @@ CustomTooltip.propTypes = {
   metric: PropTypes.string,
 };
 
-export default function UsageChart({ period = "7d", tableView = "model", stats }) {
+export default function UsageChart({ period = "7d", tableView = "model", stats, refreshKey = 0 }) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState("tokens");
@@ -124,7 +124,7 @@ export default function UsageChart({ period = "7d", tableView = "model", stats }
     } finally {
       setLoading(false);
     }
-  }, [period]);
+  }, [period, refreshKey]);
 
   useEffect(() => {
     const id = setTimeout(() => fetchData(), 0);
@@ -382,4 +382,5 @@ UsageChart.propTypes = {
   period: PropTypes.string,
   tableView: PropTypes.string,
   stats: PropTypes.object,
+  refreshKey: PropTypes.number,
 };
