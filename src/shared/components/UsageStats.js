@@ -352,26 +352,61 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
     };
   }, [period]);
 
-  // Keep the full, period-filtered snapshot current as completed requests are persisted.
+  // Keep the full, period-filtered snapshot current as completed requests are
+  // persisted — but only while the tab is visible. A hidden tab would otherwise
+  // keep the server recalculating full stats (incl. the latency query) per request.
   useEffect(() => {
-    const es = new EventSource(`/api/usage/stream?period=${encodeURIComponent(period)}`);
+    let es = null;
 
-    es.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        // The SSE snapshot is newer than an in-flight initial/period REST fetch.
-        statsFetchAbortRef.current?.abort();
-        setStats(data);
-        hasLoadedStats.current = true;
-        setLoading(false);
-      } catch (err) {
-        console.error("[SSE CLIENT] parse error:", err);
+    const close = () => {
+      if (es) {
+        es.close();
+        es = null;
       }
     };
 
-    es.onerror = () => setLoading(false);
+    const open = () => {
+      if (es) return;
+      es = new EventSource(`/api/usage/stream?period=${encodeURIComponent(period)}`);
 
-    return () => es.close();
+      es.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          // The SSE snapshot is newer than an in-flight initial/period REST fetch.
+          statsFetchAbortRef.current?.abort();
+          setStats(data);
+          hasLoadedStats.current = true;
+          setLoading(false);
+          setFetching(false);
+        } catch (err) {
+          console.error("[SSE CLIENT] parse error:", err);
+        }
+      };
+
+      es.onerror = () => {
+        setLoading(false);
+        setFetching(false);
+      };
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        close();
+      } else {
+        // Stats went stale while hidden — show the refresh indicator until the
+        // reconnected stream delivers a fresh snapshot.
+        if (hasLoadedStats.current) setFetching(true);
+        open();
+      }
+    };
+
+    if (!document.hidden) open();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      close();
+    };
   }, [period]);
 
   const toggleSort = useCallback((tableType, field) => {
