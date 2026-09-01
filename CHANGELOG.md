@@ -1,3 +1,33 @@
+# v0.5.59-1 (2026-09-01)
+
+## Features
+- **Models**: combo entries in `/v1/models` inherit capabilities and limits
+  from their members instead of shipping as bare ids — clients previously
+  guessed the context window from the combo name, and guessed high. Members
+  resolve back to provider ids (connection prefix, static alias or raw id)
+  and nested combos resolve recursively. The merge is optimistic: booleans
+  OR, limits take the maximum, thinking ranges union — so a combo advertises
+  its best member rather than being capped by the smallest fallback
+- **Models**: new `modelsExposure` setting (`all` | `combos` | `models`)
+  controls what `GET /v1/models` advertises, exposed on the profile page.
+  Applies to the default LLM list only — `/v1/models/{kind}` still returns
+  everything, so narrowing the chat catalog never drops tts/image/embedding
+  ids
+- **Capabilities**: Qwen3.8 family — `qwen3.8-max` is multimodal
+  (vision/video, 1M context) and is ordered ahead of the text-only
+  `*qwen*max*` catch-all; the 2.4T open model stays text-only at 262k
+- **Capabilities**: Meta Muse — `muse-spark` (vision/video/audio/search, 1M
+  context, always reasons so thinking cannot be disabled), `muse-glimmer`
+  and a `*muse*` fallback at 128k; every `muse-spark-1.2` variant (plain /
+  contributor / free, prefixed or not) pinned to the 1M window
+- **Capabilities**: `step-3.7` gains vision and video input with a 262k
+  window, ahead of the generic `*step-*` pattern
+- **Pricing**: canonical provider-agnostic rates for the Qwen 3.5/3.6/3.7/3.8
+  families; coder-plus/coder-flash repriced down to 0.65/3.25 and 0.195/0.975 per 1M
+
+## Fixes
+- **Capabilities**: GLM-5.2 and GLM-5.3 context window corrected 200k → 1M
+
 # v0.5.59 (2026-08-29)
 
 ## Features

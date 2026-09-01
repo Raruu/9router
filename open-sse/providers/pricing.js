@@ -80,9 +80,6 @@ export const MODEL_PRICING = {
   "gemini-2.5-flash":             { input: 0.30,  output: 2.50,  cached: 0.03,  reasoning: 3.75,   cache_creation: 0.30  },
   "gemini-2.5-flash-lite":        { input: 0.15,  output: 1.25,  cached: 0.015, reasoning: 1.875,  cache_creation: 0.15  },
 
-  // === Qwen ===
-  "qwen3-coder-plus":             { input: 1.00,  output: 4.00,  cached: 0.50,  reasoning: 6.00,   cache_creation: 1.00  },
-  "qwen3-coder-flash":            { input: 0.50,  output: 2.00,  cached: 0.25,  reasoning: 3.00,   cache_creation: 0.50  },
   // Qwen3.8 family — canonical provider-agnostic rates (mirror TokenRouter overrides).
   "qwen3-coder-plus":             { input: 0.65,  output: 3.25,  cached: 0.50,  reasoning: 3.25,   cache_creation: 1.00  },
   "qwen3-coder-flash":            { input: 0.195, output: 0.975, cached: 0.25,  reasoning: 0.975,  cache_creation: 0.50  },
