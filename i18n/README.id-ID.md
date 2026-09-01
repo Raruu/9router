@@ -7,9 +7,9 @@
 
   **Hubungkan semua tool AI coding (Claude Code, Cursor, Antigravity, Copilot, Codex, Gemini, OpenCode, Cline, OpenClaw...) ke 40+ provider AI dan 100+ model.**
 
-  [![npm](https://img.shields.io/npm/v/9router.svg)](https://www.npmjs.com/package/9router)
-  [![Downloads](https://img.shields.io/npm/dm/9router.svg)](https://www.npmjs.com/package/9router)
-  [![License](https://img.shields.io/npm/l/9router.svg)](https://github.com/decolua/9router/blob/main/LICENSE)
+  [![npm](https://img.shields.io/npm/v/@raruu/9router.svg)](https://www.npmjs.com/package/@raruu/9router)
+  [![Downloads](https://img.shields.io/npm/dm/@raruu/9router.svg)](https://www.npmjs.com/package/@raruu/9router)
+  [![License](https://img.shields.io/npm/l/@raruu/9router.svg)](https://github.com/Raruu/9router/blob/master/LICENSE)
 
   [🚀 Mulai Cepat](#-mulai-cepat) • [💡 Fitur](#-fitur-utama) • [📖 Setup](#-panduan-setup) • [🌐 Website](https://9router.com)
 
@@ -68,7 +68,7 @@ Hasil: ngoding tanpa berhenti, biaya minimum
 **1. Install secara global:**
 
 ```bash
-npm install -g 9router
+npm install -g @raruu/9router
 9router
 ```
 
@@ -887,7 +887,7 @@ Dashboard: `http://localhost:20128/dashboard`
 <summary><b>VPS / Cloud</b></summary>
 
 ```bash
-npm install -g 9router
+npm install -g @raruu/9router
 PORT=20128 HOSTNAME=0.0.0.0 BASE_URL=https://your-domain.com 9router
 ```
 
@@ -938,14 +938,14 @@ Kontribusi sangat diterima!
 
 ## 📄 Lisensi
 
-MIT License — lihat [LICENSE](https://github.com/decolua/9router/blob/main/LICENSE) untuk detailnya.
+MIT License — lihat [LICENSE](https://github.com/Raruu/9router/blob/master/LICENSE) untuk detailnya.
 
 ---
 
 <div align="center">
 
-**Kalau 9Router membantumu, kasih ⭐ di [GitHub](https://github.com/decolua/9router)!**
+**Kalau 9Router membantumu, kasih ⭐ di [GitHub](https://github.com/Raruu/9router)!**
 
-[🌐 Website](https://9router.com) • [📦 npm](https://www.npmjs.com/package/9router) • [🐛 Laporkan Bug](https://github.com/decolua/9router/issues)
+[🌐 Website](https://9router.com) • [📦 npm](https://www.npmjs.com/package/@raruu/9router) • [🐛 Laporkan Bug](https://github.com/Raruu/9router/issues)
 
 </div>

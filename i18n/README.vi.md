@@ -7,9 +7,9 @@
   
   **Kết nối tất cả công cụ AI Code (Claude Code, Codex, Cursor, Cline, Copilot, Antigravity...) tới 40+ Nhà cung cấp AI & 100+ Mô hình.**
   
-  [![npm](https://img.shields.io/npm/v/9router.svg)](https://www.npmjs.com/package/9router)
-  [![Downloads](https://img.shields.io/npm/dm/9router.svg)](https://www.npmjs.com/package/9router)
-  [![License](https://github.com/decolua/9router/blob/main/LICENSE)](https://github.com/decolua/9router/blob/main/LICENSE)
+  [![npm](https://img.shields.io/npm/v/@raruu/9router.svg)](https://www.npmjs.com/package/@raruu/9router)
+  [![Downloads](https://img.shields.io/npm/dm/@raruu/9router.svg)](https://www.npmjs.com/package/@raruu/9router)
+  [![License](https://img.shields.io/npm/l/@raruu/9router.svg)](https://github.com/Raruu/9router/blob/master/LICENSE)
   
   [🚀 Bắt đầu nhanh](#-quick-start) • [💡 Tính năng](#-key-features) • [📖 Cài đặt](#-setup-guide) • [🌐 Website](https://9router.com)
 </div>
@@ -69,7 +69,7 @@ Kết quả: Không bao giờ ngừng code, chi phí tối thiểu + tiết ki�
 **1. Cài đặt toàn cục:**
 
 ```bash
-npm install -g 9router
+npm install -g @raruu/9router
 9router
 ```
 
@@ -945,7 +945,7 @@ Model: cc/claude-opus-4-6
 
 ```bash
 # Clone và cài đặt
-git clone https://github.com/decolua/9router.git
+git clone https://github.com/Raruu/9router.git
 cd 9router
 npm install
 npm run build
@@ -1256,8 +1256,8 @@ Tài liệu tham khảo kiến trúc đầy đủ: [`docs/ARCHITECTURE.md`](../d
 ## 📧 Hỗ trợ
 
 - **Website**: [9router.com](https://9router.com)
-- **GitHub**: [github.com/decolua/9](https://github.com/decolua/9router)
-- **Issues**: [github.com/decolua/9router/issues](https://github.com/decolua/9router/issues)
+- **GitHub**: [github.com/Raruu/9router](https://github.com/Raruu/9router)
+- **Issues**: [github.com/Raruu/9router/issues](https://github.com/Raruu/9router/issues)
 
 ---
 

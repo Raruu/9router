@@ -7,9 +7,9 @@
 
   **すべてのAIコーディングツール（Claude Code、Cursor、Antigravity、Copilot、Codex、Gemini、OpenCode、Cline、OpenClaw...）を40以上のAIプロバイダーと100以上のモデルに接続。**
 
-  [![npm](https://img.shields.io/npm/v/9router.svg)](https://www.npmjs.com/package/9router)
-  [![Downloads](https://img.shields.io/npm/dm/9router.svg)](https://www.npmjs.com/package/9router)
-  [![License](https://img.shields.io/npm/l/9router.svg)](https://github.com/decolua/9router/blob/main/LICENSE)
+  [![npm](https://img.shields.io/npm/v/@raruu/9router.svg)](https://www.npmjs.com/package/@raruu/9router)
+  [![Downloads](https://img.shields.io/npm/dm/@raruu/9router.svg)](https://www.npmjs.com/package/@raruu/9router)
+  [![License](https://img.shields.io/npm/l/@raruu/9router.svg)](https://github.com/Raruu/9router/blob/master/LICENSE)
 
   [🚀 クイックスタート](#-クイックスタート) • [💡 機能](#-主な機能) • [📖 セットアップ](#-セットアップガイド) • [🌐 ウェブサイト](https://9router.com)
 
@@ -68,7 +68,7 @@
 **1. グローバルインストール：**
 
 ```bash
-npm install -g 9router
+npm install -g @raruu/9router
 9router
 ```
 
@@ -945,7 +945,7 @@ Model: cc/claude-opus-4-6
 
 ```bash
 # クローンとインストール
-git clone https://github.com/decolua/9router.git
+git clone https://github.com/Raruu/9router.git
 cd 9router
 npm install
 npm run build
@@ -1167,8 +1167,8 @@ Authorization: Bearer your-api-key
 ## 📧 サポート
 
 - **ウェブサイト**: [9router.com](https://9router.com)
-- **GitHub**: [github.com/decolua/9router](https://github.com/decolua/9router)
-- **Issues**: [github.com/decolua/9router/issues](https://github.com/decolua/9router/issues)
+- **GitHub**: [github.com/Raruu/9router](https://github.com/Raruu/9router)
+- **Issues**: [github.com/Raruu/9router/issues](https://github.com/Raruu/9router/issues)
 
 ---
 
