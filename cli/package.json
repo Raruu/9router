@@ -6,7 +6,8 @@
     "9router": "./cli.js"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "tag": "latest"
   },
   "repository": {
     "type": "git",
