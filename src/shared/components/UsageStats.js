@@ -254,6 +254,8 @@ const PERIODS = [
   { value: "60d", label: "60D" },
 ];
 
+const LIVE_STORAGE_KEY = "usage-stats:live";
+
 export default function UsageStats({ period: periodProp, setPeriod: setPeriodProp, hidePeriodSelector = false } = {}) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -278,11 +280,32 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
   }, [searchParams, router]);
   const [providers, setProviders] = useState([]);
   const [periodLocal, setPeriodLocal] = useState("today");
+  // Realtime stream can be paused; the choice is remembered across reloads.
+  // Safe to read during render: the chart that hosts this toggle only mounts
+  // after the first fetch resolves, so it is never part of the SSR markup.
+  const [live, setLive] = useState(() => {
+    if (typeof window === "undefined") return true;
+    try {
+      return localStorage.getItem(LIVE_STORAGE_KEY) !== "false";
+    } catch {
+      return true;
+    }
+  });
+  const [refreshTick, setRefreshTick] = useState(0);
   const isInitialLoad = useRef(true);
   const hasLoadedStats = useRef(false);
   const statsFetchAbortRef = useRef(null);
   const period = periodProp ?? periodLocal;
   const setPeriod = setPeriodProp ?? setPeriodLocal;
+
+  const toggleLive = useCallback((next) => {
+    setLive(next);
+    try {
+      localStorage.setItem(LIVE_STORAGE_KEY, String(next));
+    } catch (e) {
+      console.error(`Failed to save ${LIVE_STORAGE_KEY}:`, e);
+    }
+  }, []);
 
   // Fetch connected providers once, deduplicate by provider type
   // Always include noAuth free providers (e.g. opencode) regardless of connections
@@ -316,9 +339,11 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
       .catch(() => {});
   }, []);
 
-  // Fetch filtered stats via REST when period changes
-  useEffect(() => {
+  // Fetch filtered stats via REST — on period change, and on manual refresh
+  // (which is the only way to update while the realtime stream is paused).
+  const fetchStats = useCallback(() => {
     const controller = new AbortController();
+    statsFetchAbortRef.current?.abort();
     statsFetchAbortRef.current = controller;
 
     // First load: show full spinner; subsequent: show subtle fetching indicator
@@ -346,16 +371,30 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
         }
       });
 
+    return controller;
+  }, [period]);
+
+  useEffect(() => {
+    const controller = fetchStats();
     return () => {
       controller.abort();
       if (statsFetchAbortRef.current === controller) statsFetchAbortRef.current = null;
     };
-  }, [period]);
+  }, [fetchStats]);
+
+  // Manual refresh: pull a fresh snapshot and re-trigger the chart fetch.
+  const handleManualRefresh = useCallback(() => {
+    fetchStats();
+    setRefreshTick((t) => t + 1);
+  }, [fetchStats]);
 
   // Keep the full, period-filtered snapshot current as completed requests are
-  // persisted — but only while the tab is visible. A hidden tab would otherwise
-  // keep the server recalculating full stats (incl. the latency query) per request.
+  // persisted — but only while the tab is visible and the user hasn't paused.
+  // A hidden tab would otherwise keep the server recalculating full stats
+  // (incl. the latency query) per request.
   useEffect(() => {
+    if (!live) return undefined;
+
     let es = null;
 
     const close = () => {
@@ -400,14 +439,18 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
       }
     };
 
-    if (!document.hidden) open();
+    if (!document.hidden) {
+      // Resuming after a pause: stats are stale until the stream reconnects.
+      if (hasLoadedStats.current) setFetching(true);
+      open();
+    }
     document.addEventListener("visibilitychange", handleVisibilityChange);
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       close();
     };
-  }, [period]);
+  }, [period, live]);
 
   const toggleSort = useCallback((tableType, field) => {
     const params = new URLSearchParams(searchParams.toString());
@@ -597,8 +640,20 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
         </div>
       )}
 
-      {/* Token / Cost chart - sync period */}
-      {loading ? spinner : <UsageChart period={period} tableView={tableView} stats={stats} refreshKey={stats.totalRequests} />}
+      {/* Token / Cost chart - sync period. refreshKey is an identity trigger, not
+          a count: both operands only ever grow, so summing them is safe. */}
+      {loading ? spinner : (
+        <UsageChart
+          period={period}
+          tableView={tableView}
+          stats={stats}
+          refreshKey={stats.totalRequests + refreshTick}
+          live={live}
+          onToggleLive={toggleLive}
+          onRefresh={handleManualRefresh}
+          refreshing={fetching}
+        />
+      )}
 
       {/* Table with dropdown selector */}
       <div className="flex flex-col gap-3">
