@@ -73,11 +73,12 @@ Two authoritative docs already exist — read them before working in these areas
 - One file per provider. `providers/registry/index.js` is an **auto-generated** static import list — regenerate it with `scripts/migrate-registry.mjs` / `injectDisplayToRegistry.mjs`, don't hand-edit.
 - Add a provider: copy `providers/REGISTRY_TEMPLATE.js`, add models to `config/providerModels.js`. Only add an executor for non-OpenAI-compatible upstreams.
 
-### Persistence — IMPORTANT (ARCHITECTURE.md is stale here)
+### Persistence — IMPORTANT (ARCHITECTURE.md is the overview; this is the detail)
 State is **no longer `db.json`**. It's a SQLite layer under `src/lib/db/` with an adapter fallback chain (`driver.js`): `bun:sqlite` → `better-sqlite3` (optional native dep) → `node:sqlite` (Node ≥22.5) → `sql.js` (pure-JS fallback, always works). `better-sqlite3` is deliberately in `optionalDependencies` so install never fails without build tools.
 - `src/lib/localDb.js` is a **backward-compat shim** re-exporting `src/lib/db/index.js`. New code should import from `@/lib/db/index.js`; per-entity logic lives in `src/lib/db/repos/*`. Schema/migrations in `src/lib/db/migrations/`.
 - DB file location resolves via `src/lib/db/paths.js` (`DATA_DIR`, else `~/.9router/`).
-- Usage/logs (`src/lib/usageDb.js`, `usage.json` + `log.txt`) still live under `~/.9router` and do **not** follow `DATA_DIR`.
+- `src/lib/usageDb.js` is also a shim → `src/lib/db/index.js`; usage/logs are SQLite rows and follow `DATA_DIR` like everything else. `usage.json` survives only as a legacy import source (`paths.js` `LEGACY_FILES`), and `appendRequestLog` is a no-op — the request log is derived from `usageHistory` on read.
+- What escapes `DATA_DIR`: `mitmAliasCache.js`, `appUpdater.js` and `updater/updater.js` each re-derive the data dir from `process.env.DATA_DIR || os.homedir()` without `dataDir.js`'s unwritable-path fallback. So an unwritable `DATA_DIR` (`/var/lib/9router` without root — the current `.env`) sends the DB to `~/.9router` while those three still point at the unwritable path. `src/mitm/paths.js` duplicates the logic but does include the fallback.
 
 ### RTK token saver (`open-sse/rtk/`)
 Pre-translate hooks that compress `tool_result` content in-place to cut tokens. **Fail-open**: any error returns null and leaves the body untouched — never throw out of them. Skips `is_error`/`status:"error"` results to preserve traces.
