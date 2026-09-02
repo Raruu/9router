@@ -1,10 +1,10 @@
 services:
   9router:
-    image: decolua/9router:latest
+    build: .
     container_name: 9router
     restart: always
     ports:
-      - "20128:20128"
+      - "20127:20128"
     volumes:
       - 9router-data:/app/data
     env_file:

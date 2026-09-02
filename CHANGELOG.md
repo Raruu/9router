@@ -1,3 +1,33 @@
+# v0.5.59-2 (2026-09-02)
+
+## Features
+- **Usage**: latency tracking end to end — `ttft` and `totalLatency` columns
+  on `usageHistory` (schema v2), backfilled from `requestDetails` (v3,
+  idempotent), P50/P95 columns across the model/provider/account/endpoint
+  tables, and a horizontal log-scale P50→P95 range chart with a TTFT/Total
+  toggle. Low-volume models filtered, sorted by P95 descending.
+  Based on #3255 by @rusak47
+- **Antigravity**: IDE fingerprint bumped to 2.5.5. Based on #3320 by @FerryAr
+
+## Fixes
+- **Usage**: dashboard stats refresh in real time — the SSE stream merged only
+  `activeRequests`/`recentRequests`, so totals sat stale until the period was
+  switched. The stream is now period-scoped and pushes full snapshots, with an
+  AbortController cancelling a losing in-flight REST fetch.
+  Based on #3388 by @ndhao164
+- **Usage**: Anthropic-shaped usage counted as zero in Today/24h stats —
+  `getUsageStats` read only `prompt_tokens`/`completion_tokens` and now
+  prefers the normalized columns (#3388)
+- **Usage**: the latency chart was aggregated over all time regardless of the
+  selected period — the SSE handler called `getUsageStats()` with no argument,
+  so `latencyByModel` ignored the range
+
+## Improvements
+- **Perf**: the usage stats stream closes while the browser tab is hidden and
+  reopens on return, showing the refresh indicator until the fresh snapshot
+  lands. Closing triggers the stream's `cancel()`, so the server stops the
+  full-stats recalc and its latency query instead of the client discarding it
+
 # v0.5.59-1 (2026-09-01)
 
 ## Features
