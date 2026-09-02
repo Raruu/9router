@@ -57,9 +57,6 @@ export default function CombosPage() {
   const [confirmState, setConfirmState] = useState(null);
   const { copied, copy } = useCopyToClipboard();
 
-  useEffect(() => {
-    fetchData();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchData = async () => {
     try {
@@ -91,6 +88,11 @@ export default function CombosPage() {
       setLoading(false);
     }
   };
+
+    useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchData();
+  }, []); 
 
   const handleSetComboNameInResponse = async (next) => {
     setComboNameInResponse(next);

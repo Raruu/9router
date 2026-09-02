@@ -73,7 +73,7 @@ const CustomTooltip = ({ active, payload, label, metric = "total" }) => {
   const p95 = metric === "ttft" ? entry.p95Ttft : entry.p95Total;
   return (
     <div className="rounded-lg border border-border bg-bg px-3 py-2 shadow-lg text-xs">
-      <p className="font-medium mb-1">{label}</p>
+      <p className="font-medium mb-1">{entry.label ?? label}</p>
       <div className="flex items-baseline gap-2">
         <span className="text-text-muted">P50</span>
         <span className="font-mono">{p50}ms</span>
@@ -150,6 +150,14 @@ export default function UsageChart({
     () => buildLatencyData(stats?.latencyByModel, latencyMetric),
     [stats, latencyMetric],
   );
+
+  // Bars stay keyed by the raw model key — node prefixes aren't enforced unique,
+  // so two nodes sharing one would otherwise collapse into a single bar. Only
+  // the axis tick is rewritten to the readable label.
+  const latencyTickLabel = useMemo(() => {
+    const byKey = new Map(latency.data.map((d) => [d.key, d.label]));
+    return (key) => byKey.get(key) ?? key;
+  }, [latency.data]);
 
   const hasData = data.some((d) => d.tokens > 0 || d.cost > 0);
   const chartHeight = latency.data.length > 0
@@ -288,6 +296,7 @@ export default function UsageChart({
                   <YAxis
                     type="category"
                     dataKey="key"
+                    tickFormatter={latencyTickLabel}
                     tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.8 }}
                     axisLine={false}
                     tickLine={false}
@@ -326,8 +335,8 @@ export default function UsageChart({
                       key={e.key}
                       className="border-b border-border/50 last:border-0 hover:bg-bg-hover/50"
                     >
-                      <td className="px-3 py-1 truncate max-w-[200px]" title={e.key}>
-                        {e.key}
+                      <td className="px-3 py-1 truncate max-w-[200px]" title={e.label}>
+                        {e.label}
                       </td>
                       <td className="px-3 py-1 text-right text-text-muted">
                         {e.count}

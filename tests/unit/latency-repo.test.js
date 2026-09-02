@@ -206,4 +206,54 @@ describe("usageRepo latency percentiles", () => {
     expect(lat.p50Total).toBe(400);
     expect(lat.p95Total).toBe(600);
   });
+
+  it("labels custom provider nodes with their prefix, keeping the node id as the key", async () => {
+    const { saveRequestUsage, getUsageStats } = await import("@/lib/db/repos/usageRepo.js");
+    const { createProviderNode } = await import("@/lib/db/repos/nodesRepo.js");
+
+    const nodeId = "openai-compatible-chat-007fabcf-0cc4-4f85-bf26-b57fc42681ea";
+    await createProviderNode({
+      id: nodeId,
+      type: "openai-compatible",
+      name: "JustWoker",
+      prefix: "just-woker",
+      apiType: "chat",
+      baseUrl: "https://example.invalid/v1",
+    });
+
+    await saveRequestUsage({
+      timestamp: new Date(Date.now() - 3600000).toISOString(),
+      provider: nodeId,
+      model: "claude-opus-5",
+      tokens: { prompt_tokens: 100, completion_tokens: 50 },
+      cost: 0.01,
+      ttft: 150,
+      totalLatency: 450,
+    });
+
+    const stats = await getUsageStats("24h");
+    // Key stays raw so it still joins against stats.byModel
+    const key = `claude-opus-5 (${nodeId})`;
+    expect(stats.latencyByModel[key]).toBeDefined();
+    expect(stats.byModel[key]).toBeDefined();
+    expect(stats.latencyByModel[key].label).toBe("claude-opus-5 (just-woker)");
+  });
+
+  it("leaves the label equal to the key for built-in providers", async () => {
+    const { saveRequestUsage, getUsageStats } = await import("@/lib/db/repos/usageRepo.js");
+
+    await saveRequestUsage({
+      timestamp: new Date(Date.now() - 3600000).toISOString(),
+      provider: "opencode",
+      model: "mimo-v2.5-free",
+      tokens: { prompt_tokens: 100, completion_tokens: 50 },
+      cost: 0.01,
+      ttft: 150,
+      totalLatency: 450,
+    });
+
+    const stats = await getUsageStats("24h");
+    const key = "mimo-v2.5-free (opencode)";
+    expect(stats.latencyByModel[key].label).toBe(key);
+  });
 });

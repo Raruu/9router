@@ -361,9 +361,13 @@ export async function getUsageStats(period = "all") {
   for (const c of allConnections) connectionMap[c.id] = c.name || c.email || c.id;
 
   const providerNodeNameMap = {};
+  const providerNodePrefixMap = {};
   try {
     const nodes = await getProviderNodes();
-    for (const n of nodes) if (n.id && n.name) providerNodeNameMap[n.id] = n.name;
+    for (const n of nodes) {
+      if (n.id && n.name) providerNodeNameMap[n.id] = n.name;
+      if (n.id && n.prefix) providerNodePrefixMap[n.id] = n.prefix;
+    }
   } catch {}
 
   let allApiKeys = [];
@@ -681,7 +685,17 @@ export async function getUsageStats(period = "all") {
     const provider = r.provider || "unknown";
     const model = r.model || "unknown";
     const modelKey = provider ? `${model} (${provider})` : model;
-    if (!modelGroups[modelKey]) modelGroups[modelKey] = { ttfts: [], totals: [] };
+    if (!modelGroups[modelKey]) {
+      // `label` is display-only. The key must stay the raw provider id so it
+      // still joins against stats.byModel; custom nodes get their routing
+      // prefix shown instead of the unreadable node uuid.
+      const nodePrefix = providerNodePrefixMap[provider];
+      modelGroups[modelKey] = {
+        ttfts: [],
+        totals: [],
+        label: nodePrefix ? `${model} (${nodePrefix})` : modelKey,
+      };
+    }
     if (r.ttft) modelGroups[modelKey].ttfts.push(r.ttft);
     if (r.totalLatency) modelGroups[modelKey].totals.push(r.totalLatency);
   }
@@ -689,6 +703,7 @@ export async function getUsageStats(period = "all") {
     const ttftsSorted = vals.ttfts.sort((a, b) => a - b);
     const totalsSorted = vals.totals.sort((a, b) => a - b);
     stats.latencyByModel[key] = {
+      label: vals.label,
       avgTtft: ttftsSorted.length ? Math.round(ttftsSorted.reduce((a, b) => a + b, 0) / ttftsSorted.length) : 0,
       maxTtft: ttftsSorted.length ? ttftsSorted[ttftsSorted.length - 1] : 0,
       minTtft: ttftsSorted.length ? ttftsSorted[0] : 0,
