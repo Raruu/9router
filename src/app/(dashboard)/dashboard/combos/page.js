@@ -51,6 +51,7 @@ export default function CombosPage() {
   const [editingCombo, setEditingCombo] = useState(null);
   const [activeProviders, setActiveProviders] = useState([]);
   const [comboStrategies, setComboStrategies] = useState({});
+  const [comboNameInResponse, setComboNameInResponse] = useState(false);
   const [capacityAdapter, setCapacityAdapter] = useState(EMPTY_CAPACITY_ADAPTER);
   const { getCaps } = useModelCaps();
   const [confirmState, setConfirmState] = useState(null);
@@ -77,6 +78,7 @@ export default function CombosPage() {
         setActiveProviders(providersData.connections || []);
       }
       setComboStrategies(settingsData.comboStrategies || {});
+      setComboNameInResponse(!!settingsData.comboNameInResponse);
       const rawAdapter = settingsData.capacityAdapter || {};
       const normalized = {};
       for (const cap of CAPACITY_ADAPTER_CAPS) {
@@ -87,6 +89,19 @@ export default function CombosPage() {
       console.log("Error fetching data:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSetComboNameInResponse = async (next) => {
+    setComboNameInResponse(next);
+    try {
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comboNameInResponse: next }),
+      });
+    } catch (error) {
+      console.log("Error updating combo name in response:", error);
     }
   };
 
@@ -195,6 +210,26 @@ export default function CombosPage() {
 
   return (
     <div className="flex min-w-0 flex-col gap-6 px-1 sm:px-0">
+      {/* Response naming — cosmetic only; usage/logs keep the real model */}
+      <Card>
+        <div className="flex items-start sm:items-center justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">Return combo name in response</p>
+            <p className="text-xs text-text-muted mt-0.5">
+              Echo the combo you requested in the response <code className="font-mono">model</code> field
+              instead of the member that served it — <code className="font-mono">&quot;model&quot;: &quot;your combo name&quot;</code> rather
+              than <code className="font-mono">&quot;model&quot;: &quot;model id&quot;</code>. Usage tracking and logs
+              keep the real model.
+            </p>
+          </div>
+          <Toggle
+            checked={comboNameInResponse}
+            onChange={handleSetComboNameInResponse}
+            aria-label="Return combo name in response"
+          />
+        </div>
+      </Card>
+
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">

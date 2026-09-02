@@ -17,6 +17,9 @@ const DEFAULT_SETTINGS = {
   comboStrategy: "fallback",
   comboStickyRoundRobinLimit: 1,
   comboStrategies: {},
+  // Echo the requested combo name in the response `model` field instead of the
+  // upstream member that served it.
+  comboNameInResponse: false,
   // What GET /v1/models advertises: "all" | "combos" | "models".
   modelsExposure: "all",
   capacityAdapter: {
