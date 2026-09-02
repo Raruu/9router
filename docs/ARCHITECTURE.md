@@ -56,8 +56,8 @@ flowchart LR
         API[V1 Compatibility API\n/v1/*]
         DASH[Dashboard + Management API\n/api/*]
         CORE[SSE + Translation Core\nopen-sse + src/sse]
-        DB[(db.json)]
-        UDB[(usage.json + log.txt)]
+        DB[(data.sqlite)]
+        UDB[(usage tables)]
     end
 
     subgraph Upstreams[Upstream Providers]
@@ -135,17 +135,17 @@ Main flow modules:
 
 ## 3) Persistence Layer
 
-Primary state DB:
+Single SQLite store for all state:
 
-- `src/lib/localDb.js`
-- file: `${DATA_DIR}/db.json` (or `~/.9router/db.json` when `DATA_DIR` is unset)
-- entities: providerConnections, providerNodes, modelAliases, combos, apiKeys, settings, pricing
+- `src/lib/db/index.js` (entry), per-entity logic in `src/lib/db/repos/*`
+- file: `${DATA_DIR}/db/data.sqlite` (or `~/.9router/db/data.sqlite` when `DATA_DIR` is unset), backups under `${DATA_DIR}/db/backups/`
+- adapter fallback chain in `src/lib/db/driver.js`: `bun:sqlite` → `better-sqlite3` (optional native dep) → `node:sqlite` (Node ≥22.5) → `sql.js` (pure-JS, always works)
+- schema + versioned migrations: `src/lib/db/schema.js`, `src/lib/db/migrations/`
+- entities: settings, providerConnections, providerNodes, proxyPools, apiKeys, combos, usageHistory, usageDaily, requestDetails, plus a scoped `kv` table (modelAliases, pricing, disabledModels)
+- `src/lib/localDb.js` and `src/lib/usageDb.js` are backward-compat shims re-exporting `src/lib/db/index.js`; new code should import from `@/lib/db/index.js`
+- legacy JSON files (`db.json`, `usage.json`, `disabledModels.json`, `request-details.json`) are imported once on a fresh DB, then kept only as a backup (`src/lib/db/paths.js` `LEGACY_FILES`, `src/lib/db/migrate.js`)
 
-Usage DB:
-
-- `src/lib/usageDb.js`
-- files: `~/.9router/usage.json`, `~/.9router/log.txt`
-- note: currently independent from `DATA_DIR`
+See `CLAUDE.md` for the adapter/migration gotchas.
 
 ## 4) Auth + Security Surfaces
 
@@ -377,9 +377,8 @@ erDiagram
 
 Physical storage files:
 
-- main state: `${DATA_DIR}/db.json` (or `~/.9router/db.json`)
-- usage stats: `~/.9router/usage.json`
-- request log lines: `~/.9router/log.txt`
+- all state (incl. usage stats and request log rows): `${DATA_DIR}/db/data.sqlite` (or `~/.9router/db/data.sqlite`)
+- pre-migration backups: `${DATA_DIR}/db/backups/`
 - optional translator/request debug sessions: `<repo>/logs/...`
 
 ## Deployment Topology
@@ -394,8 +393,8 @@ flowchart LR
     subgraph ContainerOrProcess[9Router Runtime]
         Next[Next.js Server\nPORT=20128]
         Core[SSE Core + Executors]
-        MainDB[(db.json)]
-        UsageDB[(usage.json/log.txt)]
+        MainDB[(data.sqlite)]
+        UsageDB[(usage tables)]
     end
 
     subgraph External[External Services]
@@ -507,16 +506,16 @@ Translations are selected dynamically based on source payload shape and provider
 
 ## 5) Data Integrity
 
-- DB shape migration/repair for missing keys
-- corrupt JSON reset safeguards for localDb and usageDb
+- versioned schema migrations with a pre-migration backup (`src/lib/db/migrate.js`, `src/lib/db/backup.js`)
+- one-time import of legacy JSON state, backed up before the import runs
 
 ## Observability and Operational Signals
 
 Runtime visibility sources:
 
 - console logs from `src/sse/utils/logger.js`
-- per-request usage aggregates in `usage.json`
-- textual request status log in `log.txt`
+- per-request usage aggregates in the `usageHistory` / `usageDaily` tables
+- request status log derived from `usageHistory` on read (`getRecentLogs`)
 - optional deep request/translation logs under `logs/` when `ENABLE_REQUEST_LOGS=true`
 - dashboard usage endpoints (`/api/usage/*`) for UI consumption
 
@@ -542,7 +541,7 @@ Environment variables actively used by code:
 
 ## Known Architectural Notes
 
-1. `usageDb` currently stores under `~/.9router` and does not follow `DATA_DIR`.
+1. `src/lib/mitmAliasCache.js`, `src/lib/appUpdater.js` and `src/lib/updater/updater.js` re-derive the data dir from `process.env.DATA_DIR || os.homedir()` without `src/lib/dataDir.js`'s unwritable-path fallback, so an unwritable `DATA_DIR` splits them from the DB.
 2. `/api/v1/route.js` returns a static model list and is not the main models source used by `/v1/models`.
 3. Request logger writes full headers/body when enabled; treat log directory as sensitive.
 4. Cloud behavior depends on correct `NEXT_PUBLIC_BASE_URL` and cloud endpoint reachability.

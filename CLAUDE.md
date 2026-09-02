@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Two published artifacts live in this one repo:
 - The **dashboard + gateway** (root `package.json`, `9router-app`) — the Next.js server that does the actual routing.
-- The **CLI launcher** (`cli/`, published to npm as `9router`) — a separate package that installs/starts the server and manages the tray. It has its own `package.json`, version, and build.
+- The **CLI launcher** (`cli/`, published to npm as `@raruu/9router`) — a separate package that installs/starts the server and manages the tray. It has its own `package.json`, version, and build.
 
 The code lives in `src/` (Next.js app + dashboard/compat APIs), `open-sse/` (the provider-agnostic routing/translation engine), `cli/` (the launcher package), and `tests/`.
 
@@ -73,11 +73,12 @@ Two authoritative docs already exist — read them before working in these areas
 - One file per provider. `providers/registry/index.js` is an **auto-generated** static import list — regenerate it with `scripts/migrate-registry.mjs` / `injectDisplayToRegistry.mjs`, don't hand-edit.
 - Add a provider: copy `providers/REGISTRY_TEMPLATE.js`, add models to `config/providerModels.js`. Only add an executor for non-OpenAI-compatible upstreams.
 
-### Persistence — IMPORTANT (ARCHITECTURE.md is stale here)
+### Persistence — IMPORTANT (ARCHITECTURE.md is the overview; this is the detail)
 State is **no longer `db.json`**. It's a SQLite layer under `src/lib/db/` with an adapter fallback chain (`driver.js`): `bun:sqlite` → `better-sqlite3` (optional native dep) → `node:sqlite` (Node ≥22.5) → `sql.js` (pure-JS fallback, always works). `better-sqlite3` is deliberately in `optionalDependencies` so install never fails without build tools.
 - `src/lib/localDb.js` is a **backward-compat shim** re-exporting `src/lib/db/index.js`. New code should import from `@/lib/db/index.js`; per-entity logic lives in `src/lib/db/repos/*`. Schema/migrations in `src/lib/db/migrations/`.
 - DB file location resolves via `src/lib/db/paths.js` (`DATA_DIR`, else `~/.9router/`).
-- Usage/logs (`src/lib/usageDb.js`, `usage.json` + `log.txt`) still live under `~/.9router` and do **not** follow `DATA_DIR`.
+- `src/lib/usageDb.js` is also a shim → `src/lib/db/index.js`; usage/logs are SQLite rows and follow `DATA_DIR` like everything else. `usage.json` survives only as a legacy import source (`paths.js` `LEGACY_FILES`), and `appendRequestLog` is a no-op — the request log is derived from `usageHistory` on read.
+- What escapes `DATA_DIR`: `mitmAliasCache.js`, `appUpdater.js` and `updater/updater.js` each re-derive the data dir from `process.env.DATA_DIR || os.homedir()` without `dataDir.js`'s unwritable-path fallback. So an unwritable `DATA_DIR` (`/var/lib/9router` without root — the current `.env`) sends the DB to `~/.9router` while those three still point at the unwritable path. `src/mitm/paths.js` duplicates the logic but does include the fallback.
 
 ### RTK token saver (`open-sse/rtk/`)
 Pre-translate hooks that compress `tool_result` content in-place to cut tokens. **Fail-open**: any error returns null and leaves the body untouched — never throw out of them. Skips `is_error`/`status:"error"` results to preserve traces.
@@ -88,4 +89,4 @@ Pre-translate hooks that compress `tool_result` content in-place to cut tokens. 
 - `custom-server.js` wraps the Next standalone server to derive client IP from the TCP socket and strip attacker-controlled `X-Forwarded-For` — trusting forwarding headers only from a loopback reverse proxy. Preserve this when touching request/IP/rate-limit code.
 - Security-sensitive env: `JWT_SECRET` (session cookie), `INITIAL_PASSWORD` (default `123456` — must override), `API_KEY_SECRET`, `MACHINE_ID_SALT`. Full env contract in `.env.example` and ARCHITECTURE.md's env matrix.
 - Binary/protobuf upstreams (kiro EventStream, cursor protobuf, commandcode NDJSON) don't round-trip through OpenAI — they're handled inside their own executor, not the translator.
-- Versioning: root and `cli/` are versioned independently; changes are logged in `CHANGELOG.md`. Commit style is Conventional Commits (`fix(translator): …`, `feat(...)`).
+- Versioning: root (`9router-app`) and `cli/` (`@raruu/9router`) are bumped together in practice — `package.json`, `cli/package.json`, and both `package-lock.json` entries (the lock is gitignored, so that bump is local-only). `cli/app/package.json` needs no edit; `cli/scripts/build-cli.js` syncs it from `cli/package.json` at pack time. `compareVersions` (`src/app/api/version/route.js`, `cli/cli.js`) is hand-rolled, not semver: it splits on `[.-]` and coerces each part with `Number`, so numeric prerelease suffixes (`0.5.59-3`) order correctly but a non-numeric one (`-beta`) coerces to 0 and sorts *below* the plain release. Changes are logged in `CHANGELOG.md`, newest section first, grouped `## Features` / `## Fixes` / `## Improvements`, entries scoped `**Usage**:` / `**Translator**:` and written as the user-visible symptom plus its cause. Commit style is Conventional Commits (`fix(translator): …`, `feat(...)`).

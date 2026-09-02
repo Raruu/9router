@@ -51,14 +51,12 @@ export default function CombosPage() {
   const [editingCombo, setEditingCombo] = useState(null);
   const [activeProviders, setActiveProviders] = useState([]);
   const [comboStrategies, setComboStrategies] = useState({});
+  const [comboNameInResponse, setComboNameInResponse] = useState(false);
   const [capacityAdapter, setCapacityAdapter] = useState(EMPTY_CAPACITY_ADAPTER);
   const { getCaps } = useModelCaps();
   const [confirmState, setConfirmState] = useState(null);
   const { copied, copy } = useCopyToClipboard();
 
-  useEffect(() => {
-    fetchData();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchData = async () => {
     try {
@@ -77,6 +75,7 @@ export default function CombosPage() {
         setActiveProviders(providersData.connections || []);
       }
       setComboStrategies(settingsData.comboStrategies || {});
+      setComboNameInResponse(!!settingsData.comboNameInResponse);
       const rawAdapter = settingsData.capacityAdapter || {};
       const normalized = {};
       for (const cap of CAPACITY_ADAPTER_CAPS) {
@@ -87,6 +86,24 @@ export default function CombosPage() {
       console.log("Error fetching data:", error);
     } finally {
       setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchData();
+  }, []); 
+
+  const handleSetComboNameInResponse = async (next) => {
+    setComboNameInResponse(next);
+    try {
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comboNameInResponse: next }),
+      });
+    } catch (error) {
+      console.log("Error updating combo name in response:", error);
     }
   };
 
@@ -195,6 +212,26 @@ export default function CombosPage() {
 
   return (
     <div className="flex min-w-0 flex-col gap-6 px-1 sm:px-0">
+      {/* Response naming — cosmetic only; usage/logs keep the real model */}
+      <Card>
+        <div className="flex items-start sm:items-center justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">Return combo name in response</p>
+            <p className="text-xs text-text-muted mt-0.5">
+              Echo the combo you requested in the response <code className="font-mono">model</code> field
+              instead of the member that served it — <code className="font-mono">&quot;model&quot;: &quot;your combo name&quot;</code> rather
+              than <code className="font-mono">&quot;model&quot;: &quot;model id&quot;</code>. Usage tracking and logs
+              keep the real model.
+            </p>
+          </div>
+          <Toggle
+            checked={comboNameInResponse}
+            onChange={handleSetComboNameInResponse}
+            aria-label="Return combo name in response"
+          />
+        </div>
+      </Card>
+
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
@@ -292,6 +329,13 @@ const STRATEGY_OPTIONS = [
   { value: "fallback", label: "Fallback — try in order" },
   { value: "round-robin", label: "Round Robin — rotate" },
   { value: "fusion", label: "Fusion — panel + judge" },
+];
+
+// Capacity adapter pools only support fallback/round-robin — getCapacityAdapterStrategy
+// in open-sse/services/capacityAdapter.js has no fusion path.
+const ADAPTER_STRATEGY_OPTIONS = [
+  { value: "fallback", label: "Fallback — try in order" },
+  { value: "round-robin", label: "Round Robin — rotate" },
 ];
 
 function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, onSetStrategy }) {
@@ -441,27 +485,16 @@ function CapacityAdapterSection({ capacityAdapter, onChange, activeProviders, ge
 }
 
 function CapacityAdapterCap({ cap, entry, onChange, activeProviders, getCaps }) {
-  const [showModelSelect, setShowModelSelect] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const { enabled, roundRobin, models } = entry;
 
   const patch = (p) => onChange({ ...entry, ...p });
 
-  const handleAdd = (model) => {
-    if (models.includes(model.value)) return;
-    patch({ models: [...models, model.value] });
-  };
-
-  const handleRemove = (index) => {
-    const next = models.filter((_, i) => i !== index);
+  // An enabled pool with no models is a no-op, so reseed the default (matches
+  // getCapacityAdapterConfig in open-sse/services/capacityAdapter.js).
+  const handleSaveModels = ({ models: next }) => {
     patch({ models: next.length === 0 ? [DEFAULT_FALLBACK_MODEL] : next });
-  };
-
-  const handleMove = (index, delta) => {
-    const target = index + delta;
-    if (target < 0 || target >= models.length) return;
-    const next = [...models];
-    [next[index], next[target]] = [next[target], next[index]];
-    patch({ models: next });
+    setShowEditModal(false);
   };
 
   return (
@@ -489,19 +522,10 @@ function CapacityAdapterCap({ cap, entry, onChange, activeProviders, getCaps }) 
                 models.slice(0, 3).map((model, index) => (
                   <code
                     key={`${model}-${index}`}
-                    className="group/chip inline-flex items-center gap-1 rounded bg-black/5 px-1.5 py-0.5 font-mono text-xs text-text-muted dark:bg-white/5"
+                    className="inline-flex items-center gap-1 rounded bg-black/5 px-1.5 py-0.5 font-mono text-xs text-text-muted dark:bg-white/5"
                   >
                     <span>{model}</span>
                     <CapacityBadges caps={getCaps?.(model)} />
-                    <button onClick={() => handleMove(index, -1)} disabled={index === 0} className={`leading-none opacity-0 group-hover/chip:opacity-100 ${index === 0 ? "text-text-muted/20" : "text-text-muted hover:text-primary"}`}>
-                      <span className="material-symbols-outlined text-[12px]">arrow_upward</span>
-                    </button>
-                    <button onClick={() => handleMove(index, 1)} disabled={index === models.length - 1} className={`leading-none opacity-0 group-hover/chip:opacity-100 ${index === models.length - 1 ? "text-text-muted/20" : "text-text-muted hover:text-primary"}`}>
-                      <span className="material-symbols-outlined text-[12px]">arrow_downward</span>
-                    </button>
-                    <button onClick={() => handleRemove(index)} className="leading-none opacity-0 group-hover/chip:opacity-100 text-text-muted hover:text-red-500">
-                      <span className="material-symbols-outlined text-[12px]">close</span>
-                    </button>
                   </code>
                 ))
               )}
@@ -512,40 +536,43 @@ function CapacityAdapterCap({ cap, entry, onChange, activeProviders, getCaps }) 
           </div>
         </div>
 
-        {/* Actions: Round-robin toggle + Add Model */}
+        {/* Actions */}
         <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center sm:gap-3 sm:shrink-0">
-          <label className="flex items-center gap-1.5 text-xs text-text-muted cursor-pointer select-none">
-            <Toggle
-              checked={roundRobin}
-              onChange={(v) => patch({ roundRobin: v })}
+          {/* Strategy selector — maps onto the stored roundRobin boolean */}
+          <div className="w-full sm:w-[200px]">
+            <Select
+              options={ADAPTER_STRATEGY_OPTIONS}
+              value={roundRobin ? "round-robin" : "fallback"}
+              onChange={(e) => patch({ roundRobin: e.target.value === "round-robin" })}
               disabled={!enabled}
-              aria-label={`Round-robin ${cap.label} adapter`}
+              selectClassName="py-1.5 text-xs"
             />
-            <span>Round</span>
-          </label>
-          <Button
-            icon="add"
-            variant="ghost"
-            size="sm"
-            onClick={() => setShowModelSelect(true)}
-            disabled={!enabled}
-            title={`Add ${cap.label} model`}
-          >
-            Add Model
-          </Button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-1 sm:flex">
+            <button
+              onClick={() => setShowEditModal(true)}
+              disabled={!enabled}
+              className="flex flex-col items-center rounded px-2 py-1 text-text-muted transition-colors hover:bg-black/5 hover:text-primary disabled:opacity-40 disabled:hover:bg-transparent disabled:hover:text-text-muted dark:hover:bg-white/5"
+              title={`Edit ${cap.label} pool`}
+            >
+              <span className="material-symbols-outlined text-[18px]">edit</span>
+              <span className="text-[10px] leading-tight">Edit</span>
+            </button>
+          </div>
         </div>
       </div>
 
-      {showModelSelect && (
-        <ModelSelectModal
-          isOpen={showModelSelect}
-          onClose={() => setShowModelSelect(false)}
-          onSelect={handleAdd}
-          activeProviders={activeProviders}
-          title={`Add ${cap.label} Model`}
-          addedModelValues={models}
+      {showEditModal && (
+        <ComboFormModal
+          isOpen={showEditModal}
+          combo={{ models }}
+          hideName
           capFilter={cap.key}
-          closeOnSelect={false}
+          title={`Edit ${cap.label} Pool`}
+          onClose={() => setShowEditModal(false)}
+          onSave={handleSaveModels}
+          activeProviders={activeProviders}
         />
       )}
     </Card>
@@ -650,7 +677,7 @@ function ModelItem({ id, index, model, isFirst, isLast, onEdit, onMoveUp, onMove
   );
 }
 
-function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindFilter = null }) {
+function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindFilter = null, capFilter = null, hideName = false, title }) {
   // Initialize state with combo values - key prop on parent handles reset on remount
   const [name, setName] = useState(combo?.name || "");
   const [models, setModels] = useState(combo?.models || []);
@@ -742,9 +769,9 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
   };
 
   const handleSave = async () => {
-    if (!validateName(name)) return;
+    if (!hideName && !validateName(name)) return;
     setSaving(true);
-    await onSave({ name: name.trim(), models });
+    await onSave(hideName ? { models } : { name: name.trim(), models });
     setSaving(false);
   };
 
@@ -755,22 +782,24 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
       <Modal
         isOpen={isOpen}
         onClose={onClose}
-        title={isEdit ? "Edit Combo" : "Create Combo"}
+        title={title || (isEdit ? "Edit Combo" : "Create Combo")}
       >
         <div className="flex flex-col gap-3">
           {/* Name */}
-          <div>
-            <Input
-              label="Combo Name"
-              value={name}
-              onChange={handleNameChange}
-              placeholder="my-combo"
-              error={nameError}
-            />
-            <p className="text-[10px] text-text-muted mt-0.5">
-              Only letters, numbers, -, _ and . allowed
-            </p>
-          </div>
+          {!hideName && (
+            <div>
+              <Input
+                label="Combo Name"
+                value={name}
+                onChange={handleNameChange}
+                placeholder="my-combo"
+                error={nameError}
+              />
+              <p className="text-[10px] text-text-muted mt-0.5">
+                Only letters, numbers, -, _ and . allowed
+              </p>
+            </div>
+          )}
 
           {/* Models */}
           <div>
@@ -827,7 +856,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
               onClick={handleSave}
               fullWidth
               size="sm"
-              disabled={!name.trim() || !!nameError || saving}
+              disabled={(!hideName && (!name.trim() || !!nameError)) || saving}
             >
               {saving ? "Saving..." : isEdit ? "Save" : "Create"}
             </Button>
@@ -846,6 +875,7 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
           modelAliases={modelAliases}
           title="Add Model to Combo"
           kindFilter={kindFilter}
+          capFilter={capFilter}
           addedModelValues={models}
           closeOnSelect={false}
         />

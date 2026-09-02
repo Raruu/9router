@@ -1,12 +1,13 @@
 {
   "name": "@raruu/9router",
-  "version": "0.5.59-2",
+  "version": "0.5.59-3",
   "description": "9Router CLI - Start and manage 9Router server",
   "bin": {
     "9router": "./cli.js"
   },
   "publishConfig": {
-    "access": "public"
+    "access": "public",
+    "tag": "latest"
   },
   "repository": {
     "type": "git",

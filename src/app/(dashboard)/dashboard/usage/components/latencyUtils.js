@@ -7,6 +7,9 @@ export function buildLatencyData(latencyByModel, metric = "total") {
   const source = latencyByModel || {};
   const entries = Object.entries(source).map(([key, lat]) => ({
     key,
+    // Display string; falls back to the key for built-in providers, which have
+    // no separate label.
+    label: lat.label || key,
     p50Ttft: lat.p50Ttft || 0,
     p95Ttft: lat.p95Ttft || 0,
     p50Total: lat.p50Total || 0,

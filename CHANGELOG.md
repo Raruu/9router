@@ -1,3 +1,36 @@
+# v0.5.59-3 (2026-09-02)
+
+## Features
+- **Combos**: new `comboNameInResponse` setting echoes the combo you requested
+  in the response `model` field instead of the member that served it —
+  `"model": "qwen-3.8"` rather than `"model": "qwen3.8-flash-free"`. Off by
+  default, toggled on the combos page. Covers non-streaming, streaming
+  (translated and passthrough) and forced SSE→JSON responses across the
+  OpenAI, Claude and Gemini shapes; only a model field that already exists is
+  rewritten, never added, so no response gains a field it didn't have. Nested
+  combos resolve to the outermost name. Usage tracking, request details and
+  logs keep the real member
+- **Usage**: Live toggle and a manual refresh button on the usage chart.
+  Pausing closes the stats stream so the server stops recalculating, and the
+  refresh button still works while paused. The choice persists across reloads
+
+## Fixes
+- **Usage**: the token/cost chart replayed its entrance animation from zero on
+  every realtime update — each refetch raised the loading flag, which swapped
+  the chart for a placeholder and unmounted it, resetting the previous-points
+  ref the animation interpolates from. Only the first load unmounts now
+- **Usage**: the latency chart identified custom provider nodes by their raw
+  node uuid (`claude-opus-5 (openai-compatible-chat-007fabcf-…)`) and now
+  shows the routing prefix (`claude-opus-5 (my-router)`) on the axis, tooltip
+  and low-volume table. The aggregation key is unchanged, so the model
+  table's latency columns still resolve
+
+## Improvements
+- **Combos**: capacity adapter pools are edited through the same modal as
+  combos — static chips, a fallback/round-robin selector in place of the
+  toggle, and no per-chip reorder/remove buttons. Models past the third are
+  now reachable at all, having been unreachable behind the truncated chip list
+
 # v0.5.59-2 (2026-09-02)
 
 ## Features

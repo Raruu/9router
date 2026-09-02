@@ -9,6 +9,7 @@ import { parseSSEToOpenAIResponse } from "./sseToJsonHandler.js";
 import { buildRequestDetail, extractRequestConfig, extractUsageFromResponse, saveUsageStats, formatDoneLine } from "./requestDetail.js";
 import { appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
 import { decloakToolNames } from "../../utils/claudeCloaking.js";
+import { applyResponseModelOverride } from "../../utils/responseModel.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
 
 function parseToolArguments(value) {
@@ -281,7 +282,7 @@ export function translateNonStreamingResponse(responseBody, targetFormat, source
 /**
  * Handle non-streaming response from provider.
  */
-export async function handleNonStreamingResponse({ providerResponse, provider, model, sourceFormat, targetFormat, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, reqLogger, toolNameMap, customToolNames, trackDone, appendLog, pxpipe, reqTag, log }) {
+export async function handleNonStreamingResponse({ providerResponse, provider, model, sourceFormat, targetFormat, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, responseModelOverride, reqLogger, toolNameMap, customToolNames, trackDone, appendLog, pxpipe, reqTag, log }) {
   trackDone();
   const contentType = providerResponse.headers.get("content-type") || "";
   let responseBody;
@@ -368,6 +369,11 @@ export async function handleNonStreamingResponse({ providerResponse, provider, m
       }
     }
   }
+
+  // Report the requested combo name instead of the member that served it.
+  // Covers every shape reaching here: the translated bodies above, the verbatim
+  // pass-through branches, and executor-built responses.
+  applyResponseModelOverride(translatedResponse, responseModelOverride);
 
   reqLogger.logConvertedResponse(translatedResponse);
 

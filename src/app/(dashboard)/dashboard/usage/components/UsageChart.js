@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, startTransition } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, startTransition } from "react";
 import PropTypes from "prop-types";
 import { buildLatencyData } from "./latencyUtils.js";
 import {
@@ -15,6 +15,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import Card from "@/shared/components/Card";
+import Toggle from "@/shared/components/Toggle";
 
 const fmtTokens = (n) => {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
@@ -72,7 +73,7 @@ const CustomTooltip = ({ active, payload, label, metric = "total" }) => {
   const p95 = metric === "ttft" ? entry.p95Ttft : entry.p95Total;
   return (
     <div className="rounded-lg border border-border bg-bg px-3 py-2 shadow-lg text-xs">
-      <p className="font-medium mb-1">{label}</p>
+      <p className="font-medium mb-1">{entry.label ?? label}</p>
       <div className="flex items-baseline gap-2">
         <span className="text-text-muted">P50</span>
         <span className="font-mono">{p50}ms</span>
@@ -105,14 +106,27 @@ CustomTooltip.propTypes = {
   metric: PropTypes.string,
 };
 
-export default function UsageChart({ period = "7d", tableView = "model", stats, refreshKey = 0 }) {
+export default function UsageChart({
+  period = "7d",
+  tableView = "model",
+  stats,
+  refreshKey = 0,
+  live = true,
+  onToggleLive,
+  onRefresh,
+  refreshing = false,
+}) {
   const [data, setData] = useState([]);
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState("tokens");
   const [latencyMetric, setLatencyMetric] = useState("total");
+  // Only the very first fetch may unmount the chart. Later refetches keep it
+  // mounted so recharts can interpolate from the last painted frame instead of
+  // replaying its entrance animation from the baseline.
+  const hasLoadedRef = useRef(false);
 
   const fetchData = useCallback(async () => {
-    setLoading(true);
+    if (!hasLoadedRef.current) setLoading(true);
     try {
       const res = await fetch(`/api/usage/chart?period=${period}`);
       if (res.ok) {
@@ -122,19 +136,28 @@ export default function UsageChart({ period = "7d", tableView = "model", stats, 
     } catch (e) {
       console.error("Failed to fetch chart data:", e);
     } finally {
+      hasLoadedRef.current = true;
       setLoading(false);
     }
-  }, [period, refreshKey]);
+  }, [period]);
 
   useEffect(() => {
     const id = setTimeout(() => fetchData(), 0);
     return () => clearTimeout(id);
-  }, [fetchData]);
+  }, [fetchData, refreshKey]);
 
   const latency = useMemo(
     () => buildLatencyData(stats?.latencyByModel, latencyMetric),
     [stats, latencyMetric],
   );
+
+  // Bars stay keyed by the raw model key — node prefixes aren't enforced unique,
+  // so two nodes sharing one would otherwise collapse into a single bar. Only
+  // the axis tick is rewritten to the readable label.
+  const latencyTickLabel = useMemo(() => {
+    const byKey = new Map(latency.data.map((d) => [d.key, d.label]));
+    return (key) => byKey.get(key) ?? key;
+  }, [latency.data]);
 
   const hasData = data.some((d) => d.tokens > 0 || d.cost > 0);
   const chartHeight = latency.data.length > 0
@@ -143,25 +166,47 @@ export default function UsageChart({ period = "7d", tableView = "model", stats, 
 
   return (
     <Card className="flex min-w-0 flex-col gap-3 p-3 sm:p-4">
-      <div className="grid w-full grid-cols-3 items-center gap-1 rounded-lg border border-border bg-bg-subtle p-1 sm:w-auto sm:self-start">
-        <button
-          onClick={() => setViewMode("tokens")}
-          className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${viewMode === "tokens" ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-text hover:bg-bg-hover"}`}
-        >
-          Tokens
-        </button>
-        <button
-          onClick={() => setViewMode("cost")}
-          className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${viewMode === "cost" ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-text hover:bg-bg-hover"}`}
-        >
-          Cost
-        </button>
-        <button
-          onClick={() => setViewMode("latency")}
-          className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${viewMode === "latency" ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-text hover:bg-bg-hover"}`}
-        >
-          Latency
-        </button>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="grid w-full grid-cols-3 items-center gap-1 rounded-lg border border-border bg-bg-subtle p-1 sm:w-auto">
+          <button
+            onClick={() => setViewMode("tokens")}
+            className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${viewMode === "tokens" ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-text hover:bg-bg-hover"}`}
+          >
+            Tokens
+          </button>
+          <button
+            onClick={() => setViewMode("cost")}
+            className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${viewMode === "cost" ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-text hover:bg-bg-hover"}`}
+          >
+            Cost
+          </button>
+          <button
+            onClick={() => setViewMode("latency")}
+            className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${viewMode === "latency" ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-text hover:bg-bg-hover"}`}
+          >
+            Latency
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 self-end sm:self-auto">
+          <span className="text-xs font-medium text-text-muted">Live</span>
+          <Toggle
+            size="sm"
+            checked={live}
+            onChange={onToggleLive}
+            disabled={!onToggleLive}
+            title={live ? "Pause realtime updates" : "Resume realtime updates"}
+          />
+          <button
+            onClick={onRefresh}
+            disabled={!onRefresh || refreshing}
+            className="rounded-lg p-1.5 text-text-muted transition-colors hover:bg-bg-hover hover:text-text disabled:cursor-not-allowed disabled:opacity-50"
+            title="Refresh now"
+            aria-label="Refresh now"
+          >
+            <span className={`material-symbols-outlined text-[18px] ${refreshing ? "animate-spin" : ""}`}>refresh</span>
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -251,6 +296,7 @@ export default function UsageChart({ period = "7d", tableView = "model", stats, 
                   <YAxis
                     type="category"
                     dataKey="key"
+                    tickFormatter={latencyTickLabel}
                     tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.8 }}
                     axisLine={false}
                     tickLine={false}
@@ -289,8 +335,8 @@ export default function UsageChart({ period = "7d", tableView = "model", stats, 
                       key={e.key}
                       className="border-b border-border/50 last:border-0 hover:bg-bg-hover/50"
                     >
-                      <td className="px-3 py-1 truncate max-w-[200px]" title={e.key}>
-                        {e.key}
+                      <td className="px-3 py-1 truncate max-w-[200px]" title={e.label}>
+                        {e.label}
                       </td>
                       <td className="px-3 py-1 text-right text-text-muted">
                         {e.count}
@@ -383,4 +429,8 @@ UsageChart.propTypes = {
   tableView: PropTypes.string,
   stats: PropTypes.object,
   refreshKey: PropTypes.number,
+  live: PropTypes.bool,
+  onToggleLive: PropTypes.func,
+  onRefresh: PropTypes.func,
+  refreshing: PropTypes.bool,
 };
