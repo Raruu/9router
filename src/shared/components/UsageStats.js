@@ -87,6 +87,7 @@ function RecentRequests({ requests = [] }) {
 }
 
 function sortData(dataMap, pendingMap = {}, sortBy, sortOrder) {
+  const isLatencyField = ["avgTtft", "maxTtft", "minTtft", "avgTotal", "maxTotal", "minTotal"].includes(sortBy);
   return Object.entries(dataMap || {})
     .map(([key, data]) => {
       const totalTokens = (data.promptTokens || 0) + (data.completionTokens || 0);
@@ -103,10 +104,15 @@ function sortData(dataMap, pendingMap = {}, sortBy, sortOrder) {
       return { ...data, key, totalTokens, totalCost, inputCost, cachedCost, outputCost, pending: pendingMap[key] || 0 };
     })
     .sort((a, b) => {
-      let valA = a[sortBy];
-      let valB = b[sortBy];
+      let valA = isLatencyField ? (a.latency || {})[sortBy] : a[sortBy];
+      let valB = isLatencyField ? (b.latency || {})[sortBy] : b[sortBy];
       if (typeof valA === "string") valA = valA.toLowerCase();
       if (typeof valB === "string") valB = valB.toLowerCase();
+      // ponytail: models with no latency data stay pinned at the bottom in both directions
+      const aHasLatency = isLatencyField && (a.latency || {}).count > 0;
+      const bHasLatency = isLatencyField && (b.latency || {}).count > 0;
+      if (!aHasLatency && bHasLatency) return 1;
+      if (aHasLatency && !bHasLatency) return -1;
       if (valA < valB) return sortOrder === "asc" ? -1 : 1;
       if (valA > valB) return sortOrder === "asc" ? 1 : -1;
       return 0;
@@ -149,7 +155,55 @@ function groupDataByKey(data, keyField) {
     if (item.lastUsed && (!s.lastUsed || new Date(item.lastUsed) > new Date(s.lastUsed))) {
       s.lastUsed = item.lastUsed;
     }
+    // Aggregate latency stats for summary
+    const lat = item.latency || {};
+    if (lat.count) {
+      s.latencySumTtft = (s.latencySumTtft || 0) + (lat.avgTtft || 0) * (item.requests || 1);
+      s.latencySumTotal = (s.latencySumTotal || 0) + (lat.avgTotal || 0) * (item.requests || 1);
+      s.latencyMaxTtft = Math.max(s.latencyMaxTtft || 0, lat.maxTtft || 0);
+      s.latencyMinTtft = s.latencyMinTtft === undefined ? lat.minTtft : Math.min(s.latencyMinTtft, lat.minTtft || Infinity);
+      s.latencyMaxTotal = Math.max(s.latencyMaxTotal || 0, lat.maxTotal || 0);
+      s.latencyMinTotal = s.latencyMinTotal === undefined ? lat.minTotal : Math.min(s.latencyMinTotal, lat.minTotal || Infinity);
+      // Track all latency values for percentile computation
+      if (lat.p50Ttft !== undefined) {
+        (s.latencyP50TtftValues ||= []).push(lat.p50Ttft);
+      }
+      if (lat.p95Ttft !== undefined) {
+        (s.latencyP95TtftValues ||= []).push(lat.p95Ttft);
+      }
+      if (lat.p50Total !== undefined) {
+        (s.latencyP50TotalValues ||= []).push(lat.p50Total);
+      }
+      if (lat.p95Total !== undefined) {
+        (s.latencyP95TotalValues ||= []).push(lat.p95Total);
+      }
+      s.latencyCount = (s.latencyCount || 0) + (item.requests || 1);
+    }
     groups[gk].items.push(item);
+  });
+
+  // Compute latency avg for summaries
+  Object.values(groups).forEach((g) => {
+    const s = g.summary;
+    if (s.latencyCount) {
+      const p50TtftVals = (s.latencyP50TtftValues || []).filter((v) => v > 0);
+      const p95TtftVals = (s.latencyP95TtftValues || []).filter((v) => v > 0);
+      const p50TotalVals = (s.latencyP50TotalValues || []).filter((v) => v > 0);
+      const p95TotalVals = (s.latencyP95TotalValues || []).filter((v) => v > 0);
+      s.latency = {
+        avgTtft: Math.round(s.latencySumTtft / s.latencyCount),
+        maxTtft: s.latencyMaxTtft || 0,
+        minTtft: s.latencyMinTtft || 0,
+        p50Ttft: p50TtftVals.length ? Math.round(p50TtftVals.reduce((a, b) => a + b, 0) / p50TtftVals.length) : 0,
+        p95Ttft: p95TtftVals.length ? Math.round(p95TtftVals.reduce((a, b) => a + b, 0) / p95TtftVals.length) : 0,
+        avgTotal: Math.round(s.latencySumTotal / s.latencyCount),
+        maxTotal: s.latencyMaxTotal || 0,
+        minTotal: s.latencyMinTotal || 0,
+        p50Total: p50TotalVals.length ? Math.round(p50TotalVals.reduce((a, b) => a + b, 0) / p50TotalVals.length) : 0,
+        p95Total: p95TotalVals.length ? Math.round(p95TotalVals.reduce((a, b) => a + b, 0) / p95TotalVals.length) : 0,
+        count: s.latencyCount,
+      };
+    }
   });
   return Object.values(groups);
 }
@@ -204,18 +258,29 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const sortBy = searchParams.get("sortBy") || "rawModel";
-  const sortOrder = searchParams.get("sortOrder") || "asc";
+  // Sort state initialized from URL, reset when viewMode changes
+  const [sortBy, setSortBy] = useState(() => searchParams.get("sortBy") || "rawModel");
+  const [sortOrder, setSortOrder] = useState(() => searchParams.get("sortOrder") || "asc");
 
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [fetching, setFetching] = useState(false);
   const [tableView, setTableView] = useState("model");
   const [viewMode, setViewMode] = useState("costs");
+  const switchViewMode = useCallback((mode) => {
+    setViewMode(mode);
+    setSortBy("rawModel");
+    setSortOrder("asc");
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("sortBy");
+    params.delete("sortOrder");
+    router.replace(`?${params.toString()}`, { scroll: false });
+  }, [searchParams, router]);
   const [providers, setProviders] = useState([]);
   const [periodLocal, setPeriodLocal] = useState("today");
   const isInitialLoad = useRef(true);
   const hasLoadedStats = useRef(false);
+  const statsFetchAbortRef = useRef(null);
   const period = periodProp ?? periodLocal;
   const setPeriod = setPeriodProp ?? setPeriodLocal;
 
@@ -253,6 +318,9 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
 
   // Fetch filtered stats via REST when period changes
   useEffect(() => {
+    const controller = new AbortController();
+    statsFetchAbortRef.current = controller;
+
     // First load: show full spinner; subsequent: show subtle fetching indicator
     if (isInitialLoad.current) {
       isInitialLoad.current = false;
@@ -261,55 +329,96 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
       setFetching(true);
     }
 
-    fetch(`/api/usage/stats?period=${period}`)
+    fetch(`/api/usage/stats?period=${period}`, { signal: controller.signal })
       .then((r) => r.ok ? r.json() : null)
       .then((data) => {
         if (data) {
           hasLoadedStats.current = true;
-          setStats((prev) => ({ ...prev, ...data }));
+          setStats(data);
         }
       })
       .catch(() => {})
       .finally(() => {
-        setLoading(false);
-        setFetching(false);
+        if (statsFetchAbortRef.current === controller) {
+          statsFetchAbortRef.current = null;
+          setLoading(false);
+          setFetching(false);
+        }
       });
+
+    return () => {
+      controller.abort();
+      if (statsFetchAbortRef.current === controller) statsFetchAbortRef.current = null;
+    };
   }, [period]);
 
-  // SSE connection - real-time updates for activeRequests + recentRequests only
+  // Keep the full, period-filtered snapshot current as completed requests are
+  // persisted — but only while the tab is visible. A hidden tab would otherwise
+  // keep the server recalculating full stats (incl. the latency query) per request.
   useEffect(() => {
-    const es = new EventSource("/api/usage/stream");
+    let es = null;
 
-    es.onmessage = (e) => {
-      try {
-        const data = JSON.parse(e.data);
-        // Always merge only real-time fields, never overwrite full stats from REST
-        setStats((prev) => {
-          if (!prev) return prev;
-          return {
-            ...prev,
-            activeRequests: data.activeRequests,
-            recentRequests: data.recentRequests,
-            errorProvider: data.errorProvider,
-            pending: data.pending,
-          };
-        });
-        if (hasLoadedStats.current) setLoading(false);
-      } catch (err) {
-        console.error("[SSE CLIENT] parse error:", err);
+    const close = () => {
+      if (es) {
+        es.close();
+        es = null;
       }
     };
 
-    es.onerror = () => setLoading(false);
+    const open = () => {
+      if (es) return;
+      es = new EventSource(`/api/usage/stream?period=${encodeURIComponent(period)}`);
 
-    return () => es.close();
-  }, []);
+      es.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data);
+          // The SSE snapshot is newer than an in-flight initial/period REST fetch.
+          statsFetchAbortRef.current?.abort();
+          setStats(data);
+          hasLoadedStats.current = true;
+          setLoading(false);
+          setFetching(false);
+        } catch (err) {
+          console.error("[SSE CLIENT] parse error:", err);
+        }
+      };
+
+      es.onerror = () => {
+        setLoading(false);
+        setFetching(false);
+      };
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        close();
+      } else {
+        // Stats went stale while hidden — show the refresh indicator until the
+        // reconnected stream delivers a fresh snapshot.
+        if (hasLoadedStats.current) setFetching(true);
+        open();
+      }
+    };
+
+    if (!document.hidden) open();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      close();
+    };
+  }, [period]);
 
   const toggleSort = useCallback((tableType, field) => {
     const params = new URLSearchParams(searchParams.toString());
     if (params.get("sortBy") === field) {
-      params.set("sortOrder", params.get("sortOrder") === "asc" ? "desc" : "asc");
+      const nextOrder = params.get("sortOrder") === "asc" ? "desc" : "asc";
+      setSortBy(field);
+      setSortOrder(nextOrder);
+      params.set("sortOrder", nextOrder);
     } else {
+      setSortBy(field);
+      setSortOrder("asc");
       params.set("sortBy", field);
       params.set("sortOrder", "asc");
     }
@@ -322,9 +431,17 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
     switch (tableView) {
       case "model": {
         const pendingMap = stats.pending?.byModel || {};
+        const lats = stats.latencyByModel || {};
+        const allData = Object.entries(stats.byModel || {})
+          .map(([key, data]) => {
+            const lat = lats[key] || {};
+            return { ...data, key, latency: lat };
+          });
+        const sorted = sortData(allData, pendingMap, sortBy, sortOrder);
+        const grouped = groupDataByKey(sorted, "rawModel");
         return {
           columns: MODEL_COLUMNS,
-          groupedData: groupDataByKey(sortData(stats.byModel, pendingMap, sortBy, sortOrder), "rawModel"),
+          groupedData: grouped,
           storageKey: "usage-stats:expanded-models",
           emptyMessage: "No usage recorded yet.",
           renderSummaryCells: (group) => (
@@ -481,7 +598,7 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
       )}
 
       {/* Token / Cost chart - sync period */}
-      {loading ? spinner : <UsageChart period={period} />}
+      {loading ? spinner : <UsageChart period={period} tableView={tableView} stats={stats} refreshKey={stats.totalRequests} />}
 
       {/* Table with dropdown selector */}
       <div className="flex flex-col gap-3">
@@ -496,18 +613,24 @@ export default function UsageStats({ period: periodProp, setPeriod: setPeriodPro
               <option key={opt.value} value={opt.value}>{opt.label}</option>
             ))}
           </select>
-          <div className="grid grid-cols-2 items-center gap-1 rounded-lg border border-border bg-bg-subtle p-1 sm:flex">
+          <div className="grid grid-cols-3 items-center gap-1 rounded-lg border border-border bg-bg-subtle p-1 sm:flex">
             <button
-              onClick={() => setViewMode("costs")}
+              onClick={() => switchViewMode("costs")}
               className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${viewMode === "costs" ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-text hover:bg-bg-hover"}`}
             >
               Costs
             </button>
             <button
-              onClick={() => setViewMode("tokens")}
+              onClick={() => switchViewMode("tokens")}
               className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${viewMode === "tokens" ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-text hover:bg-bg-hover"}`}
             >
               Tokens
+            </button>
+            <button
+              onClick={() => switchViewMode("latency")}
+              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${viewMode === "latency" ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-text hover:bg-bg-hover"}`}
+            >
+              Latency
             </button>
           </div>
         </div>
