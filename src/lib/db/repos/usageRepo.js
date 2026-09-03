@@ -13,6 +13,7 @@ const PENDING_TIMEOUT_MS = 60 * 1000;
 const RING_CAP = 50;
 const CONN_CACHE_TTL_MS = 30 * 1000;
 const PERIOD_MS = { "24h": 86400000, "7d": 604800000, "30d": 2592000000, "60d": 5184000000 };
+const PERIOD_DAYS = { "7d": 7, "30d": 30, "60d": 60 };
 
 // In-memory state shared across Next.js modules
 if (!global._pendingRequests) global._pendingRequests = { byModel: {}, byAccount: {} };
@@ -48,6 +49,28 @@ function scheduleStatsEvent(event, delayMs = 150) {
 function getLocalDateKey(timestamp) {
   const d = timestamp ? new Date(timestamp) : new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Local midnight `daysBack` days ago (0 = today). Local, not UTC: the daily
+// rollup is keyed by local date, so a UTC boundary would put a whole evening in
+// the wrong bucket.
+function startOfLocalDay(daysBack = 0) {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate() - daysBack);
+}
+
+// Inclusive lower bound for a period. Every section of one stats payload must
+// resolve its window through here: latencyByModel used to carry its own
+// period→ms map, which made "today" a rolling 24h and left the latency chart
+// showing models the usage table (cut at local midnight) had already dropped.
+// null = unbounded.
+function getPeriodCutoff(period) {
+  if (period === "all") return null;
+  if (period === "today") return startOfLocalDay(0).toISOString();
+  if (period === "24h") return new Date(Date.now() - PERIOD_MS["24h"]).toISOString();
+  const days = PERIOD_DAYS[period];
+  if (!days) return startOfLocalDay(PERIOD_DAYS["7d"] - 1).toISOString();
+  return startOfLocalDay(days - 1).toISOString();
 }
 
 function addToCounter(target, key, values) {
@@ -340,9 +363,7 @@ function loadDaysInRange(adapter, maxDays) {
   if (maxDays == null) {
     return adapter.all(`SELECT dateKey, data FROM usageDaily`);
   }
-  const today = new Date();
-  const cutoff = new Date(today.getFullYear(), today.getMonth(), today.getDate() - maxDays + 1);
-  const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
+  const cutoffKey = getLocalDateKey(startOfLocalDay(maxDays - 1));
   return adapter.all(`SELECT dateKey, data FROM usageDaily WHERE dateKey >= ?`, [cutoffKey]);
 }
 
@@ -454,8 +475,7 @@ export async function getUsageStats(period = "all") {
   const useDailySummary = period !== "24h" && period !== "today";
 
   if (useDailySummary) {
-    const periodDays = { "7d": 7, "30d": 30, "60d": 60 };
-    const maxDays = periodDays[period] || null;
+    const maxDays = PERIOD_DAYS[period] || null;
     const dayRows = loadDaysInRange(db, maxDays);
 
     for (const dr of dayRows) {
@@ -573,14 +593,7 @@ export async function getUsageStats(period = "all") {
     }
   } else {
     // 24h / today: live history
-    let cutoff;
-    if (period === "today") {
-      const startOfDay = new Date();
-      startOfDay.setHours(0, 0, 0, 0);
-      cutoff = startOfDay.toISOString();
-    } else {
-      cutoff = new Date(Date.now() - PERIOD_MS["24h"]).toISOString();
-    }
+    const cutoff = getPeriodCutoff(period);
     const filtered = db.all(
       `SELECT timestamp, provider, model, connectionId, apiKey, endpoint, promptTokens, completionTokens, cost, tokens FROM usageHistory WHERE timestamp >= ?`,
       [cutoff]
@@ -673,9 +686,9 @@ export async function getUsageStats(period = "all") {
     return Math.round(sorted[Math.max(0, Math.min(idx, sorted.length - 1))]);
   }
 
-  // Latency aggregation per provider/model (avg/max/min from usageHistory)
-  const periodMs = { today: 86400000, "24h": 86400000, "7d": 604800000, "30d": 2592000000, "60d": 5184000000 };
-  const cutoff = period !== "all" ? new Date(now - (periodMs[period] || 604800000)).toISOString() : null;
+  // Latency aggregation per provider/model (avg/max/min from usageHistory).
+  // Same window as byModel above — see getPeriodCutoff.
+  const cutoff = getPeriodCutoff(period);
   const latRows = db.all(
     `SELECT provider, model, ttft, totalLatency FROM usageHistory WHERE (ttft > 0 OR totalLatency > 0)${cutoff ? " AND timestamp >= ?" : ""}`,
     cutoff ? [cutoff] : []

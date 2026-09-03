@@ -1,3 +1,28 @@
+# v0.5.59-4 (2026-09-03)
+
+## Features
+- **Usage**: a model filter on the latency chart, next to the Live toggle in
+  Latency view. Hidden models drop out before the axis is derived, so hiding a
+  slow outlier rescales the chart instead of leaving it stretched. Clear and
+  Select all act on the current search result, Reset restores everything, and
+  the hidden set persists across reloads
+- **Combos / Providers**: an eye button beside Copy on combo cards, combo
+  member rows and provider model rows opens a read-only info modal — context
+  window, max output, all fifteen capability flags, thinking format and levels,
+  estimated per-1M-token pricing, and for combos the merged limits plus a
+  per-member breakdown. Backed by a new `/api/models/detail` endpoint, which
+  resolves the routing alias to a provider id and reads the synced models.dev
+  catalog and your pricing overrides server-side. Unresolvable combo members
+  are flagged rather than dropped
+
+## Fixes
+- **Usage**: the latency chart listed models you last used yesterday. Latency
+  aggregation resolved its own period window, so "today" meant a rolling 24
+  hours there while the usage table cut at local midnight — a model kept its
+  bar after its table row had gone. Both now share one cutoff, which also
+  corrects the model table's latency columns, previously computed over the
+  wider window
+
 # v0.5.59-3 (2026-09-02)
 
 ## Features

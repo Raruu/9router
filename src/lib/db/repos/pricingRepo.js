@@ -15,6 +15,12 @@ async function getUserPricing() {
   return await pricingKv.getAll();
 }
 
+// User overrides only, without the built-in tables merged in. Lets a caller tell
+// "the user set this rate" apart from "this is our estimate".
+export async function getUserPricingTables() {
+  return await getUserPricing();
+}
+
 export async function getPricing() {
   const now = Date.now();
   if (cache.value && cache.expiresAt > now) return cache.value;

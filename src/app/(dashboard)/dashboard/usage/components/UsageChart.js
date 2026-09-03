@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, startTransition } from "react";
 import PropTypes from "prop-types";
 import { buildLatencyData } from "./latencyUtils.js";
+import LatencyModelFilter from "./LatencyModelFilter.js";
 import {
   AreaChart,
   Area,
@@ -24,6 +25,22 @@ const fmtTokens = (n) => {
 };
 
 const fmtCost = (n) => `$${(n || 0).toFixed(4)}`;
+
+const HIDDEN_MODELS_STORAGE_KEY = "usage-chart:hidden-latency-models";
+
+// Hidden keys are what gets persisted, not visible ones: a model seen for the
+// first time after the preference was saved then defaults to visible, and a key
+// that drops out on a period switch lingers harmlessly and re-applies if it
+// comes back.
+const readHiddenModels = () => {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const saved = localStorage.getItem(HIDDEN_MODELS_STORAGE_KEY);
+    return saved ? new Set(JSON.parse(saved)) : new Set();
+  } catch {
+    return new Set();
+  }
+};
 
 const fmtLatencyLabel = (v) => {
   const ms = Math.round(Math.pow(10, v));
@@ -120,6 +137,10 @@ export default function UsageChart({
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState("tokens");
   const [latencyMetric, setLatencyMetric] = useState("total");
+  // Lazy initializer, not an effect: `react-hooks/set-state-in-effect` is on,
+  // and reading during render is safe here because UsageStats only mounts this
+  // chart after its first fetch resolves, so it is never in the SSR markup.
+  const [hiddenModels, setHiddenModels] = useState(readHiddenModels);
   // Only the very first fetch may unmount the chart. Later refetches keep it
   // mounted so recharts can interpolate from the last painted frame instead of
   // replaying its entrance animation from the baseline.
@@ -147,9 +168,18 @@ export default function UsageChart({
   }, [fetchData, refreshKey]);
 
   const latency = useMemo(
-    () => buildLatencyData(stats?.latencyByModel, latencyMetric),
-    [stats, latencyMetric],
+    () => buildLatencyData(stats?.latencyByModel, latencyMetric, hiddenModels),
+    [stats, latencyMetric, hiddenModels],
   );
+
+  const changeHiddenModels = useCallback((next) => {
+    setHiddenModels(next);
+    try {
+      localStorage.setItem(HIDDEN_MODELS_STORAGE_KEY, JSON.stringify([...next]));
+    } catch (e) {
+      console.error(`Failed to save ${HIDDEN_MODELS_STORAGE_KEY}:`, e);
+    }
+  }, []);
 
   // Bars stay keyed by the raw model key — node prefixes aren't enforced unique,
   // so two nodes sharing one would otherwise collapse into a single bar. Only
@@ -189,6 +219,13 @@ export default function UsageChart({
         </div>
 
         <div className="flex items-center gap-2 self-end sm:self-auto">
+          {viewMode === "latency" && latency.all.length > 0 && (
+            <LatencyModelFilter
+              entries={latency.all}
+              hidden={hiddenModels}
+              onChange={changeHiddenModels}
+            />
+          )}
           <span className="text-xs font-medium text-text-muted">Live</span>
           <Toggle
             size="sm"
@@ -257,12 +294,14 @@ export default function UsageChart({
               </div>
             ) : (
               <div className="h-10 flex items-center text-text-muted text-xs">
-                No latency data for this period
+                {latency.all.length > 0
+                  ? "All models hidden — use the model filter to show some"
+                  : "No latency data for this period"}
               </div>
             )}
             <div
               role="img"
-              aria-label={`Latency range chart showing P50 to P95 per model, sorted by worst tail latency first. ${latency.data.length} models above threshold.`}
+              aria-label={`Latency range chart showing P50 to P95 per model, sorted by worst tail latency first. Showing ${latency.data.length} of ${latency.all.length} models above threshold.`}
             >
               <ResponsiveContainer key={period} width="100%" height={chartHeight}>
                 <BarChart

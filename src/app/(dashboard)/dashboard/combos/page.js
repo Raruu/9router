@@ -5,7 +5,7 @@ import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { restrictToVerticalAxis, restrictToParentElement } from "@dnd-kit/modifiers";
-import { Card, Button, Modal, Input, CardSkeleton, ModelSelectModal, ConfirmModal, CapacityBadges, Select, Toggle } from "@/shared/components";
+import { Card, Button, Modal, Input, CardSkeleton, ModelSelectModal, ModelDetailModal, ConfirmModal, CapacityBadges, Select, Toggle } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
@@ -340,6 +340,7 @@ const ADAPTER_STRATEGY_OPTIONS = [
 
 function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdit, onDelete, strategy = {}, onSetStrategy }) {
   const [showJudgeSelect, setShowJudgeSelect] = useState(false);
+  const [showDetail, setShowDetail] = useState(false);
   const current = strategy.fallbackStrategy || "fallback";
   const judge = strategy.judgeModel || "";
   const isFusion = current === "fusion";
@@ -406,7 +407,7 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-1 sm:flex">
+          <div className="grid grid-cols-4 gap-1 sm:flex">
             <button
               onClick={(e) => { e.stopPropagation(); onCopy(combo.name, `combo-${combo.id}`); }}
               className="flex flex-col items-center rounded px-2 py-1 text-text-muted transition-colors hover:bg-black/5 hover:text-primary dark:hover:bg-white/5"
@@ -416,6 +417,14 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
                 {copied === `combo-${combo.id}` ? "check" : "content_copy"}
               </span>
               <span className="text-[10px] leading-tight">Copy</span>
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); setShowDetail(true); }}
+              className="flex flex-col items-center rounded px-2 py-1 text-text-muted transition-colors hover:bg-black/5 hover:text-primary dark:hover:bg-white/5"
+              title="View combo info"
+            >
+              <span className="material-symbols-outlined text-[18px]">visibility</span>
+              <span className="text-[10px] leading-tight">Info</span>
             </button>
             <button
               onClick={onEdit}
@@ -447,6 +456,14 @@ function ComboCard({ combo, getCaps, activeProviders = [], copied, onCopy, onEdi
           title="Select Judge Model"
           addedModelValues={judge ? [judge] : []}
           closeOnSelect={true}
+        />
+      )}
+
+      {showDetail && (
+        <ModelDetailModal
+          isOpen={showDetail}
+          onClose={() => setShowDetail(false)}
+          comboName={combo.name}
         />
       )}
     </Card>
@@ -589,6 +606,7 @@ function ModelItem({ id, index, model, isFirst, isLast, onEdit, onMoveUp, onMove
   };
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(model);
+  const [showDetail, setShowDetail] = useState(false);
   const commit = () => {
     const trimmed = draft.trim();
     if (trimmed && trimmed !== model) onEdit(trimmed);
@@ -665,6 +683,15 @@ function ModelItem({ id, index, model, isFirst, isLast, onEdit, onMoveUp, onMove
         </button>
       </div>
 
+      {/* Info */}
+      <button
+        onClick={() => setShowDetail(true)}
+        className="p-0.5 rounded text-text-muted transition-colors hover:bg-black/5 hover:text-primary dark:hover:bg-white/5"
+        title="View model info"
+      >
+        <span className="material-symbols-outlined text-[12px]">visibility</span>
+      </button>
+
       {/* Remove */}
       <button
         onClick={onRemove}
@@ -673,6 +700,14 @@ function ModelItem({ id, index, model, isFirst, isLast, onEdit, onMoveUp, onMove
       >
         <span className="material-symbols-outlined text-[12px]">close</span>
       </button>
+
+      {showDetail && (
+        <ModelDetailModal
+          isOpen={showDetail}
+          onClose={() => setShowDetail(false)}
+          modelId={model}
+        />
+      )}
     </div>
   );
 }
