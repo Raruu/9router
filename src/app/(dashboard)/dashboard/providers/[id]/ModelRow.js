@@ -1,7 +1,9 @@
+import { useState } from "react";
 import PropTypes from "prop-types";
-import { CapacityBadges } from "@/shared/components";
+import { CapacityBadges, ModelDetailModal } from "@/shared/components";
 
 export default function ModelRow({ model, fullModel, alias, copied, onCopy, testStatus, isCustom, isFree, onDeleteAlias, onTest, isTesting, onDisable, caps, thinkingSuffix }) {
+  const [showDetail, setShowDetail] = useState(false);
   const displayModel = thinkingSuffix ? `${fullModel}(${thinkingSuffix})` : fullModel;
   const borderColor = testStatus === "ok"
     ? "border-green-500/40"
@@ -60,6 +62,18 @@ export default function ModelRow({ model, fullModel, alias, copied, onCopy, test
             {copied === `model-${model.id}` ? "Copied!" : "Copy"}
           </span>
         </div>
+        <div className="relative shrink-0 group/btn">
+          <button
+            onClick={() => setShowDetail(true)}
+            className="rounded p-0.5 text-text-muted hover:bg-sidebar hover:text-primary"
+            aria-label="View model info"
+          >
+            <span className="material-symbols-outlined text-sm">visibility</span>
+          </button>
+          <span className="pointer-events-none absolute mt-1 top-5 left-1/2 -translate-x-1/2 text-[10px] text-text-muted whitespace-nowrap opacity-0 group-hover/btn:opacity-100 transition-opacity">
+            Info
+          </span>
+        </div>
         {isCustom ? (
           <button
             onClick={onDeleteAlias}
@@ -78,6 +92,14 @@ export default function ModelRow({ model, fullModel, alias, copied, onCopy, test
           </button>
         ) : null}
       </div>
+
+      {showDetail && (
+        <ModelDetailModal
+          isOpen={showDetail}
+          onClose={() => setShowDetail(false)}
+          modelId={fullModel}
+        />
+      )}
     </div>
   );
 }

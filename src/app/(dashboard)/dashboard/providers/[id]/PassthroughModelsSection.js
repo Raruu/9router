@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import PropTypes from "prop-types";
-import { Button } from "@/shared/components";
+import { Button, ModelDetailModal } from "@/shared/components";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
 
 function PassthroughModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias, onTest, testStatus, isTesting }) {
+  const [showDetail, setShowDetail] = useState(false);
   const borderColor = testStatus === "ok"
     ? "border-green-500/40"
     : testStatus === "error"
@@ -45,6 +46,18 @@ function PassthroughModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias
               {copied === `model-${modelId}` ? "Copied!" : "Copy"}
             </span>
           </div>
+          <div className="relative group/btn">
+            <button
+              onClick={() => setShowDetail(true)}
+              className="p-0.5 hover:bg-sidebar rounded text-text-muted hover:text-primary"
+              aria-label="View model info"
+            >
+              <span className="material-symbols-outlined text-sm">visibility</span>
+            </button>
+            <span className="pointer-events-none absolute top-5 left-1/2 -translate-x-1/2 text-[10px] text-text-muted whitespace-nowrap opacity-0 group-hover/btn:opacity-100 transition-opacity">
+              Info
+            </span>
+          </div>
           {onTest && (
             <div className="relative group/btn">
               <button
@@ -72,6 +85,14 @@ function PassthroughModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias
       >
         <span className="material-symbols-outlined text-sm">delete</span>
       </button>
+
+      {showDetail && (
+        <ModelDetailModal
+          isOpen={showDetail}
+          onClose={() => setShowDetail(false)}
+          modelId={fullModel}
+        />
+      )}
     </div>
   );
 }
