@@ -220,8 +220,7 @@ export default function CombosPage() {
             <p className="text-xs text-text-muted mt-0.5">
               Echo the combo you requested in the response <code className="font-mono">model</code> field
               instead of the member that served it — <code className="font-mono">&quot;model&quot;: &quot;your combo name&quot;</code> rather
-              than <code className="font-mono">&quot;model&quot;: &quot;model id&quot;</code>. Usage tracking and logs
-              keep the real model.
+              than <code className="font-mono">&quot;model&quot;: &quot;model id&quot;</code>. 
             </p>
           </div>
           <Toggle
