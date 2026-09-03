@@ -257,3 +257,70 @@ describe("usageRepo latency percentiles", () => {
     expect(stats.latencyByModel[key].label).toBe(key);
   });
 });
+
+// latencyByModel used to resolve its own period→ms window, so "today" meant a
+// rolling 24h there while byModel cut at local midnight. A model last used
+// yesterday evening then kept a bar on the latency chart after its row had left
+// the usage table.
+describe("usageRepo latency window alignment", () => {
+  const startOfToday = () => {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    return d;
+  };
+
+  const insert = (timestamp, model) => ({
+    timestamp,
+    provider: "openai",
+    model,
+    tokens: { prompt_tokens: 100, completion_tokens: 50 },
+    cost: 0.01,
+    ttft: 150,
+    totalLatency: 450,
+  });
+
+  it("excludes a model last used before local midnight from 'today'", async () => {
+    const { saveRequestUsage, getUsageStats } = await import("@/lib/db/repos/usageRepo.js");
+
+    // One second before midnight is always inside a rolling 24h window and
+    // never inside today, so this fails deterministically on the old behaviour.
+    await saveRequestUsage(insert(new Date(startOfToday().getTime() - 1000).toISOString(), "yesterday-model"));
+    await saveRequestUsage(insert(new Date().toISOString(), "today-model"));
+
+    const stats = await getUsageStats("today");
+
+    expect(stats.latencyByModel["today-model (openai)"]).toBeDefined();
+    expect(stats.latencyByModel["yesterday-model (openai)"]).toBeUndefined();
+    // The usage table already scoped to today; the chart now agrees.
+    expect(stats.byModel["yesterday-model (openai)"]).toBeUndefined();
+  });
+
+  it("still includes a model used within the last 24h under '24h'", async () => {
+    const { saveRequestUsage, getUsageStats } = await import("@/lib/db/repos/usageRepo.js");
+
+    await saveRequestUsage(insert(new Date(startOfToday().getTime() - 1000).toISOString(), "yesterday-model"));
+
+    const stats = await getUsageStats("24h");
+
+    expect(stats.latencyByModel["yesterday-model (openai)"]).toBeDefined();
+    expect(stats.byModel["yesterday-model (openai)"]).toBeDefined();
+  });
+
+  // saveRequestUsage writes the history row and the daily rollup in one
+  // transaction, so with both windows aligned every latency key must have a
+  // table row. That is what makes an explicit join unnecessary.
+  it("never reports a latency model the usage table dropped", async () => {
+    const { saveRequestUsage, getUsageStats } = await import("@/lib/db/repos/usageRepo.js");
+
+    const now = Date.now();
+    await saveRequestUsage(insert(new Date(startOfToday().getTime() - 1000).toISOString(), "yesterday-model"));
+    await saveRequestUsage(insert(new Date(now).toISOString(), "today-model"));
+    await saveRequestUsage(insert(new Date(now - 3 * 86400000).toISOString(), "three-days-ago"));
+
+    for (const period of ["today", "24h", "7d"]) {
+      const stats = await getUsageStats(period);
+      const orphans = Object.keys(stats.latencyByModel).filter((key) => !stats.byModel[key]);
+      expect(orphans, `period ${period}`).toEqual([]);
+    }
+  });
+});
