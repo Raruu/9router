@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -8,7 +8,9 @@ import { restrictToVerticalAxis, restrictToParentElement } from "@dnd-kit/modifi
 import { Card, Button, Modal, Input, CardSkeleton, ModelSelectModal, ModelDetailModal, ConfirmModal, CapacityBadges, Select, Toggle } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
+import { useHeaderSearchStore } from "@/store/headerSearchStore";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
+import { SORT_OPTIONS, readStoredSort, writeStoredSort, sortCombos, matchComboSearch } from "./utils";
 
 // Validate combo name: only a-z, A-Z, 0-9, -, _
 const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
@@ -56,6 +58,28 @@ export default function CombosPage() {
   const { getCaps } = useModelCaps();
   const [confirmState, setConfirmState] = useState(null);
   const { copied, copy } = useCopyToClipboard();
+  const searchQuery = useHeaderSearchStore((s) => s.query);
+  const registerSearch = useHeaderSearchStore((s) => s.register);
+  const unregisterSearch = useHeaderSearchStore((s) => s.unregister);
+  // Lazy initializer is hydration-safe: the sorted list only renders after the
+  // client-side fetch clears `loading`, never in SSR markup.
+  const [sortMode, setSortMode] = useState(readStoredSort);
+
+  useEffect(() => {
+    registerSearch("Search combos...");
+    return () => unregisterSearch();
+  }, [registerSearch, unregisterSearch]);
+
+  const visibleCombos = useMemo(
+    () => sortCombos(combos.filter((combo) => matchComboSearch(combo, searchQuery)), sortMode),
+    [combos, sortMode, searchQuery]
+  );
+
+  const handleSortChange = (e) => {
+    const next = e.target.value;
+    setSortMode(next);
+    writeStoredSort(next);
+  };
 
 
   const fetchData = async () => {
@@ -248,6 +272,24 @@ export default function CombosPage() {
         </Button>
       </div>
 
+      {/* Ordering + (header-driven) search — sort choice persists per browser */}
+      {combos.length > 0 && (
+        <div className="flex items-center justify-end">
+          <select
+            value={sortMode}
+            onChange={handleSortChange}
+            className="h-8 rounded-lg border border-black/10 bg-black/[0.02] px-2 text-xs text-text-primary outline-none transition-colors hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/10"
+            aria-label="Order combos"
+          >
+            {SORT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Combos List */}
       {combos.length === 0 ? (
         <Card>
@@ -262,9 +304,19 @@ export default function CombosPage() {
             </Button>
           </div>
         </Card>
+      ) : visibleCombos.length === 0 ? (
+        <Card>
+          <div className="text-center py-12">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 text-primary mb-4">
+              <span className="material-symbols-outlined text-[32px]">search_off</span>
+            </div>
+            <p className="text-text-main font-medium mb-1">No combos match your search</p>
+            <p className="text-sm text-text-muted">Clear the search box in the header to see all combos</p>
+          </div>
+        </Card>
       ) : (
         <div className="flex flex-col gap-4">
-          {combos.map((combo) => (
+          {visibleCombos.map((combo) => (
             <ComboCard
               key={combo.id}
               combo={combo}
