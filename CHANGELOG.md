@@ -1,3 +1,38 @@
+# v0.5.65-2 (2026-09-04)
+
+## Features
+- **Combos**: sort the combo list by name, created date or last updated, and
+  filter it from the header search box. The choice persists per browser
+- **Combos**: new `comboLimitStrategy` setting picks whether a combo advertises
+  its largest (default) or smallest member's context window and max output on
+  `/v1/models` and in model info. Limits only — capability flags still union, so
+  a text-only member cannot erase a multimodal one's vision. Advertised only:
+  requests still clamp to the member that served them
+
+## Fixes
+- **Usage**: the Details tab recorded nothing whenever `ENABLE_REQUEST_LOGS` was
+  set. It sat at the top of the observability precedence chain and returned early
+  whenever it was merely defined, so the `false` shipped in `.env.example`
+  disabled request-detail capture and left `OBSERVABILITY_ENABLED` and the
+  Profile toggle as dead letters. That variable belongs to the open-sse file
+  logger and is no longer read here. The same defect hid all four
+  `OBSERVABILITY_MAX_*` vars
+- **Usage**: request details are kept for 60 days instead of the newest 1000
+  rows, so the Details window matches Overview's 60D filter. Shares Overview's
+  local-midnight cutoff, with a 20k row ceiling as a backstop
+  (`observabilityRetentionDays`, `OBSERVABILITY_RETENTION_DAYS`)
+- **Models**: custom OpenAI/Anthropic-compatible nodes showed a two-letter text
+  badge in model info instead of an icon — their ids carry a generated uuid, so
+  the `/providers/{id}.png` lookup always 404'd. They now use the existing
+  chat-completions, responses and messages icons, the subtitle shows the node's
+  display name instead of the raw id, and the icon is centered against the
+  two-line title
+
+## Improvements
+- **Models**: one resolver now handles compatible-provider icons for the
+  providers list, the provider detail header and model info, and honours the
+  session 404 cache so a missing asset degrades to text once
+
 # v0.5.65-1 (2026-09-03)
 
 Merged upstream v0.5.65 — see that section below for the full upstream
