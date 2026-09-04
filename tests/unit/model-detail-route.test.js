@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getCustomModels: vi.fn(),
   getModelAliases: vi.fn(),
   getProviderConnections: vi.fn(),
+  getProviderNodes: vi.fn(),
   getSettings: vi.fn(),
   getPricingForModel: vi.fn(),
   getUserPricingTables: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("@/lib/localDb", () => ({
   getCustomModels: mocks.getCustomModels,
   getModelAliases: mocks.getModelAliases,
   getProviderConnections: mocks.getProviderConnections,
+  getProviderNodes: mocks.getProviderNodes,
   getSettings: mocks.getSettings,
 }));
 
@@ -42,6 +44,7 @@ describe("GET /api/models/detail", () => {
     mocks.getCustomModels.mockResolvedValue([]);
     mocks.getModelAliases.mockResolvedValue({});
     mocks.getProviderConnections.mockResolvedValue([]);
+    mocks.getProviderNodes.mockResolvedValue([]);
     mocks.getSettings.mockResolvedValue({ comboStrategies: {} });
     mocks.getPricingForModel.mockResolvedValue(null);
     mocks.getUserPricingTables.mockResolvedValue({});
@@ -107,6 +110,33 @@ describe("GET /api/models/detail", () => {
 
     expect(res.body.provider.id).toBe("openai-compatible-chat");
     expect(res.body.owned_by).toBe("my-node");
+  });
+
+  it("prefers the provider node's display name over the raw compat id", async () => {
+    mocks.getProviderConnections.mockResolvedValue([
+      { provider: "openai-compatible-chat", providerSpecificData: { prefix: "my-node" } },
+    ]);
+    mocks.getProviderNodes.mockResolvedValue([
+      { id: "openai-compatible-chat", type: "openai-compatible", name: "My LM Studio", prefix: "my-node" },
+    ]);
+
+    const res = await GET(req("id=my-node/some-model"));
+
+    expect(res.body.provider.id).toBe("openai-compatible-chat");
+    expect(res.body.provider.name).toBe("My LM Studio");
+  });
+
+  it("falls back to the raw provider id when no node display name exists", async () => {
+    mocks.getProviderConnections.mockResolvedValue([
+      { provider: "openai-compatible-chat", providerSpecificData: { prefix: "my-node" } },
+    ]);
+    mocks.getProviderNodes.mockResolvedValue([
+      { id: "openai-compatible-chat", type: "openai-compatible", name: "   " },
+    ]);
+
+    const res = await GET(req("id=my-node/some-model"));
+
+    expect(res.body.provider.name).toBe("openai-compatible-chat");
   });
 
   it("reports null pricing without a source when nothing resolves", async () => {
@@ -177,6 +207,7 @@ describe("GET /api/models/detail — combos", () => {
     mocks.getCustomModels.mockResolvedValue([]);
     mocks.getModelAliases.mockResolvedValue({});
     mocks.getProviderConnections.mockResolvedValue([]);
+    mocks.getProviderNodes.mockResolvedValue([]);
     mocks.getSettings.mockResolvedValue({ comboStrategies: {} });
     mocks.getPricingForModel.mockResolvedValue(null);
     mocks.getUserPricingTables.mockResolvedValue({});

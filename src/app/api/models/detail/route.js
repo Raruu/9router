@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCombos, getComboByName, getCustomModels, getModelAliases, getProviderConnections, getSettings } from "@/lib/localDb";
+import { getCombos, getComboByName, getCustomModels, getModelAliases, getProviderConnections, getProviderNodes, getSettings } from "@/lib/localDb";
 import { getPricingForModel, getUserPricingTables } from "@/lib/db/repos/pricingRepo.js";
 import { buildProviderIdByPrefix } from "@/lib/providerPrefixMap";
 import { PROVIDER_MODELS, getModelKind } from "@/shared/constants/models";
@@ -30,7 +30,7 @@ function findRegistryModel(prefix, providerId, modelId) {
   return list.find((m) => m.id === modelId) || null;
 }
 
-function buildModelDetail({ prefix, providerId, modelId, registryModel, capabilities, pricing, pricingSource }) {
+function buildModelDetail({ prefix, providerId, modelId, registryModel, capabilities, pricing, pricingSource, nodeNameById }) {
   const providerInfo = AI_PROVIDERS[providerId];
   const kind = registryModel ? getModelKind(registryModel, LLM_KIND) : LLM_KIND;
   const detail = {
@@ -43,7 +43,9 @@ function buildModelDetail({ prefix, providerId, modelId, registryModel, capabili
     provider: {
       id: providerId,
       alias: prefix,
-      name: providerInfo?.name || providerId,
+      // Compat provider nodes are not in the registry; prefer the node's
+      // display name over leaking the raw "openai-compatible-chat-<uuid>" id.
+      name: providerInfo?.name || nodeNameById?.get(providerId) || providerId,
     },
     capabilities,
     // Mirrored under the snake_case names /v1/models emits, so the two surfaces
@@ -83,6 +85,7 @@ async function modelDetail(fullId, ctx) {
     capabilities,
     pricing,
     pricingSource,
+    nodeNameById: ctx.nodeNameById,
   });
 }
 
@@ -173,12 +176,20 @@ async function comboDetail(combo, ctx) {
 }
 
 async function buildContext() {
-  const [connections, combos, modelAliases, settings] = await Promise.all([
+  const [connections, combos, modelAliases, settings, nodes] = await Promise.all([
     getProviderConnections().catch(() => []),
     getCombos().catch(() => []),
     getModelAliases().catch(() => ({})),
     getSettings().catch(() => ({})),
+    getProviderNodes().catch(() => []),
   ]);
+
+  const nodeNameById = new Map();
+  for (const node of nodes) {
+    if (node?.id && typeof node.name === "string" && node.name.trim()) {
+      nodeNameById.set(node.id, node.name.trim());
+    }
+  }
 
   const comboByName = new Map();
   for (const combo of combos) {
@@ -189,6 +200,7 @@ async function buildContext() {
 
   return {
     providerIdByPrefix: buildProviderIdByPrefix(connections),
+    nodeNameById,
     modelAliases,
     comboByName,
     comboStrategies: settings?.comboStrategies || {},
