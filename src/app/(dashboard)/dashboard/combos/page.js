@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
@@ -8,10 +8,19 @@ import { restrictToVerticalAxis, restrictToParentElement } from "@dnd-kit/modifi
 import { Card, Button, Modal, Input, CardSkeleton, ModelSelectModal, ModelDetailModal, ConfirmModal, CapacityBadges, Select, Toggle } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
+import { useHeaderSearchStore } from "@/store/headerSearchStore";
 import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";
+import { SORT_OPTIONS, readStoredSort, writeStoredSort, sortCombos, matchComboSearch } from "./utils";
 
 // Validate combo name: only a-z, A-Z, 0-9, -, _
 const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
+
+// Which member's numeric limits (contextWindow/maxOutput) a combo advertises.
+// Booleans always union — see mergeMemberCapabilities in open-sse.
+const COMBO_LIMIT_OPTIONS = [
+  { value: "max", label: "Largest member (max)" },
+  { value: "min", label: "Smallest member (min)" },
+];
 
 // Capacity adapter: global fallback pools of models per input-modality capability.
 // A request needing a capability the target model/combo lacks switches straight
@@ -52,10 +61,33 @@ export default function CombosPage() {
   const [activeProviders, setActiveProviders] = useState([]);
   const [comboStrategies, setComboStrategies] = useState({});
   const [comboNameInResponse, setComboNameInResponse] = useState(false);
+  const [comboLimitStrategy, setComboLimitStrategy] = useState("max");
   const [capacityAdapter, setCapacityAdapter] = useState(EMPTY_CAPACITY_ADAPTER);
   const { getCaps } = useModelCaps();
   const [confirmState, setConfirmState] = useState(null);
   const { copied, copy } = useCopyToClipboard();
+  const searchQuery = useHeaderSearchStore((s) => s.query);
+  const registerSearch = useHeaderSearchStore((s) => s.register);
+  const unregisterSearch = useHeaderSearchStore((s) => s.unregister);
+  // Lazy initializer is hydration-safe: the sorted list only renders after the
+  // client-side fetch clears `loading`, never in SSR markup.
+  const [sortMode, setSortMode] = useState(readStoredSort);
+
+  useEffect(() => {
+    registerSearch("Search combos...");
+    return () => unregisterSearch();
+  }, [registerSearch, unregisterSearch]);
+
+  const visibleCombos = useMemo(
+    () => sortCombos(combos.filter((combo) => matchComboSearch(combo, searchQuery)), sortMode),
+    [combos, sortMode, searchQuery]
+  );
+
+  const handleSortChange = (e) => {
+    const next = e.target.value;
+    setSortMode(next);
+    writeStoredSort(next);
+  };
 
 
   const fetchData = async () => {
@@ -76,6 +108,7 @@ export default function CombosPage() {
       }
       setComboStrategies(settingsData.comboStrategies || {});
       setComboNameInResponse(!!settingsData.comboNameInResponse);
+      setComboLimitStrategy(settingsData.comboLimitStrategy === "min" ? "min" : "max");
       const rawAdapter = settingsData.capacityAdapter || {};
       const normalized = {};
       for (const cap of CAPACITY_ADAPTER_CAPS) {
@@ -104,6 +137,19 @@ export default function CombosPage() {
       });
     } catch (error) {
       console.log("Error updating combo name in response:", error);
+    }
+  };
+
+  const handleSetComboLimitStrategy = async (next) => {
+    setComboLimitStrategy(next);
+    try {
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comboLimitStrategy: next }),
+      });
+    } catch (error) {
+      console.log("Error updating combo limit strategy:", error);
     }
   };
 
@@ -229,6 +275,27 @@ export default function CombosPage() {
             aria-label="Return combo name in response"
           />
         </div>
+        <div className="mt-4 pt-4 border-t border-border flex items-start sm:items-center justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">Combo context size</p>
+            <p className="text-xs text-text-muted mt-0.5">
+              Which member&apos;s context window and max output a combo advertises on{" "}
+              <code className="font-mono">/v1/models</code> and in model info. Largest matches the
+              headline model but lets an oversized prompt hard-fail on a smaller fallback;
+              smallest never over-fills, at the cost of under-using it. Advertised only — requests
+              always clamp to the member that actually served them.
+            </p>
+          </div>
+          <div className="w-full sm:w-[220px] shrink-0">
+            <Select
+              options={COMBO_LIMIT_OPTIONS}
+              value={comboLimitStrategy}
+              onChange={(e) => handleSetComboLimitStrategy(e.target.value)}
+              selectClassName="py-1.5 text-xs"
+              aria-label="Combo advertised limits strategy"
+            />
+          </div>
+        </div>
       </Card>
 
       {/* Header */}
@@ -248,6 +315,24 @@ export default function CombosPage() {
         </Button>
       </div>
 
+      {/* Ordering + (header-driven) search — sort choice persists per browser */}
+      {combos.length > 0 && (
+        <div className="flex items-center justify-end">
+          <select
+            value={sortMode}
+            onChange={handleSortChange}
+            className="h-8 rounded-lg border border-black/10 bg-black/[0.02] px-2 text-xs text-text-primary outline-none transition-colors hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/10"
+            aria-label="Order combos"
+          >
+            {SORT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
       {/* Combos List */}
       {combos.length === 0 ? (
         <Card>
@@ -262,9 +347,19 @@ export default function CombosPage() {
             </Button>
           </div>
         </Card>
+      ) : visibleCombos.length === 0 ? (
+        <Card>
+          <div className="text-center py-12">
+            <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/10 text-primary mb-4">
+              <span className="material-symbols-outlined text-[32px]">search_off</span>
+            </div>
+            <p className="text-text-main font-medium mb-1">No combos match your search</p>
+            <p className="text-sm text-text-muted">Clear the search box in the header to see all combos</p>
+          </div>
+        </Card>
       ) : (
         <div className="flex flex-col gap-4">
-          {combos.map((combo) => (
+          {visibleCombos.map((combo) => (
             <ComboCard
               key={combo.id}
               combo={combo}

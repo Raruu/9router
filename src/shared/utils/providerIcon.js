@@ -28,8 +28,36 @@ export function resolveProviderIconId(providerId) {
 
 /** `/providers/{id}.png` or null when previously failed. */
 export function getProviderIconSrc(providerId) {
-  const id = resolveProviderIconId(providerId);
-  return id ? `/providers/${id}.png` : null;
+  return srcForFileId(resolveProviderIconId(providerId));
+}
+
+function srcForFileId(fileId) {
+  return fileId && !failedIds.has(fileId) ? `/providers/${fileId}.png` : null;
+}
+
+// Prefixes for the user-created compatible provider nodes. Inlined as literals
+// (not imported from constants/providers.js) on purpose: that module pulls the
+// full provider registry, and ProviderIcon is used on the public landing page,
+// which must stay registry-free.
+const OPENAI_COMPATIBLE = "openai-compatible";
+const ANTHROPIC_COMPATIBLE = "anthropic-compatible";
+
+/**
+ * Icon src for a provider id that may be a user-created compatible node.
+ * Those ids embed their api type (`openai-compatible-chat-<uuid>` /
+ * `openai-compatible-responses-<uuid>`, see /api/provider-nodes POST) and no
+ * registry entry exists for them, so plain getProviderIconSrc always 404s.
+ * apiType overrides the id-derived value when the caller already knows it.
+ * custom-embedding-* has no icon asset and keeps the text fallback.
+ */
+export function getProviderIconSrcForId(providerId, apiType) {
+  const id = typeof providerId === "string" ? providerId : "";
+  if (id.startsWith(ANTHROPIC_COMPATIBLE)) return srcForFileId("anthropic-m");
+  if (id.startsWith(OPENAI_COMPATIBLE)) {
+    const type = apiType || (id.startsWith(`${OPENAI_COMPATIBLE}-responses`) ? "responses" : "chat");
+    return srcForFileId(type === "responses" ? "oai-r" : "oai-cc");
+  }
+  return getProviderIconSrc(providerId);
 }
 
 /** Call from img onError so later mounts skip the request. */

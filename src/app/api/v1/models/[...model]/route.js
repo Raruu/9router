@@ -1,4 +1,5 @@
 import { buildModelsList } from "../route.js";
+import { getSettings } from "@/lib/localDb";
 
 // URL slug → service kind(s). `web` covers both webSearch and webFetch.
 const KIND_SLUG_MAP = {
@@ -32,6 +33,17 @@ function json(data, options = {}) {
   });
 }
 
+// Keep single-model lookups consistent with GET /v1/models: a combo's
+// advertised limits must not depend on which endpoint answered.
+async function comboLimitStrategy() {
+  try {
+    const { comboLimitStrategy } = await getSettings();
+    return comboLimitStrategy;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * GET /v1/models/{kind} - OpenAI-compatible models list filtered by capability.
  * GET /v1/models/{provider}/{model} - OpenAI-compatible single model lookup.
@@ -43,15 +55,16 @@ export async function GET(_request, { params }) {
     const path = Array.isArray(model) ? model : [model];
     const identifier = path.filter(Boolean).join("/");
     const kindFilter = path.length === 1 ? KIND_SLUG_MAP[identifier] : null;
+    const limits = { comboLimitStrategy: await comboLimitStrategy() };
 
     if (kindFilter) {
-      const data = await buildModelsList(kindFilter);
+      const data = await buildModelsList(kindFilter, limits);
       return json({ object: "list", data });
     }
 
     // Match the same LLM catalog exposed by GET /v1/models. A catch-all
     // parameter is required because provider-prefixed IDs contain a slash.
-    const models = await buildModelsList([LLM_KIND]);
+    const models = await buildModelsList([LLM_KIND], limits);
     const matchedModel = models.find((candidate) => candidate.id === identifier);
 
     if (!matchedModel) {

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import PropTypes from "prop-types";
 import Modal from "./Modal";
 import ProviderIcon from "./ProviderIcon";
+import { getProviderIconSrcForId } from "@/shared/utils/providerIcon";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 
 // Order and labels for the capability object. Kept explicit rather than derived
@@ -365,18 +366,18 @@ export default function ModelDetailModal({ isOpen, onClose, modelId, comboName }
       {!loading && !error && detail && (
         <div className="flex min-w-0 flex-col gap-5">
           {/* Identity */}
-          <div className="flex min-w-0 items-start gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             {isCombo ? (
               <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
                 <span className="material-symbols-outlined text-[20px] text-primary">layers</span>
               </div>
             ) : (
               <ProviderIcon
-                providerId={detail.provider?.id}
+                src={getProviderIconSrcForId(detail.provider?.id)}
                 alt={detail.provider?.name || ""}
                 size={36}
                 className="size-9 shrink-0 rounded-lg object-contain"
-                fallbackText={(detail.provider?.name || detail.owned_by || "?").slice(0, 2).toUpperCase()}
+                fallbackText={(detail.owned_by || detail.provider?.name || "?").slice(0, 2).toUpperCase()}
               />
             )}
             <div className="min-w-0 flex-1">
@@ -449,8 +450,10 @@ export default function ModelDetailModal({ isOpen, onClose, modelId, comboName }
                 <>
                   <MembersTable members={detail.members} />
                   <p className="text-[10px] text-text-muted">
-                    A combo advertises what its best member delivers: capabilities union, limits
-                    take the maximum. Prices are per 1M tokens.
+                    {detail.comboLimitStrategy === "min"
+                      ? "A combo advertises its smallest member's limits: capabilities still union, numeric limits take the minimum (set on the Combos page)."
+                      : "A combo advertises what its best member delivers: capabilities union, limits take the maximum."}{" "}
+                    Prices are per 1M tokens.
                   </p>
                 </>
               ) : (
