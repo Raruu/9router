@@ -75,7 +75,7 @@ export function comboCapabilities(combo, ctx, depth = 0, visited = new Set()) {
     const memberCapabilities = (combo?.models || [])
       .map((member) => comboMemberCapabilities(member, ctx, depth, visited))
       .filter(Boolean);
-    return mergeMemberCapabilities(memberCapabilities);
+    return mergeMemberCapabilities(memberCapabilities, ctx?.comboLimitStrategy);
   } finally {
     if (name !== null) visited.delete(name);
   }
@@ -101,8 +101,12 @@ function unionThinkingRanges(ranges) {
 //
 // The tradeoff: a prompt sized for the best member hard-fails if routing falls
 // through to a smaller one. Fallback is by availability, so keep members within
-// a comparable size class.
-export function mergeMemberCapabilities(memberCapabilities) {
+// a comparable size class. The `comboLimitStrategy` setting (dashboard →
+// Combos) lets the user flip the numeric limits to the smallest member instead,
+// so clients sizing prompts off context_length never over-fill a fallback.
+// Limits-only by design: AND-ing booleans would recreate the masked-vision bug
+// above, and `tools` defaults true so intersection could zero out tool calling.
+export function mergeMemberCapabilities(memberCapabilities, limitStrategy = "max") {
   if (memberCapabilities.length === 0) return null;
 
   // A budget range only means something alongside the format it belongs to, so
@@ -115,7 +119,11 @@ export function mergeMemberCapabilities(memberCapabilities) {
     const values = memberCapabilities.map((caps) => caps[key]);
     if (key === "contextWindow" || key === "maxOutput") {
       const numbers = values.filter((value) => Number.isFinite(value));
-      merged[key] = numbers.length > 0 ? Math.max(...numbers) : DEFAULT_CAPABILITIES[key];
+      if (numbers.length === 0) {
+        merged[key] = DEFAULT_CAPABILITIES[key];
+      } else {
+        merged[key] = limitStrategy === "min" ? Math.min(...numbers) : Math.max(...numbers);
+      }
     } else if (key === "thinkingRange") {
       merged[key] = sharesThinkingFormat ? unionThinkingRanges(values) : null;
     } else if (values.every((value) => typeof value === "boolean")) {

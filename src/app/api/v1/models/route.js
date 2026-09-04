@@ -267,6 +267,7 @@ export { mergeMemberCapabilities };
  * @param {object} [options]
  * @param {boolean} [options.skipDynamicFetch] - Skip upstream /models fetches.
  * @param {"all"|"combos"|"models"} [options.exposure] - Which entries to advertise.
+ * @param {"max"|"min"} [options.comboLimitStrategy] - Which member's numeric limits a combo advertises.
  */
 export async function buildModelsList(kindFilter, options = {}) {
   // When this header is present, the /v1/models request came from another
@@ -334,6 +335,7 @@ export async function buildModelsList(kindFilter, options = {}) {
     providerIdByPrefix: buildProviderIdByPrefix(connections),
     modelAliases,
     comboByName,
+    comboLimitStrategy: options.comboLimitStrategy,
   };
 
   // Combos first (filtered by kind). Web combos expose `kind` so AI knows search vs fetch.
@@ -615,18 +617,26 @@ export async function OPTIONS() {
 // combos-only setting would leave every CLI Tools picker empty. A valid CLI
 // token already unlocks /api/settings and every provider route, so exempting it
 // from a display filter grants nothing new.
-async function resolveExposure(request) {
+// comboLimitStrategy is NOT exempted: CLI clients are exactly the ones that
+// size prompts from context_length, so the setting applies to them too.
+async function resolveCatalogOptions(request) {
+  let settings = {};
   try {
-    if (await hasValidCliToken(request)) return "all";
+    settings = await getSettings();
+  } catch {
+    settings = {};
+  }
+  try {
+    if (await hasValidCliToken(request)) {
+      return { exposure: "all", comboLimitStrategy: settings.comboLimitStrategy };
+    }
   } catch {
     // Token check failed (no machine-id file yet) — fall through to the setting.
   }
-  try {
-    const { modelsExposure } = await getSettings();
-    return modelsExposure;
-  } catch {
-    return "all";
-  }
+  return {
+    exposure: settings.modelsExposure,
+    comboLimitStrategy: settings.comboLimitStrategy,
+  };
 }
 
 /**
@@ -637,8 +647,8 @@ export async function GET(request) {
   try {
     // Detect cross-instance recursive /models fetch (another 9router fetching our /models)
     const skipDynamicFetch = request?.headers?.get(INTERNAL_MODELS_FETCH_HEADER) === "1";
-    const exposure = await resolveExposure(request);
-    const data = await buildModelsList([LLM_KIND], { skipDynamicFetch, exposure });
+    const { exposure, comboLimitStrategy } = await resolveCatalogOptions(request);
+    const data = await buildModelsList([LLM_KIND], { skipDynamicFetch, exposure, comboLimitStrategy });
     return Response.json({ object: "list", data }, {
       headers: { "Access-Control-Allow-Origin": "*" },
     });

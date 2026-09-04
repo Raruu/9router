@@ -20,6 +20,11 @@ export const DEFAULT_SETTINGS = {
   // Echo the requested combo name in the response `model` field instead of the
   // upstream member that served it.
   comboNameInResponse: false,
+  // Which member's numeric limits (contextWindow/maxOutput) a combo advertises
+  // on /v1/models and the model-info modal: "max" = largest member, "min" =
+  // smallest. Advertised only — routing/clamping always use the member that
+  // actually served the request.
+  comboLimitStrategy: "max",
   // What GET /v1/models advertises: "all" | "combos" | "models".
   modelsExposure: "all",
   capacityAdapter: {

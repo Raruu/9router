@@ -248,6 +248,23 @@ describe("GET /api/models/detail — combos", () => {
 
     expect(res.body.capabilities.contextWindow).toBe(Math.max(...windows));
     expect(res.body.context_length).toBe(res.body.capabilities.contextWindow);
+    expect(res.body.comboLimitStrategy).toBe("max");
+  });
+
+  it("advertises the smallest member window under comboLimitStrategy min", async () => {
+    mocks.getSettings.mockResolvedValue({ comboStrategies: {}, comboLimitStrategy: "min" });
+    mocks.getCombos.mockResolvedValue([
+      { name: "narrow", kind: "llm", models: ["anthropic/claude-opus-4.6", "openai/gpt-5.4"] },
+    ]);
+
+    const res = await GET(req("combo=narrow"));
+    const windows = res.body.members.map((m) => m.capabilities.contextWindow);
+
+    expect(windows.length).toBe(2);
+    expect(res.body.capabilities.contextWindow).toBe(Math.min(...windows));
+    expect(res.body.capabilities.maxOutput).toBe(Math.min(...res.body.members.map((m) => m.capabilities.maxOutput)));
+    expect(res.body.context_length).toBe(res.body.capabilities.contextWindow);
+    expect(res.body.comboLimitStrategy).toBe("min");
   });
 
   it("keeps an unresolvable member as a flagged row instead of dropping it", async () => {

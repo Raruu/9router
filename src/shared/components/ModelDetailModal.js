@@ -450,8 +450,10 @@ export default function ModelDetailModal({ isOpen, onClose, modelId, comboName }
                 <>
                   <MembersTable members={detail.members} />
                   <p className="text-[10px] text-text-muted">
-                    A combo advertises what its best member delivers: capabilities union, limits
-                    take the maximum. Prices are per 1M tokens.
+                    {detail.comboLimitStrategy === "min"
+                      ? "A combo advertises its smallest member's limits: capabilities still union, numeric limits take the minimum (set on the Combos page)."
+                      : "A combo advertises what its best member delivers: capabilities union, limits take the maximum."}{" "}
+                    Prices are per 1M tokens.
                   </p>
                 </>
               ) : (

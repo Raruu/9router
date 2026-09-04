@@ -15,6 +15,13 @@ import { SORT_OPTIONS, readStoredSort, writeStoredSort, sortCombos, matchComboSe
 // Validate combo name: only a-z, A-Z, 0-9, -, _
 const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
 
+// Which member's numeric limits (contextWindow/maxOutput) a combo advertises.
+// Booleans always union — see mergeMemberCapabilities in open-sse.
+const COMBO_LIMIT_OPTIONS = [
+  { value: "max", label: "Largest member (max)" },
+  { value: "min", label: "Smallest member (min)" },
+];
+
 // Capacity adapter: global fallback pools of models per input-modality capability.
 // A request needing a capability the target model/combo lacks switches straight
 // to the first enabled model here instead of erroring or dropping the data.
@@ -54,6 +61,7 @@ export default function CombosPage() {
   const [activeProviders, setActiveProviders] = useState([]);
   const [comboStrategies, setComboStrategies] = useState({});
   const [comboNameInResponse, setComboNameInResponse] = useState(false);
+  const [comboLimitStrategy, setComboLimitStrategy] = useState("max");
   const [capacityAdapter, setCapacityAdapter] = useState(EMPTY_CAPACITY_ADAPTER);
   const { getCaps } = useModelCaps();
   const [confirmState, setConfirmState] = useState(null);
@@ -100,6 +108,7 @@ export default function CombosPage() {
       }
       setComboStrategies(settingsData.comboStrategies || {});
       setComboNameInResponse(!!settingsData.comboNameInResponse);
+      setComboLimitStrategy(settingsData.comboLimitStrategy === "min" ? "min" : "max");
       const rawAdapter = settingsData.capacityAdapter || {};
       const normalized = {};
       for (const cap of CAPACITY_ADAPTER_CAPS) {
@@ -128,6 +137,19 @@ export default function CombosPage() {
       });
     } catch (error) {
       console.log("Error updating combo name in response:", error);
+    }
+  };
+
+  const handleSetComboLimitStrategy = async (next) => {
+    setComboLimitStrategy(next);
+    try {
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comboLimitStrategy: next }),
+      });
+    } catch (error) {
+      console.log("Error updating combo limit strategy:", error);
     }
   };
 
@@ -252,6 +274,27 @@ export default function CombosPage() {
             onChange={handleSetComboNameInResponse}
             aria-label="Return combo name in response"
           />
+        </div>
+        <div className="mt-4 pt-4 border-t border-border flex items-start sm:items-center justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">Combo context size</p>
+            <p className="text-xs text-text-muted mt-0.5">
+              Which member&apos;s context window and max output a combo advertises on{" "}
+              <code className="font-mono">/v1/models</code> and in model info. Largest matches the
+              headline model but lets an oversized prompt hard-fail on a smaller fallback;
+              smallest never over-fills, at the cost of under-using it. Advertised only — requests
+              always clamp to the member that actually served them.
+            </p>
+          </div>
+          <div className="w-full sm:w-[220px] shrink-0">
+            <Select
+              options={COMBO_LIMIT_OPTIONS}
+              value={comboLimitStrategy}
+              onChange={(e) => handleSetComboLimitStrategy(e.target.value)}
+              selectClassName="py-1.5 text-xs"
+              aria-label="Combo advertised limits strategy"
+            />
+          </div>
         </div>
       </Card>
 

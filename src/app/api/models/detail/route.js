@@ -155,6 +155,7 @@ async function comboDetail(combo, ctx) {
   // numbers and the table can never disagree.
   const capabilities = mergeMemberCapabilities(
     members.map((m) => m.capabilities).filter(Boolean),
+    ctx.comboLimitStrategy,
   );
 
   const detail = {
@@ -165,6 +166,7 @@ async function comboDetail(combo, ctx) {
     name: combo.name,
     kind: combo.kind || LLM_KIND,
     strategy: ctx.comboStrategies?.[combo.name] || null,
+    comboLimitStrategy: ctx.comboLimitStrategy === "min" ? "min" : "max",
     capabilities,
     members,
   };
@@ -204,6 +206,7 @@ async function buildContext() {
     modelAliases,
     comboByName,
     comboStrategies: settings?.comboStrategies || {},
+    comboLimitStrategy: settings?.comboLimitStrategy,
   };
 }
 

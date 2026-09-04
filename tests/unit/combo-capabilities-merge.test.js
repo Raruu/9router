@@ -13,16 +13,53 @@ const caps = (fullModel) => {
   return getCapabilitiesForModel(fullModel.slice(0, slash), fullModel.slice(slash + 1));
 };
 
+// Members chosen so the windows actually differ (glm-5.3-flash 1M/131072,
+// gpt-5.4 400k/128000, glm-5.3-free + glm-5.2 1M/128000); expectations are
+// computed from the live tables so table drift cannot silently vacuous-ify
+// the direction assertions — the guard fails loudly if they ever converge.
+const MEMBERS = ["vs-llm/glm-5.3-flash", "openai/gpt-5.4", "nara-router/glm-5.3-free"];
+
 describe("combo capability merge", () => {
   it("reports the largest member window, not the smallest", () => {
-    const merged = mergeMemberCapabilities([
-      caps("vs-llm/glm-5.3-flash"),      // 1M / 131072
-      caps("nara-router/glm-5.3-free"),  // 200k / 128000, text-only
-      caps("cbai/glm-5.2"),              // 200k / 128000, text-only
-    ]);
+    const memberCaps = MEMBERS.map(caps);
+    const windows = memberCaps.map((c) => c.contextWindow);
+    expect(new Set(windows).size).toBeGreaterThan(1);
 
-    expect(merged.contextWindow).toBe(1000000);
-    expect(merged.maxOutput).toBe(131072);
+    const merged = mergeMemberCapabilities(memberCaps);
+    expect(merged.contextWindow).toBe(Math.max(...windows));
+    expect(merged.maxOutput).toBe(Math.max(...memberCaps.map((c) => c.maxOutput)));
+  });
+
+  it("reports the smallest member window under the min strategy", () => {
+    const memberCaps = MEMBERS.map(caps);
+
+    const merged = mergeMemberCapabilities(memberCaps, "min");
+    expect(merged.contextWindow).toBe(Math.min(...memberCaps.map((c) => c.contextWindow)));
+    expect(merged.maxOutput).toBe(Math.min(...memberCaps.map((c) => c.maxOutput)));
+  });
+
+  it("keeps booleans unioned under the min strategy — limits only, by design", () => {
+    const merged = mergeMemberCapabilities(
+      [
+        caps("vs-llm/glm-5.3-flash"),     // multimodal, tools, reasoning
+        caps("cbai/glm-5.2"),             // text-only
+      ],
+      "min",
+    );
+
+    expect(merged.vision).toBe(true);
+    expect(merged.pdf).toBe(true);
+    expect(merged.tools).toBe(true);
+    expect(merged.reasoning).toBe(true);
+  });
+
+  it("falls back to max for anything that is not \"min\"", () => {
+    const memberCaps = MEMBERS.map(caps);
+    for (const strategy of [undefined, null, "", "MAX", "bogus"]) {
+      expect(mergeMemberCapabilities(memberCaps, strategy).contextWindow).toBe(
+        mergeMemberCapabilities(memberCaps, "max").contextWindow,
+      );
+    }
   });
 
   it("unions modalities so a multimodal member is not masked by a text-only one", () => {
