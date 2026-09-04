@@ -1,10 +1,12 @@
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { getRetentionCutoff } from "./usageRepo.js";
 
 const DEFAULT_MAX_RECORDS = 200;
 const DEFAULT_BATCH_SIZE = 20;
 const DEFAULT_FLUSH_INTERVAL_MS = 5000;
 const DEFAULT_MAX_JSON_SIZE = 5 * 1024;
+const DEFAULT_RETENTION_DAYS = 60;
 const CONFIG_CACHE_TTL_MS = 5000;
 
 let cachedConfig = null;
@@ -13,33 +15,37 @@ let cachedConfigTs = 0;
 async function getObservabilityConfig() {
   if (cachedConfig && (Date.now() - cachedConfigTs) < CONFIG_CACHE_TTL_MS) return cachedConfig;
   try {
-    const { getSettings } = await import("./settingsRepo.js");
-    const settings = await getSettings();
-    const envRequestLogs = process.env.ENABLE_REQUEST_LOGS;
-    if (envRequestLogs !== undefined) {
-      const enabled = envRequestLogs.toLowerCase() === "true";
-      cachedConfig = {
-        enabled,
-        maxRecords: settings.observabilityMaxRecords || parseInt(process.env.OBSERVABILITY_MAX_RECORDS || String(DEFAULT_MAX_RECORDS), 10),
-        batchSize: settings.observabilityBatchSize || parseInt(process.env.OBSERVABILITY_BATCH_SIZE || String(DEFAULT_BATCH_SIZE), 10),
-        flushIntervalMs: settings.observabilityFlushIntervalMs || parseInt(process.env.OBSERVABILITY_FLUSH_INTERVAL_MS || String(DEFAULT_FLUSH_INTERVAL_MS), 10),
-        maxJsonSize: (settings.observabilityMaxJsonSize || parseInt(process.env.OBSERVABILITY_MAX_JSON_SIZE || "5", 10)) * 1024,
-      };
-      cachedConfigTs = Date.now();
-      return cachedConfig;
-    }
-    const envFallback = process.env.OBSERVABILITY_ENABLED !== "false";
-    const uiFlag = typeof settings.enableObservability === "boolean";
-    const enabled = uiFlag
-      ? settings.enableObservability
-      : envFallback;
-
+    const { getRawSettings, DEFAULT_SETTINGS } = await import("./settingsRepo.js");
+    const raw = await getRawSettings();
+    const has = (key) => !!raw && Object.prototype.hasOwnProperty.call(raw, key);
+    const num = (key, envName, min = 1) => {
+      if (has(key)) {
+        const stored = Number(raw[key]);
+        if (Number.isFinite(stored) && stored >= min) return stored;
+      }
+      const envRaw = process.env[envName];
+      if (envRaw !== undefined && envRaw !== "") {
+        const env = Number(envRaw);
+        if (Number.isFinite(env) && env >= min) return env;
+      }
+      return DEFAULT_SETTINGS[key];
+    };
     cachedConfig = {
-      enabled,
-      maxRecords: settings.observabilityMaxRecords || parseInt(process.env.OBSERVABILITY_MAX_RECORDS || String(DEFAULT_MAX_RECORDS), 10),
-      batchSize: settings.observabilityBatchSize || parseInt(process.env.OBSERVABILITY_BATCH_SIZE || String(DEFAULT_BATCH_SIZE), 10),
-      flushIntervalMs: settings.observabilityFlushIntervalMs || parseInt(process.env.OBSERVABILITY_FLUSH_INTERVAL_MS || String(DEFAULT_FLUSH_INTERVAL_MS), 10),
-      maxJsonSize: (settings.observabilityMaxJsonSize || parseInt(process.env.OBSERVABILITY_MAX_JSON_SIZE || "5", 10)) * 1024,
+      // Precedence: UI toggle (when stored) > OBSERVABILITY_ENABLED env > opt-in default.
+      // Raw read, not getSettings(): mergeWithDefaults stamps the default into every
+      // result, which made the env fallback unreachable under a typeof check.
+      // ENABLE_REQUEST_LOGS is deliberately not consulted — it gates the open-sse
+      // file logger (open-sse/utils/requestLogger.js), not this table.
+      enabled: has("enableObservability")
+        ? !!raw.enableObservability
+        : process.env.OBSERVABILITY_ENABLED !== undefined
+          ? String(process.env.OBSERVABILITY_ENABLED).toLowerCase() === "true"
+          : !!DEFAULT_SETTINGS.enableObservability,
+      maxRecords: num("observabilityMaxRecords", "OBSERVABILITY_MAX_RECORDS"),
+      batchSize: num("observabilityBatchSize", "OBSERVABILITY_BATCH_SIZE"),
+      flushIntervalMs: num("observabilityFlushIntervalMs", "OBSERVABILITY_FLUSH_INTERVAL_MS"),
+      maxJsonSize: num("observabilityMaxJsonSize", "OBSERVABILITY_MAX_JSON_SIZE") * 1024,
+      retentionDays: num("observabilityRetentionDays", "OBSERVABILITY_RETENTION_DAYS", 0),
     };
   } catch {
     cachedConfig = {
@@ -48,6 +54,7 @@ async function getObservabilityConfig() {
       batchSize: DEFAULT_BATCH_SIZE,
       flushIntervalMs: DEFAULT_FLUSH_INTERVAL_MS,
       maxJsonSize: DEFAULT_MAX_JSON_SIZE,
+      retentionDays: DEFAULT_RETENTION_DAYS,
     };
   }
   cachedConfigTs = Date.now();
@@ -122,6 +129,13 @@ async function flushToDatabase() {
             `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, status, data) VALUES(?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET timestamp = excluded.timestamp, provider = excluded.provider, model = excluded.model, connectionId = excluded.connectionId, status = excluded.status, data = excluded.data`,
             [record.id, record.timestamp, record.provider, record.model, record.connectionId, record.status, stringifyJson(record)]
           );
+        }
+
+        if (config.retentionDays > 0) {
+          const cutoff = getRetentionCutoff(config.retentionDays);
+          if (cutoff) {
+            db.run(`DELETE FROM requestDetails WHERE timestamp < ?`, [cutoff]);
+          }
         }
 
         const cnt = db.get(`SELECT COUNT(*) as c FROM requestDetails`);

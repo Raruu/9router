@@ -73,6 +73,15 @@ function getPeriodCutoff(period) {
   return startOfLocalDay(days - 1).toISOString();
 }
 
+// Inclusive lower bound for an N-day retention window — local midnight N-1 days
+// back, matching getPeriodCutoff("60d") so requestDetails retention and the
+// Overview period selector agree on where a day starts. null = disable.
+export function getRetentionCutoff(days) {
+  const n = Number(days);
+  if (!Number.isFinite(n) || n < 1) return null;
+  return startOfLocalDay(Math.floor(n) - 1).toISOString();
+}
+
 function addToCounter(target, key, values) {
   if (!target[key]) target[key] = { requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0 };
   target[key].requests += values.requests || 1;
