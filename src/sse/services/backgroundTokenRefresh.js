@@ -111,23 +111,32 @@ export async function runBackgroundTokenRefreshTick(deps = {}) {
       ids: due.map((c) => c.id).filter(Boolean),
     });
 
-    await Promise.allSettled(
-      due.map(async (conn) => {
-        try {
-          await refresh(conn);
-          log.info("BG_TOKEN_REFRESH", "Connection refresh finished", {
-            id: conn.id,
-            provider: conn.provider,
-          });
-        } catch (err) {
-          log.warn("BG_TOKEN_REFRESH", "Connection refresh failed (swallowed)", {
-            id: conn?.id,
-            provider: conn?.provider,
-            error: err?.message ?? String(err),
-          });
-        }
-      })
-    );
+    const isSensitiveProvider = (p) => p === "antigravity" || p === "gemini-cli";
+    const baseSensitiveDelay = Number(process.env.BG_REFRESH_GOOGLE_DELAY_MS) || 12_000;
+    const baseNormalDelay = Number(process.env.BG_REFRESH_DELAY_MS) || 1_500;
+
+    for (const conn of due) {
+      try {
+        await refresh(conn);
+        log.info("BG_TOKEN_REFRESH", "Connection refresh finished", {
+          id: conn.id,
+          email: conn.email || conn.name || conn.id,
+          provider: conn.provider,
+        });
+      } catch (err) {
+        log.warn("BG_TOKEN_REFRESH", "Connection refresh failed (swallowed)", {
+          id: conn?.id,
+          email: conn?.email || conn?.name || conn?.id,
+          provider: conn?.provider,
+          error: err?.message ?? String(err),
+        });
+      }
+
+      // Sequential delay between accounts to prevent bursting upstream providers (especially Google Cloud)
+      const baseDelay = isSensitiveProvider(conn.provider) ? baseSensitiveDelay : baseNormalDelay;
+      const jitter = isSensitiveProvider(conn.provider) ? Math.floor(Math.random() * 4000) : 200;
+      await new Promise((res) => setTimeout(res, baseDelay + jitter));
+    }
   } catch (err) {
     log.warn("BG_TOKEN_REFRESH", "Tick failed (swallowed)", {
       error: err?.message ?? String(err),
