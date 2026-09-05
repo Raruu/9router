@@ -50,6 +50,9 @@ export const DEFAULT_SETTINGS = {
   samlAttributeEmail: "email",
   samlAttributeName: "name",
   enableObservability: false,
+  // When false, /api/usage/request-details replaces stored payloads with
+  // { redacted: true } so a shared dashboard cannot read conversations.
+  observabilityShowBodies: false,
   observabilityMaxRecords: 20000,
   observabilityRetentionDays: 60,
   observabilityBatchSize: 20,

@@ -51,6 +51,13 @@ function getProviderName(providerId, cache) {
   return providerConfig?.name || providerId;
 }
 
+const REDACTED_HINT = "Payloads hidden — enable 'Show request bodies' in Settings → Observability.";
+
+function RedactedHint({ show }) {
+  if (!show) return null;
+  return <p className="text-xs text-text-muted mt-2">{REDACTED_HINT}</p>;
+}
+
 function CollapsibleSection({ title, children, defaultOpen = false, icon = null }) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
   
@@ -460,6 +467,7 @@ export default function RequestDetailsTab() {
                 <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
                   {JSON.stringify(selectedDetail.request, null, 2)}
                 </pre>
+                <RedactedHint show={selectedDetail.request?.redacted === true} />
               </CollapsibleSection>
 
               {selectedDetail.providerRequest && (
@@ -467,6 +475,7 @@ export default function RequestDetailsTab() {
                   <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
                     {JSON.stringify(selectedDetail.providerRequest, null, 2)}
                   </pre>
+                  <RedactedHint show={selectedDetail.providerRequest?.redacted === true} />
                 </CollapsibleSection>
               )}
 
@@ -478,6 +487,7 @@ export default function RequestDetailsTab() {
                       : selectedDetail.providerResponse
                     }
                   </pre>
+                  <RedactedHint show={selectedDetail.providerResponse?.redacted === true} />
                 </CollapsibleSection>
               )}
               
@@ -500,6 +510,7 @@ export default function RequestDetailsTab() {
                 <pre className="max-h-[300px] max-w-full overflow-auto rounded-lg border border-black/5 bg-black/5 p-3 font-mono text-xs text-text-main dark:border-white/5 dark:bg-white/5 sm:p-4">
                   {selectedDetail.response?.content || "[No content]"}
                 </pre>
+                <RedactedHint show={selectedDetail.response?.redacted === true} />
               </CollapsibleSection>
             </div>
           </div>

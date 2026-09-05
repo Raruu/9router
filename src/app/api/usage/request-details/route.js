@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRequestDetails } from "@/lib/usageDb";
+import { getSettings } from "@/lib/localDb";
 
 /**
  * GET /api/usage/request-details
@@ -48,20 +49,30 @@ export async function GET(request) {
     
     const result = await getRequestDetails(filter);
 
-    // Redact conversation payloads: the stored details include full request
-    // bodies (user prompts, tool calls) and provider responses. Returning them
-    // wholesale lets any dashboard-authenticated user (or, if requireLogin is
-    // disabled, anyone) read every user's conversation history. Keep the
-    // metadata (model, tokens, latency, status) but drop message content.
-    const redactedDetails = (result.details || []).map((d) => {
-      const redacted = { ...d };
-      for (const key of ["request", "providerRequest", "providerResponse", "response"]) {
-        if (redacted[key] !== undefined) {
-          redacted[key] = { redacted: true };
+    // Redact conversation payloads by default: the stored details include full
+    // request bodies (user prompts, tool calls) and provider responses. Serving
+    // them wholesale lets any dashboard-authenticated user (or, if requireLogin
+    // is disabled, anyone) read every user's conversation history. Keep the
+    // metadata (model, tokens, latency, status) and drop message content unless
+    // the owner opted in via Settings -> Observability -> "Show request bodies"
+    // (single-user instances that never share the dashboard).
+    let observabilityShowBodies = false;
+    try {
+      ({ observabilityShowBodies } = await getSettings());
+    } catch {
+      // Settings unavailable -> stay redacted (fail closed).
+    }
+    const redactedDetails = observabilityShowBodies === true
+      ? result.details || []
+      : (result.details || []).map((d) => {
+        const redacted = { ...d };
+        for (const key of ["request", "providerRequest", "providerResponse", "response"]) {
+          if (redacted[key] !== undefined) {
+            redacted[key] = { redacted: true };
+          }
         }
-      }
-      return redacted;
-    });
+        return redacted;
+      });
 
     return NextResponse.json({ ...result, details: redactedDetails });
   } catch (error) {

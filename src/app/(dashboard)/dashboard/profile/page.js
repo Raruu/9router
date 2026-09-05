@@ -658,6 +658,21 @@ export default function ProfilePage() {
     }
   };
 
+  const updateObservabilityShowBodies = async (enabled) => {
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ observabilityShowBodies: enabled }),
+      });
+      if (res.ok) {
+        setSettings(prev => ({ ...prev, observabilityShowBodies: enabled }));
+      }
+    } catch (err) {
+      console.error("Failed to update observabilityShowBodies:", err);
+    }
+  };
+
   const reloadSettings = async () => {
     try {
       const res = await fetch("/api/settings");
@@ -749,6 +764,7 @@ export default function ProfilePage() {
   };
 
   const observabilityEnabled = settings.enableObservability === true;
+  const observabilityShowBodies = settings.observabilityShowBodies === true;
 
   const handleShutdown = async () => {
     setIsShuttingDown(true);
@@ -1658,6 +1674,20 @@ export default function ProfilePage() {
             <Toggle
               checked={observabilityEnabled}
               onChange={updateObservabilityEnabled}
+              disabled={loading}
+            />
+          </div>
+          <div className="flex items-start sm:items-center justify-between gap-4 mt-4 pt-4 border-t border-border">
+            <div className="flex-1 min-w-0">
+              <p className="font-medium text-sm sm:text-base">Show request bodies</p>
+              <p className="text-xs sm:text-sm text-text-muted">
+                Serve full request/response payloads in request details instead of
+                redacting them. Disable this if the dashboard is shared with others.
+              </p>
+            </div>
+            <Toggle
+              checked={observabilityShowBodies}
+              onChange={updateObservabilityShowBodies}
               disabled={loading}
             />
           </div>
