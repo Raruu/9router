@@ -152,6 +152,8 @@ describe("GET /v1/models advertises the setting end-to-end", () => {
     const combo = data.find((e) => e.id === "mixed");
     expect(combo.context_length).toBe(Math.max(...windows));
     expect(combo.max_completion_tokens).toBe(Math.max(...memberCaps().map((c) => c.maxOutput)));
+    expect(combo.max_input_tokens).toBe(Math.max(...windows));
+    expect(combo.max_output_tokens).toBe(Math.max(...memberCaps().map((c) => c.maxOutput)));
   });
 
   it("min advertises the smallest member window", async () => {
@@ -160,6 +162,8 @@ describe("GET /v1/models advertises the setting end-to-end", () => {
     const combo = data.find((e) => e.id === "mixed");
     expect(combo.context_length).toBe(Math.min(...windows));
     expect(combo.max_completion_tokens).toBe(Math.min(...memberCaps().map((c) => c.maxOutput)));
+    expect(combo.max_input_tokens).toBe(Math.min(...windows));
+    expect(combo.max_output_tokens).toBe(Math.min(...memberCaps().map((c) => c.maxOutput)));
   });
 
   it("mergeWithDefaults supplies max when the stored settings lack the key", () => {

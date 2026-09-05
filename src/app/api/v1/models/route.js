@@ -354,8 +354,14 @@ export async function buildModelsList(kindFilter, options = {}) {
       const caps = comboCapabilities(combo, capabilityContext);
       if (caps) {
         entry.capabilities = caps;
-        if (Number.isFinite(caps.contextWindow)) entry.context_length = caps.contextWindow;
-        if (Number.isFinite(caps.maxOutput)) entry.max_completion_tokens = caps.maxOutput;
+        if (Number.isFinite(caps.contextWindow)) {
+          entry.context_length = caps.contextWindow;
+          entry.max_input_tokens = caps.contextWindow;
+        }
+        if (Number.isFinite(caps.maxOutput)) {
+          entry.max_completion_tokens = caps.maxOutput;
+          entry.max_output_tokens = caps.maxOutput;
+        }
       }
     }
     models.push(entry);
@@ -550,6 +556,9 @@ export async function buildModelsList(kindFilter, options = {}) {
         // 1.05M never reaches its compaction threshold and hard-fails upstream.
         // Emitted at top level because not every client recurses into nested
         // objects; the camelCase `capabilities` block stays for compatibility.
+        // `max_input_tokens` / `max_output_tokens` are plain synonyms of
+        // `context_length` / `max_completion_tokens` for clients that only look
+        // for the more explicit token names.
         if (kind === LLM_KIND || allowAsLlm) {
           let contextWindow = caps?.contextWindow;
           let maxOutput = caps?.maxOutput;
@@ -561,8 +570,14 @@ export async function buildModelsList(kindFilter, options = {}) {
             if (!Number.isFinite(contextWindow)) contextWindow = fallback.contextWindow;
             if (!Number.isFinite(maxOutput)) maxOutput = fallback.maxOutput;
           }
-          if (Number.isFinite(contextWindow)) model.context_length = contextWindow;
-          if (Number.isFinite(maxOutput)) model.max_completion_tokens = maxOutput;
+          if (Number.isFinite(contextWindow)) {
+            model.context_length = contextWindow;
+            model.max_input_tokens = contextWindow;
+          }
+          if (Number.isFinite(maxOutput)) {
+            model.max_completion_tokens = maxOutput;
+            model.max_output_tokens = maxOutput;
+          }
         }
         models.push(model);
       }
