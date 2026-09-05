@@ -83,6 +83,21 @@ describe("/v1/models exposure setting", () => {
   it("combos still inherit member capabilities when models are hidden", async () => {
     const [combo] = await buildModelsList(["llm"], { exposure: "combos" });
     expect(combo.context_length).toBeGreaterThan(0);
+    expect(combo.max_input_tokens).toBe(combo.context_length);
+    expect(combo.max_output_tokens).toBe(combo.max_completion_tokens);
+  });
+
+  // Provider models emit the same four top-level limit aliases as combos so
+  // clients can read either field name for either entry kind.
+  it("provider models emit max_input_tokens / max_output_tokens alongside the older aliases", async () => {
+    const data = await buildModelsList(["llm"], { exposure: "models" });
+    const model = data.find((e) => e.id === "glm/glm-5.2");
+
+    expect(model.capabilities.contextWindow).toBeGreaterThan(0);
+    expect(model.context_length).toBe(model.capabilities.contextWindow);
+    expect(model.max_input_tokens).toBe(model.context_length);
+    expect(model.max_completion_tokens).toBe(model.capabilities.maxOutput);
+    expect(model.max_output_tokens).toBe(model.max_completion_tokens);
   });
 });
 
