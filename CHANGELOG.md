@@ -1,3 +1,40 @@
+# v0.5.65-3 (2026-09-05)
+
+## Features
+- **Usage**: new "Show request bodies" toggle in Settings → Observability.
+  Request details always rendered `{"redacted": true}` in every payload section:
+  the details endpoint strips request/response bodies by default so a shared
+  dashboard cannot be used to read conversations. `observabilityShowBodies`
+  (default off, and it fails closed when settings cannot be read) lifts the
+  redaction, and redacted sections now say where the switch lives. Storage is
+  unchanged — bodies were always persisted
+- **Models**: `/v1/models` and `/v1/models/{id}` also emit `max_input_tokens`
+  and `max_output_tokens` alongside `context_length` / `max_completion_tokens`,
+  for combos and provider models alike, so clients that only look for the
+  explicit token names stop guessing the window from the model name
+
+## Fixes
+- **Antigravity**: multi-account background refreshes burst Google's Cloud Code
+  endpoints from one IP, tripping anti-abuse shadow-restriction and repeated
+  `onboardUser … no project_id` failures. Refresh is now a sequential queue with
+  jittered pacing (`BG_REFRESH_GOOGLE_DELAY_MS`, 12s for antigravity/gemini-cli;
+  `BG_REFRESH_DELAY_MS`, 1.5s otherwise), project ids resolve lazily on the
+  request that needs one (`EAGER_PROJECT_ID_REFRESH=true` restores the old
+  behaviour), and `onboardUser` retries drop 5→2 with a 12s jittered backoff
+  (`ONBOARD_MAX_ATTEMPTS`, `ONBOARD_RETRY_DELAY_MS`). Refresh logs now name the
+  account. Based on #3813 by @hifzi
+- **Translator**: a `tool_result` / `role:"tool"` entry that arrived with no id
+  was copied through as `tool_use_id: undefined`, so Anthropic rejected the
+  request with `tool_result.tool_use_id: Field required` — the repair only
+  covered malformed ids, not absent ones — and the missing-result fixup then
+  spliced an empty duplicate beside the real result. The id is recovered by
+  pairing with the oldest unanswered tool call from the preceding assistant
+  turn, in the shared normalization pass, so claude, gemini, kiro and cursor
+  all benefit. Based on #3369 by @ntdatt812
+- **Fallback**: AiHubMix's free-tier refusal ("to prevent abuse … can only try
+  10 times") was not a rotation trigger, so the request failed instead of
+  backing off to the next account. Based on #3608 by @hussainbiedouh
+
 # v0.5.65-2 (2026-09-04)
 
 ## Features
