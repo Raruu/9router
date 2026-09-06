@@ -1,3 +1,33 @@
+# v0.5.69-1 (2026-09-05)
+
+Merged upstream v0.5.69 — see that section below for the full upstream
+changelog (GPT 6.0 Astra, the OpenCode Go executor and quota tracking, Gemini
+`thoughtSignature` replay, the Qoder catalog refresh, cowork-mcp SSRF guard,
+and more).
+
+## Fork notes
+- **Streaming**: upstream threads `credentials` through the SSE transform to
+  scope the new Gemini `thoughtSignature` store by session, taking the same
+  positional slot our `comboNameInResponse` rewrite uses. Both are kept —
+  `createSSETransformStreamWithLogger` now ends `…, customToolNames,
+  credentials, responseModelOverride`, so thought-signature replay and combo
+  naming work together instead of one silently eating the other's argument
+- **Antigravity**: upstream's own take on the refresh pacing we merged in
+  0.5.65-3 supersedes ours — same jittered sequential queue, but the delay is
+  skipped after the last account, `SENSITIVE_PROVIDERS` is a module-level Set,
+  and the sleep is injectable for tests. The scheduler's info/debug lines are
+  gone with it (upstream trimmed them as noise), and the fake-timer workaround
+  our test needed is no longer necessary
+- **Docker**: upstream's switch to Chinese mirrors (aliyun apk, npmmirror
+  registry) is deliberately not taken — we keep `dl-cdn.alpinelinux.org`, the
+  default registry and the `--mount=type=cache` npm cache so image builds stay
+  portable and incremental
+- Fork-only work carried through the merge unchanged: latency tracking and
+  chart, the model/combo info modal and `/api/models/detail`,
+  `comboNameInResponse`, combo capability inheritance and limit strategy, the
+  model-exposure setting, the observability show-bodies toggle, the
+  `max_input/output_tokens` aliases, and `@raruu/9router` packaging
+
 # v0.5.65-3 (2026-09-05)
 
 ## Features
@@ -88,6 +118,28 @@ model-marker fix, Groq quota tracking, and more).
   chart, the latency model filter, the model/combo info modal and
   `/api/models/detail`, `comboNameInResponse`, combo capability inheritance,
   the model-exposure setting, and `@raruu/9router` packaging
+
+# v0.5.69 (2026-09-05)
+
+## Features
+- **Codex**: add GPT 6.0 Astra (`gpt-6-astra`) with vision, thinking and search capabilities
+- **Usage**: add Claude Fable quota tracker support with weekly window normalization (`weekly fable (7d)`)
+- **Dashboard**: group Antigravity Gemini and Claude quotas in Quota Tracker, prune stale hidden keys
+- **OpenCode Go**: add `muse-spark-1.3-contributor` model and support parallel tool calls on Responses path (#3819)
+- **Providers & Models**: align CodeBuddy-CN catalog/capabilities with server config; add GPT-5.6 Sol, Terra, Luna image aliases on Codex (#3806); refresh Qoder catalog with capability mapping and image pass-through
+- **CLI tools**: replace Copilot MITM with VS Code extension setup guide
+- **Gemini**: persist and replay `thoughtSignature` scoped by session namespace
+
+## Fixes
+- **Claude**: normalize adaptive auto effort (`output_config.effort`) (#3792)
+- **Antigravity**: prevent Google anti-abuse rate limits during multi-account refresh (#3813)
+- **Anthropic-compatible**: forward Claude beta flags to nodes fronting Anthropic (#3797)
+- **Dashboard**: dynamic mode label for local/remote detection (#3801)
+- **Codex**: format reset credit API errors cleanly (#3778)
+- **Security**: guard cowork MCP tools probe against SSRF (#3783)
+- **OpenCode Go**: track OpenCode Go quota (#3791) and send stable session headers (#3800)
+- **Logger**: suppress noisy background token refresh logs
+- **CLI**: export packed `.tgz` directly into workspace root instead of parent directory
 
 # v0.5.65 (2026-09-03)
 

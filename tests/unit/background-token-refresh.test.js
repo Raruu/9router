@@ -129,12 +129,9 @@ describe("runBackgroundTokenRefreshTick", () => {
       "../../src/sse/services/backgroundTokenRefresh.js"
     );
 
-    // Since PR 3813 the tick sleeps (jittered) after every refreshed connection,
-    // including the last. Advance the fake clock so the tick can settle instead
-    // of hanging on the trailing setTimeout.
-    const tick = runBackgroundTokenRefreshTick({ loadConnections, refreshConnection });
-    await vi.advanceTimersByTimeAsync(60_000);
-    await expect(tick).resolves.toBeUndefined();
+    await expect(
+      runBackgroundTokenRefreshTick({ loadConnections, refreshConnection })
+    ).resolves.toBeUndefined();
 
     expect(loadConnections).toHaveBeenCalledTimes(1);
     expect(refreshConnection).toHaveBeenCalledTimes(1);
