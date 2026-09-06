@@ -535,6 +535,7 @@ Environment variables actively used by code:
 - Storage: `DATA_DIR`
 - Security hashing: `API_KEY_SECRET`, `MACHINE_ID_SALT`
 - Logging: `ENABLE_REQUEST_LOGS` (open-sse file logger), `OBSERVABILITY_ENABLED` + `OBSERVABILITY_RETENTION_DAYS` (requestDetails table, fallback/default respectively)
+- OAuth refresh pacing: `DISABLE_BACKGROUND_TOKEN_REFRESH` (scheduler kill switch), `BG_REFRESH_GOOGLE_DELAY_MS` + `BG_REFRESH_DELAY_MS` (sequential inter-account delay), `EAGER_PROJECT_ID_REFRESH` (literal `"true"` restores eager project-id fetch), `ONBOARD_MAX_ATTEMPTS` + `ONBOARD_RETRY_DELAY_MS`
 - Sync/cloud URLing: `NEXT_PUBLIC_BASE_URL`, `NEXT_PUBLIC_CLOUD_URL`
 - Outbound proxy: `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, `NO_PROXY` and lowercase variants
 - Platform/runtime helpers (not app-specific config): `APPDATA`, `NODE_ENV`, `PORT`, `HOSTNAME`
