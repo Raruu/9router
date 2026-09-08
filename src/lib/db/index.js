@@ -50,6 +50,13 @@ export {
   getPricing, getPricingForModel, updatePricing, resetPricing, resetAllPricing,
 } from "./repos/pricingRepo.js";
 
+// Model catalog
+export {
+  getOpenRouterModels, replaceOpenRouterModels, clearOpenRouterModels, deleteOpenRouterModel,
+  getUserModelCatalog, upsertUserModelCatalogRule, deleteUserModelCatalogRule,
+  replaceUserModelCatalog,
+} from "../modelCatalog/repository.js";
+
 // Disabled models
 export {
   getDisabledModels, getDisabledByProvider, disableModels, enableModels,
@@ -83,6 +90,8 @@ export async function exportDb() {
     customModels: [],
     mitmAlias: {},
     pricing: {},
+    userModelCatalog: db.all(`SELECT provider, pattern, name, data, createdAt, updatedAt FROM userModelCatalog ORDER BY provider, pattern`)
+      .map((r) => ({ ...r, data: parseJson(r.data, {}) })),
   };
 
   for (const r of db.all(`SELECT key, value FROM kv WHERE scope = 'modelAliases'`)) out.modelAliases[r.key] = parseJson(r.value);
@@ -108,6 +117,9 @@ export async function importDb(payload) {
     db.run(`DELETE FROM apiKeys`);
     db.run(`DELETE FROM combos`);
     db.run(`DELETE FROM kv WHERE scope IN ('modelAliases', 'customModels', 'mitmAlias', 'pricing')`);
+    db.run(`DELETE FROM userModelCatalog`);
+    // OpenRouter is reconstructible and deliberately excluded from exports.
+    db.run(`DELETE FROM openRouterModels`);
 
     // Settings
     if (payload.settings) {
@@ -160,8 +172,21 @@ export async function importDb(payload) {
     for (const [provider, models] of Object.entries(payload.pricing || {})) {
       db.run(`INSERT OR REPLACE INTO kv(scope, key, value) VALUES('pricing', ?, ?)`, [provider, stringifyJson(models || {})]);
     }
+    for (const rule of payload.userModelCatalog || []) {
+      const now = new Date().toISOString();
+      db.run(
+        `INSERT OR REPLACE INTO userModelCatalog(provider, pattern, name, data, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?)`,
+        [rule.provider || "*", rule.pattern, rule.name || null, stringifyJson(rule.data || {}), rule.createdAt || now, rule.updatedAt || now],
+      );
+    }
   });
 
+  const [{ refreshModelCatalogRuntime }, { invalidatePricingCache }] = await Promise.all([
+    import("../modelCatalog/runtime.js"),
+    import("./repos/pricingRepo.js"),
+  ]);
+  invalidatePricingCache();
+  await refreshModelCatalogRuntime();
   return await exportDb();
 }
 

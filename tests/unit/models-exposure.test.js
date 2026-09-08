@@ -1,4 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { afterEach, describe, it, expect, beforeEach, vi } from "vitest";
+import { createCatalogResolver } from "../../src/lib/modelCatalog/resolution.js";
+import { setCatalogSource } from "../../open-sse/providers/capabilities.js";
 
 // `modelsExposure` decides what GET /v1/models advertises. Combos and provider
 // models stay routable either way — the setting only narrows the catalog, so a
@@ -34,6 +36,8 @@ const { mergeWithDefaults } = await import("../../src/lib/db/repos/settingsRepo.
 
 const ids = (entries) => entries.map((e) => e.id);
 const comboEntries = (entries) => entries.filter((e) => e.owned_by === "combo");
+
+afterEach(() => setCatalogSource(null));
 
 describe("/v1/models exposure setting", () => {
   beforeEach(() => {
@@ -98,6 +102,38 @@ describe("/v1/models exposure setting", () => {
     expect(model.max_input_tokens).toBe(model.context_length);
     expect(model.max_completion_tokens).toBe(model.capabilities.maxOutput);
     expect(model.max_output_tokens).toBe(model.max_completion_tokens);
+  });
+
+  it("exposes referenced custom capabilities without an active connection", async () => {
+    const expected = { vision: true, pdf: true, audioInput: true, videoInput: true, imageOutput: true, audioOutput: true, tools: true, reasoning: true };
+    setCatalogSource(createCatalogResolver({
+      openRouterRules: [{ provider: "*", pattern: "*omni*", data: { capabilities: expected } }],
+      customModels: [{ providerAlias: "kr", id: "opaque", catalogRef: { source: "openrouter", provider: "*", pattern: "*omni*" } }],
+      normalizeProviderId: (provider) => provider === "kr" ? "kiro" : provider,
+    }));
+    mocks.getProviderConnections.mockResolvedValue([]);
+    mocks.getCustomModels.mockResolvedValue([{ providerAlias: "kr", id: "opaque", type: "llm" }]);
+
+    const data = await buildModelsList(["llm"], { exposure: "models" });
+    const model = data.find((entry) => entry.id === "kr/opaque");
+
+    expect(model.capabilities).toMatchObject(expected);
+    expect(model.context_length).toBe(model.capabilities.contextWindow);
+    expect(model.max_completion_tokens).toBe(model.capabilities.maxOutput);
+  });
+
+  it("exposes referenced custom capabilities with an active connection", async () => {
+    const expected = { vision: true, pdf: true, audioInput: true, videoInput: true, imageOutput: true, audioOutput: true, tools: true, reasoning: true };
+    setCatalogSource(createCatalogResolver({
+      openRouterRules: [{ provider: "*", pattern: "*omni*", data: { capabilities: expected } }],
+      customModels: [{ providerAlias: "glm", id: "opaque", catalogRef: { source: "openrouter", provider: "*", pattern: "*omni*" } }],
+    }));
+    mocks.getCustomModels.mockResolvedValue([{ providerAlias: "glm", id: "opaque", type: "llm" }]);
+
+    const data = await buildModelsList(["llm"], { exposure: "models" });
+    const model = data.find((entry) => entry.id === "glm/opaque");
+
+    expect(model.capabilities).toMatchObject(expected);
   });
 });
 

@@ -2,7 +2,7 @@ import { useState } from "react";
 import PropTypes from "prop-types";
 import { CapacityBadges, ModelDetailModal } from "@/shared/components";
 
-export default function ModelRow({ model, fullModel, alias, copied, onCopy, testStatus, isCustom, isFree, onDeleteAlias, onTest, isTesting, onDisable, caps, thinkingSuffix }) {
+export default function ModelRow({ model, fullModel, alias, copied, onCopy, testStatus, isCustom, isFree, onDeleteAlias, onEdit, onTest, isTesting, onDisable, caps, thinkingSuffix }) {
   const [showDetail, setShowDetail] = useState(false);
   const displayModel = thinkingSuffix ? `${fullModel}(${thinkingSuffix})` : fullModel;
   const borderColor = testStatus === "ok"
@@ -38,7 +38,7 @@ export default function ModelRow({ model, fullModel, alias, copied, onCopy, test
             <button
               onClick={onTest}
               disabled={isTesting}
-              className={`rounded p-0.5 text-text-muted transition-opacity hover:bg-sidebar hover:text-primary ${isTesting ? "opacity-100" : "opacity-100 sm:opacity-0 sm:group-hover:opacity-100"}`}
+              className={`rounded p-0.5 text-text-muted transition-opacity hover:bg-sidebar hover:text-primary ${isTesting ? "opacity-100" : "opacity-50 group-hover:opacity-100"}`}
             >
               <span className="material-symbols-outlined text-sm" style={isTesting ? { animation: "spin 1s linear infinite" } : undefined}>
                 {isTesting ? "progress_activity" : "science"}
@@ -52,7 +52,7 @@ export default function ModelRow({ model, fullModel, alias, copied, onCopy, test
         <div className="relative shrink-0 group/btn">
           <button
             onClick={() => onCopy(displayModel, `model-${model.id}`)}
-            className="rounded p-0.5 text-text-muted hover:bg-sidebar hover:text-primary"
+            className="rounded p-0.5 text-text-muted opacity-50 transition-opacity hover:bg-sidebar hover:text-primary group-hover:opacity-100"
           >
             <span className="material-symbols-outlined text-sm">
               {copied === `model-${model.id}` ? "check" : "content_copy"}
@@ -65,7 +65,7 @@ export default function ModelRow({ model, fullModel, alias, copied, onCopy, test
         <div className="relative shrink-0 group/btn">
           <button
             onClick={() => setShowDetail(true)}
-            className="rounded p-0.5 text-text-muted hover:bg-sidebar hover:text-primary"
+            className="rounded p-0.5 text-text-muted opacity-50 transition-opacity hover:bg-sidebar hover:text-primary group-hover:opacity-100"
             aria-label="View model info"
           >
             <span className="material-symbols-outlined text-sm">visibility</span>
@@ -74,10 +74,19 @@ export default function ModelRow({ model, fullModel, alias, copied, onCopy, test
             Info
           </span>
         </div>
+        {onEdit && (
+          <button
+            onClick={onEdit}
+            className="rounded p-0.5 text-text-muted opacity-50 transition-opacity hover:bg-sidebar hover:text-primary group-hover:opacity-100"
+            title="Edit custom model"
+          >
+            <span className="material-symbols-outlined text-sm">edit</span>
+          </button>
+        )}
         {isCustom ? (
           <button
             onClick={onDeleteAlias}
-            className="ml-auto rounded p-0.5 text-text-muted opacity-100 transition-opacity hover:bg-red-500/10 hover:text-red-500 sm:opacity-0 sm:group-hover:opacity-100"
+            className="ml-auto rounded p-0.5 text-text-muted opacity-50 transition-opacity hover:bg-red-500/10 hover:text-red-500 group-hover:opacity-100"
             title="Remove custom model"
           >
             <span className="material-symbols-outlined text-sm">close</span>
@@ -85,7 +94,7 @@ export default function ModelRow({ model, fullModel, alias, copied, onCopy, test
         ) : onDisable ? (
           <button
             onClick={onDisable}
-            className="ml-auto rounded p-0.5 text-text-muted opacity-100 transition-opacity hover:bg-red-500/10 hover:text-red-500 sm:opacity-0 sm:group-hover:opacity-100"
+            className="ml-auto rounded p-0.5 text-text-muted opacity-50 transition-opacity hover:bg-red-500/10 hover:text-red-500 group-hover:opacity-100"
             title="Disable this model"
           >
             <span className="material-symbols-outlined text-sm">close</span>
@@ -116,6 +125,7 @@ ModelRow.propTypes = {
   isCustom: PropTypes.bool,
   isFree: PropTypes.bool,
   onDeleteAlias: PropTypes.func,
+  onEdit: PropTypes.func,
   onTest: PropTypes.func,
   isTesting: PropTypes.bool,
   onDisable: PropTypes.func,

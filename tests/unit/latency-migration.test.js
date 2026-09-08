@@ -28,10 +28,10 @@ describe("Latency migration v2", () => {
     const { latestVersion } = await import("@/lib/db/migrations/index.js");
     const db = await getAdapter();
 
-    // Schema version should be 3 (v2 adds columns, v3 backfills from requestDetails)
+    // Schema version should include the latest migration.
     const row = db.get(`SELECT value FROM _meta WHERE key='schemaVersion'`);
-    expect(parseInt(row.value, 10)).toBe(3);
-    expect(latestVersion()).toBe(3);
+    expect(parseInt(row.value, 10)).toBe(latestVersion());
+    expect(latestVersion()).toBe(4);
 
     // usageHistory should have new latency columns
     const cols = db.all(`PRAGMA table_info(usageHistory)`);
@@ -68,9 +68,10 @@ describe("Latency migration v2", () => {
     const { getAdapter: getAdapter2 } = await import("@/lib/db/driver.js");
     const db2 = await getAdapter2();
 
-    // Schema version should be 3
+    // Schema version should be current.
     const row = db2.get(`SELECT value FROM _meta WHERE key='schemaVersion'`);
-    expect(parseInt(row.value, 10)).toBe(3);
+    const { latestVersion } = await import("@/lib/db/migrations/index.js");
+    expect(parseInt(row.value, 10)).toBe(latestVersion());
 
     // New columns should exist
     const cols = db2.all(`PRAGMA table_info(usageHistory)`);

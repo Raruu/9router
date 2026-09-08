@@ -199,7 +199,11 @@ function PricingTable({ pricing, pricingSource }) {
         Per 1M tokens.{" "}
         {pricingSource === "user"
           ? "From your pricing overrides."
-          : "Built-in estimate — verify against the provider's own rates."}
+          : pricingSource === "user catalog"
+            ? "From your model catalog rule."
+            : pricingSource === "openrouter"
+              ? "From the fetched OpenRouter catalog."
+              : "Built-in estimate — verify against the provider's own rates."}
       </p>
     </div>
   );
@@ -235,6 +239,11 @@ function MembersTable({ members }) {
                 )}
                 {m.kind === "combo" && (
                   <span className="text-[10px] text-text-muted">nested combo</span>
+                )}
+                {m.catalogRef && (
+                  <span className="block truncate font-mono text-[10px] text-primary/80" title={`[${m.catalogRef.source}] ${m.catalogRef.provider} / ${m.catalogRef.pattern}`}>
+                    [{m.catalogRef.source}] {m.catalogRef.provider} / {m.catalogRef.pattern}
+                  </span>
                 )}
               </td>
               <td className="px-3 py-1.5 text-right font-mono text-text-muted">
@@ -407,6 +416,17 @@ export default function ModelDetailModal({ isOpen, onClose, modelId, comboName }
               )}
             </div>
           </div>
+
+          {!isCombo && detail.catalogRef && (
+            <Section title="Applied model pattern">
+              <div className="rounded-lg border border-border bg-bg-alt/40 px-3 py-2">
+                <code className="block break-all font-mono text-xs text-text-main">
+                  [{detail.catalogRef.source}] {detail.catalogRef.provider} / {detail.catalogRef.pattern}
+                </code>
+                <p className="mt-1 text-[10px] text-text-muted">Capabilities and pricing follow this catalog entry.</p>
+              </div>
+            </Section>
+          )}
 
           {detail.capabilities ? (
             <>

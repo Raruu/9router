@@ -76,6 +76,7 @@ export const DEFAULT_SETTINGS = {
   pxpipeAutoInstall: true,
   pxpipeMinChars: 25000,
   pxpipeTimeoutMs: 15000,
+  modelCatalogPriority: "user-openrouter-hardcoded",
 };
 
 async function readRaw() {
@@ -114,6 +115,10 @@ export async function getSettings() {
 
 // Atomic read-merge-write inside transaction (prevents losing concurrent updates)
 export async function updateSettings(updates) {
+  if (Object.prototype.hasOwnProperty.call(updates || {}, "modelCatalogPriority")) {
+    const allowed = ["user-openrouter-hardcoded", "user-hardcoded-openrouter"];
+    if (!allowed.includes(updates.modelCatalogPriority)) throw new Error("Invalid model catalog priority");
+  }
   const db = await getAdapter();
   let next;
   db.transaction(function () {
@@ -125,6 +130,10 @@ export async function updateSettings(updates) {
       [stringifyJson(next)],
     );
   });
+  if (Object.prototype.hasOwnProperty.call(updates || {}, "modelCatalogPriority")) {
+    const { refreshModelCatalogRuntime } = await import("../../modelCatalog/runtime.js");
+    await refreshModelCatalogRuntime();
+  }
   return mergeWithDefaults(next);
 }
 

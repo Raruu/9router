@@ -3,7 +3,7 @@
 // pre-change safety backup in migrate.js: when the stored version is lower,
 // one lightweight DB backup is taken before applying schema changes. Forgetting
 // to bump only skips that backup — it does NOT break the additive auto-sync.
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export const PRAGMA_SQL = `
 PRAGMA journal_mode = WAL;
@@ -105,6 +105,36 @@ export const TABLES = {
     },
     primaryKey: "PRIMARY KEY (scope, key)",
     indexes: ["CREATE INDEX IF NOT EXISTS idx_kv_scope ON kv(scope)"],
+  },
+  openRouterModels: {
+    columns: {
+      pattern: "TEXT PRIMARY KEY",
+      normalizedModel: "TEXT NOT NULL",
+      sourceId: "TEXT NOT NULL",
+      name: "TEXT",
+      data: "TEXT NOT NULL",
+      fetchedAt: "TEXT NOT NULL",
+    },
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_orm_normalized ON openRouterModels(normalizedModel)",
+      "CREATE INDEX IF NOT EXISTS idx_orm_source ON openRouterModels(sourceId)",
+      "CREATE INDEX IF NOT EXISTS idx_orm_fetched ON openRouterModels(fetchedAt)",
+    ],
+  },
+  userModelCatalog: {
+    columns: {
+      provider: "TEXT NOT NULL",
+      pattern: "TEXT NOT NULL",
+      name: "TEXT",
+      data: "TEXT NOT NULL",
+      createdAt: "TEXT NOT NULL",
+      updatedAt: "TEXT NOT NULL",
+    },
+    primaryKey: "PRIMARY KEY (provider, pattern)",
+    indexes: [
+      "CREATE INDEX IF NOT EXISTS idx_umc_provider ON userModelCatalog(provider)",
+      "CREATE INDEX IF NOT EXISTS idx_umc_updated ON userModelCatalog(updatedAt)",
+    ],
   },
   usageHistory: {
     columns: {

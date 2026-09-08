@@ -381,11 +381,22 @@ export async function buildModelsList(kindFilter, options = {}) {
       for (const model of providerModels) {
         if (!kindFilter.includes(modelKind(model))) continue;
         if (isDisabled(alias, model.id)) continue;
-        models.push({
+        const entry = {
           id: `${alias}/${model.id}`,
           object: "model",
           owned_by: alias,
-        });
+        };
+        const caps = getCapabilitiesForModel(providerId, model.id);
+        entry.capabilities = caps;
+        if (Number.isFinite(caps.contextWindow)) {
+          entry.context_length = caps.contextWindow;
+          entry.max_input_tokens = caps.contextWindow;
+        }
+        if (Number.isFinite(caps.maxOutput)) {
+          entry.max_completion_tokens = caps.maxOutput;
+          entry.max_output_tokens = caps.maxOutput;
+        }
+        models.push(entry);
       }
     }
 
@@ -399,11 +410,23 @@ export async function buildModelsList(kindFilter, options = {}) {
       const modelId = String(customModel.id).trim();
       if (!modelId) continue;
 
-      models.push({
+      const providerId = capabilityContext.providerIdByPrefix.get(providerAlias) || providerAlias;
+      const caps = getCapabilitiesForModel(providerId, modelId);
+      const entry = {
         id: `${providerAlias}/${modelId}`,
         object: "model",
         owned_by: providerAlias,
-      });
+        capabilities: caps,
+      };
+      if (Number.isFinite(caps.contextWindow)) {
+        entry.context_length = caps.contextWindow;
+        entry.max_input_tokens = caps.contextWindow;
+      }
+      if (Number.isFinite(caps.maxOutput)) {
+        entry.max_completion_tokens = caps.maxOutput;
+        entry.max_output_tokens = caps.maxOutput;
+      }
+      models.push(entry);
     }
   } else {
     for (const [providerId, conn] of activeConnectionByProvider.entries()) {

@@ -30,8 +30,8 @@ export async function getCustomModels() {
 }
 
 // Atomic upsert inside transaction to prevent duplicate races.
-// Re-adding an existing model updates caps/name without resetting omitted fields.
-export async function addCustomModel({ providerAlias, id, type = "llm", name, caps }) {
+// Re-adding an existing model updates metadata without changing its identity.
+export async function addCustomModel({ providerAlias, id, type = "llm", name, caps, catalogRef, clearCatalogMetadata = false }) {
   const k = customKey(providerAlias, id, type);
   const db = await getAdapter();
   let added = false;
@@ -39,19 +39,32 @@ export async function addCustomModel({ providerAlias, id, type = "llm", name, ca
     const row = db.get(`SELECT value FROM kv WHERE scope = 'customModels' AND key = ?`, [k]);
     if (row) {
       const prev = parseJson(row.value) || {};
-      const next = { ...prev, ...(name ? { name } : {}), ...(caps ? { caps } : {}) };
+      const next = { ...prev, ...(name ? { name } : {}) };
+      if (clearCatalogMetadata) {
+        delete next.caps;
+        delete next.catalogRef;
+      }
+      if (caps) next.caps = caps;
+      if (catalogRef) {
+        next.catalogRef = catalogRef;
+        delete next.caps;
+      }
       db.run(`UPDATE kv SET value = ? WHERE scope = 'customModels' AND key = ?`, [stringifyJson(next), k]);
       return;
     }
-    const value = stringifyJson({ providerAlias, id, type, name: name || id, ...(caps ? { caps } : {}) });
+    const value = stringifyJson({ providerAlias, id, type, name: name || id, ...(caps ? { caps } : {}), ...(catalogRef ? { catalogRef } : {}) });
     db.run(`INSERT INTO kv(scope, key, value) VALUES('customModels', ?, ?)`, [k, value]);
     added = true;
   });
+  const { refreshModelCatalogRuntime } = await import("../../modelCatalog/runtime.js");
+  await refreshModelCatalogRuntime();
   return added;
 }
 
 export async function deleteCustomModel({ providerAlias, id, type = "llm" }) {
   await customKv.remove(customKey(providerAlias, id, type));
+  const { refreshModelCatalogRuntime } = await import("../../modelCatalog/runtime.js");
+  await refreshModelCatalogRuntime();
 }
 
 // mitmAlias: key=toolName, value=mappings object

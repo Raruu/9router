@@ -61,6 +61,7 @@ export default function ProviderDetailPage() {
   const [modelsTestError, setModelsTestError] = useState("");
   const [testingModelIds, setTestingModelIds] = useState(() => new Set());
   const [showAddCustomModel, setShowAddCustomModel] = useState(false);
+  const [editingCustomModel, setEditingCustomModel] = useState(null);
   const [selectedConnectionIds, setSelectedConnectionIds] = useState([]);
   const [bulkProxyPoolId, setBulkProxyPoolId] = useState("__none__");
   const [bulkUpdatingProxy, setBulkUpdatingProxy] = useState(false);
@@ -527,12 +528,12 @@ export default function ProviderDetailPage() {
     }
   };
 
-  const handleAddCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias, caps) => {
+  const handleAddCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias, catalogRef, name) => {
     try {
       const res = await fetch("/api/models/custom", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ providerAlias: providerAliasOverride, id: modelId, type, ...(caps ? { caps } : {}) }),
+        body: JSON.stringify({ providerAlias: providerAliasOverride, id: modelId, type, catalogRef: catalogRef || null, ...(name ? { name } : {}) }),
       });
       if (res.ok) {
         await fetchCustomModels();
@@ -1084,8 +1085,9 @@ export default function ProviderDetailPage() {
           onCopy={copy}
           onSetAlias={handleSetAlias}
           onDeleteAlias={handleDeleteAlias}
-          onAddCustomModel={(modelId) => handleAddCustomModel(modelId, "llm", providerStorageAlias)}
+          onAddCustomModel={(modelId, catalogRef) => handleAddCustomModel(modelId, "llm", providerStorageAlias, catalogRef)}
           onDeleteCustomModel={(modelId) => handleDeleteCustomModel(modelId, "llm", providerStorageAlias)}
+          getModelCaps={getCaps}
           connections={connections}
           isAnthropic={isAnthropicCompatible}
         />
@@ -1127,6 +1129,10 @@ export default function ProviderDetailPage() {
                 handleDeleteAlias(model.alias);
               }
             }}
+            onEdit={model.source === "custom" ? () => {
+              setEditingCustomModel(model);
+              setShowAddCustomModel(true);
+            } : undefined}
             testStatus={modelTestResults[model.id]}
             onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(model.id) : undefined}
             isTesting={testingModelIds.has(model.id)}
@@ -1166,7 +1172,10 @@ export default function ProviderDetailPage() {
 
         {/* Add model button — inline, same style as model chips */}
         <button
-          onClick={() => setShowAddCustomModel(true)}
+          onClick={() => {
+            setEditingCustomModel(null);
+            setShowAddCustomModel(true);
+          }}
           className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/40 px-3 py-2 text-xs text-primary transition-colors hover:border-primary hover:bg-primary/5 sm:w-auto"
         >
           <span className="material-symbols-outlined text-sm">add</span>
@@ -1770,14 +1779,19 @@ export default function ProviderDetailPage() {
       )}
       {!isCompatible && (
         <AddCustomModelModal
+          key={editingCustomModel?.id || "add"}
           isOpen={showAddCustomModel}
           providerAlias={providerStorageAlias}
-          providerDisplayAlias={providerDisplayAlias}
-          onSave={async (modelId, caps) => {
-            await handleAddCustomModel(modelId, "llm", providerStorageAlias, caps);
+          existingModel={editingCustomModel}
+          onSave={async (modelId, catalogRef) => {
+            await handleAddCustomModel(modelId, "llm", providerStorageAlias, catalogRef);
             setShowAddCustomModel(false);
+            setEditingCustomModel(null);
           }}
-          onClose={() => setShowAddCustomModel(false)}
+          onClose={() => {
+            setShowAddCustomModel(false);
+            setEditingCustomModel(null);
+          }}
         />
       )}
 

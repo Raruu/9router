@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import PropTypes from "prop-types";
-import { Button, ModelDetailModal } from "@/shared/components";
+import { Button, CapacityBadges, ModelDetailModal } from "@/shared/components";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
-function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias, onTest, testStatus, isTesting }) {
+import AddCustomModelModal from "./AddCustomModelModal";
+
+function CompatibleModelRow({ modelId, modelName, fullModel, copied, onCopy, onDeleteAlias, onEdit, onTest, testStatus, isTesting, caps }) {
   const [showDetail, setShowDetail] = useState(false);
   const borderColor = testStatus === "ok"
     ? "border-green-500/40"
@@ -19,7 +21,7 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
     : undefined;
 
   return (
-    <div className={`flex items-center gap-3 p-3 rounded-lg border ${borderColor} hover:bg-sidebar/50`}>
+    <div className={`group flex items-center gap-3 p-3 rounded-lg border ${borderColor} hover:bg-sidebar/50`}>
       <span
         className="material-symbols-outlined text-base text-text-muted"
         style={iconColor ? { color: iconColor } : undefined}
@@ -27,13 +29,13 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
         {testStatus === "ok" ? "check_circle" : testStatus === "error" ? "cancel" : "smart_toy"}
       </span>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate">{modelId}</p>
+        <p className="text-sm font-medium truncate">{modelName || modelId}</p>
         <div className="flex items-center gap-1 mt-1">
           <code className="text-xs text-text-muted font-mono bg-sidebar px-1.5 py-0.5 rounded">{fullModel}</code>
           <div className="relative group/btn">
             <button
               onClick={() => onCopy(fullModel, `model-${modelId}`)}
-              className="p-0.5 hover:bg-sidebar rounded text-text-muted hover:text-primary"
+              className="rounded p-0.5 text-text-muted opacity-50 transition-opacity hover:bg-sidebar hover:text-primary group-hover:opacity-100"
             >
               <span className="material-symbols-outlined text-sm">
                 {copied === `model-${modelId}` ? "check" : "content_copy"}
@@ -46,7 +48,7 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
           <div className="relative group/btn">
             <button
               onClick={() => setShowDetail(true)}
-              className="p-0.5 hover:bg-sidebar rounded text-text-muted hover:text-primary"
+              className="rounded p-0.5 text-text-muted opacity-50 transition-opacity hover:bg-sidebar hover:text-primary group-hover:opacity-100"
               aria-label="View model info"
             >
               <span className="material-symbols-outlined text-sm">visibility</span>
@@ -60,7 +62,7 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
               <button
                 onClick={onTest}
                 disabled={isTesting}
-                className="p-0.5 hover:bg-sidebar rounded text-text-muted hover:text-primary transition-colors"
+                className={`rounded p-0.5 text-text-muted transition-opacity hover:bg-sidebar hover:text-primary ${isTesting ? "opacity-100" : "opacity-50 group-hover:opacity-100"}`}
               >
                 <span className="material-symbols-outlined text-sm" style={isTesting ? { animation: "spin 1s linear infinite" } : undefined}>
                   {isTesting ? "progress_activity" : "science"}
@@ -71,11 +73,21 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
               </span>
             </div>
           )}
+          <CapacityBadges caps={caps} size={13} />
         </div>
       </div>
+      {onEdit && (
+        <button
+          onClick={onEdit}
+          className="rounded p-1 text-text-muted opacity-50 transition-opacity hover:bg-sidebar hover:text-primary group-hover:opacity-100"
+          title="Edit custom model"
+        >
+          <span className="material-symbols-outlined text-sm">edit</span>
+        </button>
+      )}
       <button
         onClick={onDeleteAlias}
-        className="p-1 hover:bg-red-50 rounded text-red-500"
+        className="rounded p-1 text-red-500 opacity-50 transition-opacity hover:bg-red-50 group-hover:opacity-100"
         title="Remove model"
       >
         <span className="material-symbols-outlined text-sm">delete</span>
@@ -92,9 +104,9 @@ function CompatibleModelRow({ modelId, fullModel, copied, onCopy, onDeleteAlias,
   );
 }
 
-export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, connections, isAnthropic }) {
-  const [newModel, setNewModel] = useState("");
-  const [adding, setAdding] = useState(false);
+export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, getModelCaps, connections, isAnthropic }) {
+  const [showModelModal, setShowModelModal] = useState(false);
+  const [editingModel, setEditingModel] = useState(null);
   const [importing, setImporting] = useState(false);
   const [testingModelId, setTestingModelId] = useState(null);
   const [modelTestResults, setModelTestResults] = useState({});
@@ -124,23 +136,14 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
     type: "llm",
   });
 
-  const handleAdd = async () => {
-    if (!newModel.trim() || adding) return;
-    const modelId = newModel.trim();
-    if (allModels.some((model) => model.id === modelId)) {
+  const handleSaveModel = async (modelId, catalogRef) => {
+    if (!editingModel && allModels.some((model) => model.id === modelId)) {
       alert("Model already exists for this provider.");
       return;
     }
-
-    setAdding(true);
-    try {
-      await onAddCustomModel(modelId);
-      setNewModel("");
-    } catch (error) {
-      console.log("Error adding model:", error);
-    } finally {
-      setAdding(false);
-    }
+    await onAddCustomModel(modelId, catalogRef);
+    setShowModelModal(false);
+    setEditingModel(null);
   };
 
   const handleImport = async () => {
@@ -187,22 +190,15 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
         Add {isAnthropic ? "Anthropic" : "OpenAI"}-compatible models manually or import them from the /models endpoint.
       </p>
 
-      <div className="flex items-end gap-2 flex-wrap">
-        <div className="flex-1 min-w-[240px]">
-          <label htmlFor="new-compatible-model-input" className="text-xs text-text-muted mb-1 block">Model ID</label>
-          <input
-            id="new-compatible-model-input"
-            type="text"
-            value={newModel}
-            onChange={(e) => setNewModel(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-            placeholder={isAnthropic ? "claude-3-opus-20240229" : "gpt-4o"}
-            className="w-full px-3 py-2 text-sm border border-border rounded-lg bg-background focus:outline-none focus:border-primary"
-          />
-        </div>
-        <Button size="sm" icon="add" onClick={handleAdd} disabled={!newModel.trim() || adding}>
-          {adding ? "Adding..." : "Add"}
-        </Button>
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => { setEditingModel(null); setShowModelModal(true); }}
+          className="flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/40 px-3 py-2 text-xs text-primary transition-colors hover:border-primary hover:bg-primary/5"
+        >
+          <span className="material-symbols-outlined text-sm">add</span>
+          Add Model
+        </button>
         <Button size="sm" variant="secondary" icon="download" onClick={handleImport} disabled={!canImport || importing}>
           {importing ? "Importing..." : "Import from /models"}
         </Button>
@@ -216,21 +212,39 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
 
       {allModels.length > 0 && (
         <div className="flex flex-col gap-3">
-          {allModels.map(({ id, alias, source }) => (
+          {allModels.map(({ id, name, alias, source, catalogRef }) => (
             <CompatibleModelRow
               key={`${source}-${providerStorageAlias}/${id}`}
               modelId={id}
+              modelName={name}
               fullModel={`${providerDisplayAlias}/${id}`}
               copied={copied}
               onCopy={onCopy}
               onDeleteAlias={() => source === "custom" ? onDeleteCustomModel(id) : onDeleteAlias(alias)}
+              onEdit={source === "custom" ? () => {
+                setEditingModel({ id, name, catalogRef });
+                setShowModelModal(true);
+              } : undefined}
               onTest={connections.length > 0 ? () => handleTestModel(id) : undefined}
               testStatus={modelTestResults[id]}
               isTesting={testingModelId === id}
+              caps={getModelCaps?.(`${providerStorageAlias}/${id}`)}
             />
           ))}
         </div>
       )}
+
+      <AddCustomModelModal
+        key={editingModel?.id || "add"}
+        isOpen={showModelModal}
+        providerAlias={providerStorageAlias}
+        existingModel={editingModel}
+        onSave={handleSaveModel}
+        onClose={() => {
+          setShowModelModal(false);
+          setEditingModel(null);
+        }}
+      />
     </div>
   );
 }
@@ -245,6 +259,7 @@ CompatibleModelsSection.propTypes = {
   onDeleteAlias: PropTypes.func.isRequired,
   onAddCustomModel: PropTypes.func.isRequired,
   onDeleteCustomModel: PropTypes.func.isRequired,
+  getModelCaps: PropTypes.func,
   connections: PropTypes.arrayOf(PropTypes.shape({
     id: PropTypes.string,
     isActive: PropTypes.bool,

@@ -383,6 +383,25 @@ export function matchPattern(pattern, model) {
   return regex.test(model);
 }
 
+let catalogPricingSource = null;
+
+/** Install a synchronous server catalog source without coupling this module to SQLite. */
+export function setCatalogPricingSource(source) {
+  catalogPricingSource = source;
+}
+
+function getHardcodedPricing(provider, model) {
+  if (!model) return null;
+  if (provider && PROVIDER_PRICING[provider]?.[model]) return PROVIDER_PRICING[provider][model];
+  const baseModel = model.includes("/") ? model.split("/").pop() : model;
+  if (MODEL_PRICING[baseModel]) return MODEL_PRICING[baseModel];
+  if (MODEL_PRICING[model]) return MODEL_PRICING[model];
+  for (const { pattern, pricing } of PATTERN_PRICING) {
+    if (matchPattern(pattern, baseModel) || matchPattern(pattern, model)) return pricing;
+  }
+  return null;
+}
+
 /**
  * Resolve pricing for a model using the 3-step fallback chain:
  *   1. PROVIDER_PRICING[provider][model]
@@ -395,25 +414,23 @@ export function matchPattern(pattern, model) {
  */
 export function getPricingForModel(provider, model) {
   if (!model) return null;
+  const hardcoded = getHardcodedPricing(provider, model) || {};
+  const resolved = catalogPricingSource?.getPricing?.(provider, model, hardcoded);
+  const result = resolved ? { ...hardcoded, ...resolved } : hardcoded;
+  return Object.keys(result).length ? result : null;
+}
 
-  // 1. Provider-specific override
-  if (provider && PROVIDER_PRICING[provider]?.[model]) {
-    return PROVIDER_PRICING[provider][model];
-  }
+export function getHardcodedPricingForModel(provider, model) {
+  return getHardcodedPricing(provider, model);
+}
 
-  // 2. Canonical model pricing (strip vendor prefix if needed: "deepseek/deepseek-chat" → "deepseek-chat")
-  const baseModel = model.includes("/") ? model.split("/").pop() : model;
-  if (MODEL_PRICING[baseModel]) return MODEL_PRICING[baseModel];
-  if (MODEL_PRICING[model]) return MODEL_PRICING[model];
-
-  // 3. Pattern match
-  for (const { pattern, pricing } of PATTERN_PRICING) {
-    if (matchPattern(pattern, baseModel) || matchPattern(pattern, model)) {
-      return pricing;
-    }
-  }
-
-  return null;
+export function getHardcodedPricingCatalog() {
+  return {
+    canonicalExact: Object.entries(MODEL_PRICING).map(([model, pricing]) => ({ model, pricing: { ...pricing } })),
+    providerExact: Object.entries(PROVIDER_PRICING).flatMap(([provider, models]) =>
+      Object.entries(models).map(([model, pricing]) => ({ provider, model, pricing: { ...pricing } }))),
+    patterns: PATTERN_PRICING.map(({ pattern, pricing }) => ({ pattern, pricing: { ...pricing } })),
+  };
 }
 
 /**

@@ -1,4 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, vi, beforeEach } from "vitest";
+import { createCatalogResolver } from "../../src/lib/modelCatalog/resolution.js";
+import { setCatalogSource } from "../../open-sse/providers/capabilities.js";
 
 const mocks = vi.hoisted(() => ({
   json: vi.fn((body, init) => ({ status: init?.status || 200, body })),
@@ -35,6 +37,29 @@ vi.mock("@/lib/db/repos/pricingRepo.js", () => ({
 const { GET } = await import("../../src/app/api/models/detail/route.js");
 
 const req = (query) => ({ url: `http://localhost:20128/api/models/detail?${query}` });
+
+function installReferencedCapabilities() {
+  const allCapabilities = {
+    vision: true,
+    pdf: true,
+    audioInput: true,
+    videoInput: true,
+    imageOutput: true,
+    audioOutput: true,
+    tools: true,
+    reasoning: true,
+  };
+  setCatalogSource(createCatalogResolver({
+    openRouterRules: [{ provider: "*", pattern: "*omni*", data: { capabilities: allCapabilities } }],
+    customModels: [{ providerAlias: "kr", id: "opaque", catalogRef: { source: "openrouter", provider: "*", pattern: "*omni*" } }],
+    normalizeProviderId: (provider) => provider === "kr" ? "kiro" : provider,
+  }));
+  return allCapabilities;
+}
+
+const catalogRef = { source: "openrouter", provider: "*", pattern: "*omni*" };
+
+afterEach(() => setCatalogSource(null));
 
 describe("GET /api/models/detail", () => {
   beforeEach(() => {
@@ -182,6 +207,25 @@ describe("GET /api/models/detail", () => {
     expect(res.body.source).toBe("custom");
   });
 
+  it("shows every capability selected through a custom model pattern", async () => {
+    const expected = installReferencedCapabilities();
+    mocks.getCustomModels.mockResolvedValue([{ providerAlias: "kr", id: "opaque", type: "llm", catalogRef }]);
+
+    const res = await GET(req("id=kr/opaque"));
+
+    expect(res.body.capabilities).toMatchObject(expected);
+    expect(res.body.catalogRef).toEqual(catalogRef);
+  });
+
+  it("does not match a custom model from an unrelated unmapped provider", async () => {
+    installReferencedCapabilities();
+    mocks.getCustomModels.mockResolvedValue([{ providerAlias: "unmapped-a", id: "opaque", type: "llm", catalogRef }]);
+
+    const res = await GET(req("id=unmapped-b/opaque"));
+
+    expect(res.body.catalogRef).toBeUndefined();
+  });
+
   it("404s an unknown bare id", async () => {
     const res = await GET(req("id=nope"));
     expect(res.status).toBe(404);
@@ -296,6 +340,18 @@ describe("GET /api/models/detail — combos", () => {
     expect(res.body.members).toHaveLength(1);
     expect(res.body.members[0].kind).toBe("combo");
     expect(res.body.members[0].capabilities).not.toBeNull();
+  });
+
+  it("merges custom pattern capabilities into combo info", async () => {
+    const expected = installReferencedCapabilities();
+    mocks.getCustomModels.mockResolvedValue([{ providerAlias: "kr", id: "opaque", type: "llm", catalogRef }]);
+    mocks.getCombos.mockResolvedValue([{ name: "omni-combo", kind: "llm", models: ["kr/opaque"] }]);
+
+    const res = await GET(req("combo=omni-combo"));
+
+    expect(res.body.members[0].capabilities).toMatchObject(expected);
+    expect(res.body.members[0].catalogRef).toEqual(catalogRef);
+    expect(res.body.capabilities).toMatchObject(expected);
   });
 
   it("returns null capabilities when no member resolves", async () => {
