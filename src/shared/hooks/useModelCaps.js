@@ -44,14 +44,7 @@ function resolveCaps(byFull, byId, key) {
   const bare = key.includes("/") ? key.slice(key.indexOf("/") + 1) : key;
   if (byId[bare]) return byId[bare];
   const provider = key.includes("/") ? key.slice(0, key.indexOf("/")) : null;
-  const c = getCapabilitiesForModel(provider, bare);
-  return {
-    vision: c.vision,
-    search: c.search,
-    reasoning: c.reasoning,
-    contextWindow: c.contextWindow,
-    maxOutput: c.maxOutput,
-  };
+  return getCapabilitiesForModel(provider, bare);
 }
 
 export function useModelCaps() {

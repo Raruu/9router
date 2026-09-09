@@ -3,9 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import PropTypes from "prop-types";
 import Modal from "./Modal";
+import CapacityBadges from "./CapacityBadges";
 import ProviderIcon from "./ProviderIcon";
 import { getProviderIconSrcForId } from "@/shared/utils/providerIcon";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
+import { CAPACITY_META } from "@/shared/constants/models";
 
 // Order and labels for the capability object. Kept explicit rather than derived
 // from Object.keys so the modal groups modalities before features and never
@@ -199,7 +201,11 @@ function PricingTable({ pricing, pricingSource }) {
         Per 1M tokens.{" "}
         {pricingSource === "user"
           ? "From your pricing overrides."
-          : "Built-in estimate — verify against the provider's own rates."}
+          : pricingSource === "user catalog"
+            ? "From your model catalog rule."
+            : pricingSource === "openrouter"
+              ? "From the fetched OpenRouter catalog."
+              : "Built-in estimate — verify against the provider's own rates."}
       </p>
     </div>
   );
@@ -236,6 +242,11 @@ function MembersTable({ members }) {
                 {m.kind === "combo" && (
                   <span className="text-[10px] text-text-muted">nested combo</span>
                 )}
+                {m.catalogRef && (
+                  <span className="block truncate font-mono text-[10px] text-primary/80" title={`[${m.catalogRef.source}] ${m.catalogRef.provider} / ${m.catalogRef.pattern}`}>
+                    [{m.catalogRef.source}] {m.catalogRef.provider} / {m.catalogRef.pattern}
+                  </span>
+                )}
               </td>
               <td className="px-3 py-1.5 text-right font-mono text-text-muted">
                 {m.capabilities ? fmtTokens(m.capabilities.contextWindow) : "—"}
@@ -244,23 +255,9 @@ function MembersTable({ members }) {
                 {m.capabilities ? fmtTokens(m.capabilities.maxOutput) : "—"}
               </td>
               <td className="px-3 py-1.5 text-center">
-                <span className="inline-flex items-center gap-1">
-                  {m.capabilities?.vision && (
-                    <span className="material-symbols-outlined text-[14px] text-blue-500" title="Vision">
-                      visibility
-                    </span>
-                  )}
-                  {m.capabilities?.reasoning && (
-                    <span className="material-symbols-outlined text-[14px] text-amber-500" title="Reasoning">
-                      neurology
-                    </span>
-                  )}
-                  {m.capabilities?.search && (
-                    <span className="material-symbols-outlined text-[14px] text-green-600" title="Web search">
-                      travel_explore
-                    </span>
-                  )}
-                </span>
+                {m.capabilities && Object.keys(CAPACITY_META).some((key) => m.capabilities[key]) ? (
+                  <CapacityBadges caps={m.capabilities} className="justify-center" size={14} />
+                ) : "—"}
               </td>
               <td className="whitespace-nowrap px-3 py-1.5 text-right font-mono text-text-muted">
                 {m.pricing ? `${fmtRate(m.pricing.input)} / ${fmtRate(m.pricing.output)}` : "—"}
@@ -407,6 +404,17 @@ export default function ModelDetailModal({ isOpen, onClose, modelId, comboName }
               )}
             </div>
           </div>
+
+          {!isCombo && detail.catalogRef && (
+            <Section title="Applied model pattern">
+              <div className="rounded-lg border border-border bg-bg-alt/40 px-3 py-2">
+                <code className="block break-all font-mono text-xs text-text-main">
+                  [{detail.catalogRef.source}] {detail.catalogRef.provider} / {detail.catalogRef.pattern}
+                </code>
+                <p className="mt-1 text-[10px] text-text-muted">Capabilities and pricing follow this catalog entry.</p>
+              </div>
+            </Section>
+          )}
 
           {detail.capabilities ? (
             <>

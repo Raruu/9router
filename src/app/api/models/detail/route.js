@@ -13,14 +13,29 @@ const LLM_KIND = "llm";
 // Built-in tables answer for most models; a row in the pricing kv scope means
 // the user overrode it. Worth surfacing, because the modal labels these numbers
 // as estimates and "your own override" is not an estimate.
-async function resolvePricing(providerId, modelId) {
+async function resolvePricing(providerId, modelId, catalogRef) {
   const [resolved, userTables] = await Promise.all([
     getPricingForModel(providerId, modelId),
     getUserPricingTables().catch(() => null),
   ]);
   if (!resolved) return { pricing: null, pricingSource: null };
-  const isUserOverride = Boolean(userTables?.[providerId]?.[modelId]);
-  return { pricing: resolved, pricingSource: isUserOverride ? "user" : "builtin" };
+  if (userTables?.[providerId]?.[modelId]) return { pricing: resolved, pricingSource: "user" };
+  if (catalogRef?.source === "user") return { pricing: resolved, pricingSource: "user catalog" };
+  if (catalogRef?.source === "openrouter") return { pricing: resolved, pricingSource: "openrouter" };
+  if (catalogRef?.source === "hardcoded") return { pricing: resolved, pricingSource: "builtin" };
+  try {
+    const { getUserModelCatalog, getOpenRouterModels } = await import("@/lib/modelCatalog/repository.js");
+    const { matchCatalogPattern } = await import("@/lib/modelCatalog/resolution.js");
+    const [userRules, openRouterRules] = await Promise.all([getUserModelCatalog(), getOpenRouterModels()]);
+    const provider = String(providerId || "").toLowerCase();
+    if (userRules.some((rule) => rule.data?.pricing && (rule.provider === "*" || rule.provider === provider) && matchCatalogPattern(rule.pattern, modelId))) {
+      return { pricing: resolved, pricingSource: "user catalog" };
+    }
+    if (openRouterRules.some((rule) => rule.data?.pricing && matchCatalogPattern(rule.pattern, modelId))) {
+      return { pricing: resolved, pricingSource: "openrouter" };
+    }
+  } catch {}
+  return { pricing: resolved, pricingSource: "builtin" };
 }
 
 // Registry metadata that has no home in the capability object but is useful on a
@@ -30,7 +45,7 @@ function findRegistryModel(prefix, providerId, modelId) {
   return list.find((m) => m.id === modelId) || null;
 }
 
-function buildModelDetail({ prefix, providerId, modelId, registryModel, capabilities, pricing, pricingSource, nodeNameById }) {
+function buildModelDetail({ prefix, providerId, modelId, registryModel, capabilities, pricing, pricingSource, nodeNameById, catalogRef }) {
   const providerInfo = AI_PROVIDERS[providerId];
   const kind = registryModel ? getModelKind(registryModel, LLM_KIND) : LLM_KIND;
   const detail = {
@@ -54,6 +69,7 @@ function buildModelDetail({ prefix, providerId, modelId, registryModel, capabili
     max_completion_tokens: capabilities.maxOutput,
     pricing,
     pricingSource,
+    ...(catalogRef ? { catalogRef } : {}),
   };
   if (capabilities.reasoning) {
     detail.thinkingLevels = getThinkingLevels(providerId, modelId) || null;
@@ -73,9 +89,19 @@ async function modelDetail(fullId, ctx) {
   const modelId = fullId.slice(separator + 1).trim();
   if (!modelId) return null;
 
-  const providerId = ctx.providerIdByPrefix.get(prefix) || prefix;
+  const mappedPrefix = ctx.providerIdByPrefix.get(prefix);
+  const customModel = ctx.customModels.find((entry) => {
+    if (entry?.id !== modelId) return false;
+    if (entry.providerAlias === prefix) return true;
+    const mappedAlias = ctx.providerIdByPrefix.get(entry.providerAlias);
+    return Boolean(mappedPrefix && mappedAlias && mappedAlias === mappedPrefix);
+  });
+  const providerId = ctx.providerIdByPrefix.get(prefix)
+    || ctx.providerIdByPrefix.get(customModel?.providerAlias)
+    || customModel?.providerAlias
+    || prefix;
   const capabilities = getCapabilitiesForModel(providerId, modelId);
-  const { pricing, pricingSource } = await resolvePricing(providerId, modelId);
+  const { pricing, pricingSource } = await resolvePricing(providerId, modelId, customModel?.catalogRef);
 
   return buildModelDetail({
     prefix,
@@ -86,6 +112,7 @@ async function modelDetail(fullId, ctx) {
     pricing,
     pricingSource,
     nodeNameById: ctx.nodeNameById,
+    catalogRef: customModel?.catalogRef,
   });
 }
 
@@ -120,6 +147,7 @@ async function comboMemberDetail(member, ctx) {
           capabilities: detail.capabilities,
           pricing: detail.pricing,
           pricingSource: detail.pricingSource,
+          catalogRef: detail.catalogRef,
         };
       }
     }
@@ -142,6 +170,7 @@ async function comboMemberDetail(member, ctx) {
     capabilities: detail.capabilities,
     pricing: detail.pricing,
     pricingSource: detail.pricingSource,
+    catalogRef: detail.catalogRef,
   };
 }
 
@@ -178,9 +207,10 @@ async function comboDetail(combo, ctx) {
 }
 
 async function buildContext() {
-  const [connections, combos, modelAliases, settings, nodes] = await Promise.all([
+  const [connections, combos, customModels, modelAliases, settings, nodes] = await Promise.all([
     getProviderConnections().catch(() => []),
     getCombos().catch(() => []),
+    getCustomModels().catch(() => []),
     getModelAliases().catch(() => ({})),
     getSettings().catch(() => ({})),
     getProviderNodes().catch(() => []),
@@ -202,6 +232,7 @@ async function buildContext() {
 
   return {
     providerIdByPrefix: buildProviderIdByPrefix(connections),
+    customModels,
     nodeNameById,
     modelAliases,
     comboByName,
@@ -259,9 +290,8 @@ export async function GET(request) {
     // Flag ids that match neither the registry nor a user-added custom model, so
     // the modal can say the numbers are pattern-derived rather than declared.
     if (!findRegistryModel(detail.owned_by, detail.provider.id, id.slice(id.indexOf("/") + 1))) {
-      const customModels = await getCustomModels().catch(() => []);
       const modelId = id.slice(id.indexOf("/") + 1);
-      const isCustom = customModels.some(
+      const isCustom = ctx.customModels.some(
         (m) => m?.id === modelId && (m.providerAlias === detail.owned_by || m.providerAlias === detail.provider.id),
       );
       detail.source = isCustom ? "custom" : "unlisted";

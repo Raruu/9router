@@ -6,7 +6,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { CATALOG_FILE, CATALOG_RAW_FILE, invalidateCatalog, installCatalogSource } from "open-sse/providers/catalogOverride.js";
+import { CATALOG_FILE, CATALOG_RAW_FILE, invalidateCatalog } from "open-sse/providers/catalogOverride.js";
 
 const CATALOG_URL = "https://models.dev/api.json";
 const FETCH_TIMEOUT_MS = 60000;
@@ -44,7 +44,7 @@ let state = { running: false, lastSync: null, lastError: null, lastResult: null,
 let timer = null;
 
 export function getSyncState() {
-  return { ...state, file: CATALOG_FILE, url: CATALOG_URL, intervalMs: SYNC_INTERVAL_MS };
+  return { ...state, file: CATALOG_FILE, url: CATALOG_URL, openRouterUrl: OPENROUTER_CATALOG_URL, intervalMs: SYNC_INTERVAL_MS };
 }
 
 // "zai-org/GLM-4.6V:free" -> "glm-4.6v"
@@ -142,16 +142,11 @@ function build(catalog, entries) {
 // Snapshot every registered model with the capabilities the hand-written tables
 // resolve on their own, so build() can tell which upstream values are a change.
 //
-// The previous catalog MUST be detached first. Leaving it installed makes each
-// delta relative to the last one, so a value that still agrees with upstream
-// looks like "no change" and is dropped — the file erases itself over two runs.
 async function collectEntries() {
-  const [{ default: registry }, { getCapabilitiesForModel, setCatalogSource }] = await Promise.all([
+  const [{ default: registry }, { getHardcodedCapabilitiesForModel }] = await Promise.all([
     import("open-sse/providers/registry/index.js"),
     import("open-sse/providers/capabilities.js"),
   ]);
-  setCatalogSource(null);
-
   const entries = [];
   for (const provider of registry) {
     for (const model of provider.models || []) {
@@ -159,7 +154,7 @@ async function collectEntries() {
         provider: provider.id,
         model: model.id,
         contextLength: model.contextLength,
-        current: getCapabilitiesForModel(provider.id, model.id),
+        current: getHardcodedCapabilitiesForModel(provider.id, model.id),
       });
     }
   }
@@ -213,8 +208,6 @@ export async function syncModelCatalog() {
     console.log(`[modelCatalog] sync failed: ${state.lastError}`);
     return null;
   } finally {
-    // collectEntries() detaches the reader; put it back whatever happened.
-    await installCatalogSource().catch(() => {});
     state.running = false;
   }
 }

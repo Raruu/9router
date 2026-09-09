@@ -81,4 +81,24 @@ describe("provider custom model rows", () => {
       },
     ]);
   });
+
+  it("preserves a live catalog reference on persisted custom model rows", () => {
+    const catalogRef = { source: "openrouter", provider: "*", pattern: "*vision-model*" };
+
+    expect(getProviderCustomModelRows({
+      customModels: [
+        { providerAlias: "ollama", id: "vision-model", type: "llm", catalogRef },
+      ],
+      providerAlias: "ollama",
+    })).toEqual([
+      {
+        id: "vision-model",
+        name: "vision-model",
+        fullModel: "ollama/vision-model",
+        source: "custom",
+        type: "llm",
+        catalogRef,
+      },
+    ]);
+  });
 });

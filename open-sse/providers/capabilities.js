@@ -428,13 +428,12 @@ export const PATTERN_CAPABILITIES = [
  */
 const MODALITY_KEYS = ["vision", "pdf", "audioInput", "videoInput"];
 
-// Catalog lookups, installed by the server at startup. Left as no-ops in the
-// browser bundle, where there is no file to read.
+// Catalog resolution is installed by the server at startup. The seam is sync so
+// this hot path remains usable by browser bundles without importing DB/node APIs.
 let catalogSource = null;
 
 /**
- * Install the synced catalog reader (server only).
- * @param {{ getModalities: Function, getLimits: Function } | null} source
+ * @param {{ getCapabilities?: Function, getModalities?: Function, getLimits?: Function } | null} source
  */
 export function setCatalogSource(source) {
   catalogSource = source;
@@ -444,9 +443,15 @@ export function setCatalogSource(source) {
 // Strictly additive: a capability already true stays true, and a false one only
 // flips when an outside source positively declares support.
 function refine(base, provider, model) {
-  const result = { ...DEFAULT_CAPABILITIES, ...base };
+  // Treat the legacy name heuristic as part of the lowest-priority hardcoded
+  // source so an explicit catalog `vision: false` remains authoritative.
+  const hardcoded = { ...(base || {}) };
+  if (hardcoded.vision !== true && looksLikeVisionModel(model)) hardcoded.vision = true;
+  let result = { ...DEFAULT_CAPABILITIES, ...hardcoded };
 
-  if (catalogSource) {
+  if (catalogSource?.getCapabilities) {
+    result = { ...DEFAULT_CAPABILITIES, ...(catalogSource.getCapabilities(provider, model, hardcoded) || {}) };
+  } else if (catalogSource) {
     const modalities = catalogSource.getModalities(model);
     if (modalities) {
       for (const key of MODALITY_KEYS) {
@@ -461,12 +466,14 @@ function refine(base, provider, model) {
     }
   }
 
-  if (!result.vision && looksLikeVisionModel(model)) result.vision = true;
-
   return result;
 }
 
 export function getCapabilitiesForModel(provider, model) {
+  return resolveCapabilities(provider, model, true);
+}
+
+function resolveCapabilities(provider, model, withCatalog) {
   if (!model) return { ...DEFAULT_CAPABILITIES };
 
   // Canonical exact lookup strips vendor prefix: "anthropic/claude-opus-4.7" -> "claude-opus-4.7".
@@ -475,21 +482,36 @@ export function getCapabilitiesForModel(provider, model) {
   // 1. Provider-specific override
   if (provider) {
     const providerCaps = PROVIDER_CAPABILITIES[provider];
-    if (providerCaps?.[model]) return { ...DEFAULT_CAPABILITIES, ...providerCaps[model] };
-    if (providerCaps?.[baseModel]) return { ...DEFAULT_CAPABILITIES, ...providerCaps[baseModel] };
+    if (providerCaps?.[model]) return withCatalog ? refine(providerCaps[model], provider, model) : { ...DEFAULT_CAPABILITIES, ...providerCaps[model] };
+    if (providerCaps?.[baseModel]) return withCatalog ? refine(providerCaps[baseModel], provider, model) : { ...DEFAULT_CAPABILITIES, ...providerCaps[baseModel] };
   }
 
   // 2. Canonical exact
-  if (MODEL_CAPABILITIES[baseModel]) return { ...DEFAULT_CAPABILITIES, ...MODEL_CAPABILITIES[baseModel] };
-  if (MODEL_CAPABILITIES[model]) return { ...DEFAULT_CAPABILITIES, ...MODEL_CAPABILITIES[model] };
+  if (MODEL_CAPABILITIES[baseModel]) return withCatalog ? refine(MODEL_CAPABILITIES[baseModel], provider, model) : { ...DEFAULT_CAPABILITIES, ...MODEL_CAPABILITIES[baseModel] };
+  if (MODEL_CAPABILITIES[model]) return withCatalog ? refine(MODEL_CAPABILITIES[model], provider, model) : { ...DEFAULT_CAPABILITIES, ...MODEL_CAPABILITIES[model] };
 
   // 3. Pattern match (first match wins), refined by catalog + name heuristic
   for (const { pattern, caps } of PATTERN_CAPABILITIES) {
     if (matchPattern(pattern, baseModel) || matchPattern(pattern, model)) {
-      return refine(caps, provider, model);
+      return withCatalog ? refine(caps, provider, model) : { ...DEFAULT_CAPABILITIES, ...caps };
     }
   }
 
   // 4. Floor
-  return refine(null, provider, model);
+  return withCatalog ? refine(null, provider, model) : { ...DEFAULT_CAPABILITIES };
+}
+
+// Stable API-facing projection of the hand-written catalog. models.dev deltas
+// intentionally remain part of this hardcoded layer rather than a new priority.
+export function getHardcodedCapabilityCatalog() {
+  return {
+    canonicalExact: Object.entries(MODEL_CAPABILITIES).map(([model, capabilities]) => ({ model, capabilities: { ...capabilities } })),
+    providerExact: Object.entries(PROVIDER_CAPABILITIES).flatMap(([provider, models]) =>
+      Object.entries(models).map(([model, capabilities]) => ({ provider, model, capabilities: { ...capabilities } }))),
+    patterns: PATTERN_CAPABILITIES.map(({ pattern, caps }) => ({ pattern, capabilities: { ...caps } })),
+  };
+}
+
+export function getHardcodedCapabilitiesForModel(provider, model) {
+  return resolveCapabilities(provider, model, false);
 }

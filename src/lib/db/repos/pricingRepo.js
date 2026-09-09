@@ -7,7 +7,7 @@ const CACHE_TTL_MS = 5000;
 
 let cache = { value: null, expiresAt: 0 };
 
-function invalidate() {
+export function invalidatePricingCache() {
   cache = { value: null, expiresAt: 0 };
 }
 
@@ -57,9 +57,11 @@ export async function getPricing() {
 export async function getPricingForModel(provider, model) {
   if (!model) return null;
   const userPricing = await getUserPricing();
-  if (provider && userPricing[provider]?.[model]) return userPricing[provider][model];
   const { getPricingForModel: resolveConst } = await import("open-sse/providers/pricing.js");
-  return resolveConst(provider, model);
+  const catalogPricing = resolveConst(provider, model);
+  const override = provider && userPricing[provider]?.[model];
+  if (!override) return catalogPricing;
+  return { ...(catalogPricing || {}), ...override };
 }
 
 // Atomic merge inside transaction (per-provider read-modify-write)
@@ -79,7 +81,7 @@ export async function updatePricing(pricingData) {
       );
     }
   });
-  invalidate();
+  invalidatePricingCache();
   return await getUserPricing();
 }
 
@@ -103,12 +105,12 @@ export async function resetPricing(provider, model) {
       );
     }
   });
-  invalidate();
+  invalidatePricingCache();
   return await getUserPricing();
 }
 
 export async function resetAllPricing() {
   await pricingKv.clear();
-  invalidate();
+  invalidatePricingCache();
   return {};
 }

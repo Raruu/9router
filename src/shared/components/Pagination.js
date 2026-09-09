@@ -2,6 +2,7 @@
 
 import { cn } from "@/shared/utils/cn";
 import Button from "./Button";
+import PropTypes from "prop-types";
 
 export default function Pagination({
   currentPage,
@@ -9,6 +10,7 @@ export default function Pagination({
   totalItems,
   onPageChange,
   onPageSizeChange,
+  pageSizeOptions = [10, 20, 50],
   className,
 }) {
   const totalPages = Math.ceil(totalItems / pageSize);
@@ -65,7 +67,7 @@ export default function Pagination({
               )}
               style={{ colorScheme: 'auto' }}
             >
-              {[10, 20, 50].map((size) => (
+              {pageSizeOptions.map((size) => (
                 <option key={size} value={size}>
                   {size}
                 </option>
@@ -148,3 +150,13 @@ export default function Pagination({
     </div>
   );
 }
+
+Pagination.propTypes = {
+  currentPage: PropTypes.number.isRequired,
+  pageSize: PropTypes.number.isRequired,
+  totalItems: PropTypes.number.isRequired,
+  onPageChange: PropTypes.func.isRequired,
+  onPageSizeChange: PropTypes.func,
+  pageSizeOptions: PropTypes.arrayOf(PropTypes.number),
+  className: PropTypes.string,
+};

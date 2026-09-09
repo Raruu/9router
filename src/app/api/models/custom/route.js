@@ -14,6 +14,18 @@ function sanitizeCaps(caps) {
   return Object.keys(clean).length ? clean : null;
 }
 
+const CATALOG_SOURCES = new Set(["user", "openrouter", "hardcoded"]);
+
+function sanitizeCatalogRef(ref) {
+  if (ref === null || ref === undefined) return null;
+  if (!ref || typeof ref !== "object" || Array.isArray(ref)) throw new Error("Invalid catalog pattern");
+  const source = String(ref.source || "").trim().toLowerCase();
+  const provider = String(ref.provider || "*").trim().toLowerCase();
+  const pattern = String(ref.pattern || "").trim();
+  if (!CATALOG_SOURCES.has(source) || !provider || !pattern || pattern.length > 512) throw new Error("Invalid catalog pattern");
+  return { source, provider, pattern };
+}
+
 // GET /api/models/custom - List all custom models
 export async function GET() {
   try {
@@ -28,16 +40,27 @@ export async function GET() {
 // POST /api/models/custom - Add custom model
 export async function POST(request) {
   try {
-    const { providerAlias, id, type, name, caps } = await request.json();
+    const body = await request.json();
+    const { providerAlias, id, type, name, caps } = body;
     if (!providerAlias || !id) {
       return NextResponse.json({ error: "providerAlias and id required" }, { status: 400 });
     }
     const cleanCaps = sanitizeCaps(caps);
-    const added = await addCustomModel({ providerAlias, id, type: type || "llm", name, ...(cleanCaps ? { caps: cleanCaps } : {}) });
+    const catalogRef = sanitizeCatalogRef(body.catalogRef);
+    const added = await addCustomModel({
+      providerAlias,
+      id,
+      type: type || "llm",
+      name,
+      ...(cleanCaps ? { caps: cleanCaps } : {}),
+      ...(catalogRef ? { catalogRef } : {}),
+      clearCatalogMetadata: Object.hasOwn(body, "catalogRef") && !catalogRef,
+    });
     return NextResponse.json({ success: true, added });
   } catch (error) {
     console.log("Error adding custom model:", error);
-    return NextResponse.json({ error: "Failed to add custom model" }, { status: 500 });
+    const invalidCatalogRef = error?.message === "Invalid catalog pattern";
+    return NextResponse.json({ error: invalidCatalogRef ? error.message : "Failed to add custom model" }, { status: invalidCatalogRef ? 400 : 500 });
   }
 }
 

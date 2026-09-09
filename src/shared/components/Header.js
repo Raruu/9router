@@ -70,6 +70,13 @@ const getPageInfo = (pathname) => {
     }
   }
 
+  if (pathname.includes("/model-catalog"))
+    return {
+      title: "Model Catalog",
+      description: "Manage model capabilities, limits, pricing, and metadata sources",
+      icon: "view_list",
+      breadcrumbs: [],
+    };
   if (pathname.includes("/providers") && !pathname.includes("/media-providers"))
     return {
       title: "Providers",
