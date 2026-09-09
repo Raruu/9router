@@ -85,6 +85,12 @@ export const OPENAI_COMPATIBLE_PREFIX = "openai-compatible-";
 export const ANTHROPIC_COMPATIBLE_PREFIX = "anthropic-compatible-";
 export const CUSTOM_EMBEDDING_PREFIX = "custom-embedding-";
 
+// Switchable kinds for custom compatible nodes (see convertProviderNodeType).
+export const COMPATIBLE_NODE_TYPES = [
+  { value: "openai-compatible", label: "OpenAI Compatible" },
+  { value: "anthropic-compatible", label: "Anthropic Compatible" },
+];
+
 export function isOpenAICompatibleProvider(providerId) {
   return typeof providerId === "string" && providerId.startsWith(OPENAI_COMPATIBLE_PREFIX);
 }

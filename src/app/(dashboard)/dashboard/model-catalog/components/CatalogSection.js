@@ -20,9 +20,9 @@ export default function CatalogSection({ title, description, icon, actions, rows
   return (
     <section>
       <Card padding="sm" className="min-w-0">
-        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex min-w-0 items-start gap-3">
-            <span className="material-symbols-outlined mt-0.5 text-[20px] text-primary">{icon}</span>
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="material-symbols-outlined text-[20px] text-primary">{icon}</span>
             <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <h2 className="font-semibold text-text-main">{title}</h2>

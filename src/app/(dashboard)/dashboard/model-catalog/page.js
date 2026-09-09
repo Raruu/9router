@@ -239,7 +239,7 @@ export default function ModelCatalogPage() {
         emptyText={capability !== "all" ? "No user entries match the capability filter." : "No user-defined models yet."}
         onEdit={(entry) => { setEditing(entry); setDialogOpen(true); }}
         onDelete={setDeleting}
-        actions={<Button size="sm" icon="add" onClick={() => { setEditing(null); setDialogOpen(true); }}>Add model</Button>}
+        actions={<Button icon="add" onClick={() => { setEditing(null); setDialogOpen(true); }}>Add model</Button>}
       />
 
       <CatalogSection
@@ -252,8 +252,8 @@ export default function ModelCatalogPage() {
         onDelete={setDeletingOpenRouter}
         actions={
           <>
-            <Button size="sm" variant="secondary" icon="download" loading={busy === "fetch"} onClick={fetchOpenRouter}>Fetch Models</Button>
-            <Button size="sm" variant="danger" icon="delete_sweep" disabled={!openrouterStatus.count} onClick={() => setConfirmClear(true)}>Clear All</Button>
+            <Button variant="secondary" icon="download" loading={busy === "fetch"} onClick={fetchOpenRouter}>Fetch Models</Button>
+            <Button variant="danger" icon="delete_sweep" disabled={!openrouterStatus.count} onClick={() => setConfirmClear(true)}>Clear All</Button>
           </>
         }
       />

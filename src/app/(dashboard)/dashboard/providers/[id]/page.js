@@ -62,6 +62,7 @@ export default function ProviderDetailPage() {
   const [testingModelIds, setTestingModelIds] = useState(() => new Set());
   const [showAddCustomModel, setShowAddCustomModel] = useState(false);
   const [editingCustomModel, setEditingCustomModel] = useState(null);
+  const [importingCompatModels, setImportingCompatModels] = useState(false);
   const [selectedConnectionIds, setSelectedConnectionIds] = useState([]);
   const [bulkProxyPoolId, setBulkProxyPoolId] = useState("__none__");
   const [bulkUpdatingProxy, setBulkUpdatingProxy] = useState(false);
@@ -356,6 +357,11 @@ export default function ProviderDetailPage() {
       });
       const data = await res.json();
       if (res.ok) {
+        // Switching provider type moves the node to a new id — follow it.
+        if (data.converted && data.node?.id && data.node.id !== providerId) {
+          router.push(`/dashboard/providers/${data.node.id}`);
+          return;
+        }
         setProviderNode(data.node);
         await fetchConnections();
         setShowEditNodeModal(false);
@@ -557,6 +563,66 @@ export default function ProviderDetailPage() {
       }
     } catch (error) {
       console.log("Error deleting custom model:", error);
+    }
+  };
+
+  // Rows for OpenAI/Anthropic compatible nodes (no built-in models).
+  const compatModelRows = getProviderCustomModelRows({
+    customModels,
+    modelAliases,
+    providerAlias: providerStorageAlias,
+    type: "llm",
+  });
+  const canImportCompatModels = connections.some((conn) => conn.isActive !== false);
+
+  const openCompatModelModal = (existing = null) => {
+    setEditingCustomModel(existing);
+    setShowAddCustomModel(true);
+  };
+
+  const handleSaveCompatModel = async (modelId, catalogRef) => {
+    if (!editingCustomModel && compatModelRows.some((model) => model.id === modelId)) {
+      alert("Model already exists for this provider.");
+      return;
+    }
+    await handleAddCustomModel(modelId, "llm", providerStorageAlias, catalogRef);
+    setShowAddCustomModel(false);
+    setEditingCustomModel(null);
+  };
+
+  const handleImportCompatModels = async () => {
+    if (importingCompatModels) return;
+    const activeConnection = connections.find((conn) => conn.isActive !== false);
+    if (!activeConnection) return;
+
+    setImportingCompatModels(true);
+    try {
+      const res = await fetch(`/api/providers/${activeConnection.id}/models`);
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to import models");
+        return;
+      }
+      const models = data.models || [];
+      if (models.length === 0) {
+        alert("No models returned from /models.");
+        return;
+      }
+      let importedCount = 0;
+      for (const model of models) {
+        const modelId = model.id || model.name || model.model;
+        if (!modelId) continue;
+        if (compatModelRows.some((entry) => entry.id === modelId)) continue;
+        await handleAddCustomModel(modelId, "llm", providerStorageAlias);
+        importedCount += 1;
+      }
+      if (importedCount === 0) {
+        alert("No new models were added.");
+      }
+    } catch (error) {
+      console.log("Error importing models:", error);
+    } finally {
+      setImportingCompatModels(false);
     }
   };
 
@@ -1085,7 +1151,7 @@ export default function ProviderDetailPage() {
           onCopy={copy}
           onSetAlias={handleSetAlias}
           onDeleteAlias={handleDeleteAlias}
-          onAddCustomModel={(modelId, catalogRef) => handleAddCustomModel(modelId, "llm", providerStorageAlias, catalogRef)}
+          onEditModel={(entry) => openCompatModelModal(entry)}
           onDeleteCustomModel={(modelId) => handleDeleteCustomModel(modelId, "llm", providerStorageAlias)}
           getModelCaps={getCaps}
           connections={connections}
@@ -1675,7 +1741,28 @@ export default function ProviderDetailPage() {
               </select>
             )}
           </div>
-          {!isCompatible && (() => {
+          {isCompatible ? (
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                icon="add"
+                onClick={() => openCompatModelModal()}
+                className="w-full sm:w-auto"
+              >
+                Add Model
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                icon="download"
+                onClick={handleImportCompatModels}
+                disabled={!canImportCompatModels || importingCompatModels}
+                className="w-full sm:w-auto"
+              >
+                {importingCompatModels ? "Importing..." : "Import from /models"}
+              </Button>
+            </div>
+          ) : (() => {
             const allIds = [
               ...models,
               ...kiloFreeModels.filter((fm) => !models.some((m) => m.id === fm.id)),
@@ -1774,26 +1861,27 @@ export default function ProviderDetailPage() {
           node={providerNode}
           onSave={handleUpdateNode}
           onClose={() => setShowEditNodeModal(false)}
-          isAnthropic={isAnthropicCompatible}
         />
       )}
-      {!isCompatible && (
-        <AddCustomModelModal
-          key={editingCustomModel?.id || "add"}
-          isOpen={showAddCustomModel}
-          providerAlias={providerStorageAlias}
-          existingModel={editingCustomModel}
-          onSave={async (modelId, catalogRef) => {
-            await handleAddCustomModel(modelId, "llm", providerStorageAlias, catalogRef);
-            setShowAddCustomModel(false);
-            setEditingCustomModel(null);
-          }}
-          onClose={() => {
-            setShowAddCustomModel(false);
-            setEditingCustomModel(null);
-          }}
-        />
-      )}
+      <AddCustomModelModal
+        key={editingCustomModel?.id || "add"}
+        isOpen={showAddCustomModel}
+        providerAlias={providerStorageAlias}
+        existingModel={editingCustomModel}
+        onSave={async (modelId, catalogRef) => {
+          if (isCompatible) {
+            await handleSaveCompatModel(modelId, catalogRef);
+            return;
+          }
+          await handleAddCustomModel(modelId, "llm", providerStorageAlias, catalogRef);
+          setShowAddCustomModel(false);
+          setEditingCustomModel(null);
+        }}
+        onClose={() => {
+          setShowAddCustomModel(false);
+          setEditingCustomModel(null);
+        }}
+      />
 
       {providerId === "codex" && (
         <BulkImportCodexModal
