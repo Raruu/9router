@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import PropTypes from "prop-types";
-import { Card, Button, Input, Modal, CardSkeleton, Toggle, ConfirmModal } from "@/shared/components";
+import { Card, Button, Input, Modal, CardSkeleton, Toggle, ConfirmModal, ModelsExposureCard } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import {
   TUNNEL_BENEFITS,
@@ -28,7 +28,9 @@ export default function APIPageClient({ machineId }) {
   const [requireApiKey, setRequireApiKey] = useState(false);
   const [requireLogin, setRequireLogin] = useState(true);
   const [hasPassword, setHasPassword] = useState(true);
- const [tunnelDashboardAccess, setTunnelDashboardAccess] = useState(false);
+  const [tunnelDashboardAccess, setTunnelDashboardAccess] = useState(false);
+  const [modelsExposure, setModelsExposure] = useState(null);
+  const [modelsExposureSaving, setModelsExposureSaving] = useState(false);
 
  // Cloudflare Tunnel state
   const [tunnelChecking, setTunnelChecking] = useState(true);
@@ -204,6 +206,7 @@ export default function APIPageClient({ machineId }) {
         setRequireLogin(data.requireLogin !== false);
         setHasPassword(data.hasPassword || false);
         setTunnelDashboardAccess(data.tunnelDashboardAccess || false);
+        setModelsExposure(data.modelsExposure || "all");
       }
       if (statusRes.ok) {
         const data = await statusRes.json();
@@ -250,6 +253,22 @@ export default function APIPageClient({ machineId }) {
       if (res.ok) setRequireApiKey(value);
     } catch (error) {
       console.log("Error updating requireApiKey:", error);
+    }
+  };
+
+  const handleModelsExposure = async (value) => {
+    setModelsExposureSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ modelsExposure: value }),
+      });
+      if (res.ok) setModelsExposure(value);
+    } catch (error) {
+      console.log("Error updating modelsExposure:", error);
+    } finally {
+      setModelsExposureSaving(false);
     }
   };
 
@@ -962,6 +981,13 @@ export default function APIPageClient({ machineId }) {
           </div>
         )}
       </Card>
+
+      <ModelsExposureCard
+        value={modelsExposure || "all"}
+        disabled={modelsExposure === null || modelsExposureSaving}
+        onChange={handleModelsExposure}
+        variant="endpoint"
+      />
 
       {/* API Keys */}
       <Card id="require-api-key">
