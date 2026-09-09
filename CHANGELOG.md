@@ -1,3 +1,16 @@
+# v0.5.69-2 (2026-09-09)
+
+## Features
+- **Models**: new Model Catalog dashboard (`/dashboard/model-catalog`, in the
+  sidebar) with User Defined, OpenRouter and Hardcoded sections. User rules are
+  exact or glob patterns with per-pattern capabilities, token limits and
+  pricing; a source priority setting picks whether user rules fall through to
+  OpenRouter or hardcoded metadata first. 
+- **Models**: the Profile Model List exposure setting (Combos + Models /
+  Combos only / Models only) is now also on `/dashboard/endpoint`.
+- **Models**: Combo Info member `Caps` shows the full shared capability badges,
+  covering every enabled capability
+
 # v0.5.69-1 (2026-09-05)
 
 Merged upstream v0.5.69 — see that section below for the full upstream
