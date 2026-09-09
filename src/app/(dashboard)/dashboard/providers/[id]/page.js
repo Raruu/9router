@@ -32,6 +32,24 @@ const AUTO_PING_SETTINGS_KEYS = {
   codex: "codexAutoPing",
 };
 
+// Per-provider chat timeout overrides (seconds in the UI, ms in settings).
+// Empty = global default. Stall/first-token apply to streaming only.
+const TIMEOUT_FIELDS = [
+  { msKey: "connectMs", stateKey: "connect", label: "Connect", defaultSec: 60, hint: "Abort if the upstream sends no response headers within this time." },
+  { msKey: "firstChunkMs", stateKey: "firstChunk", label: "First token", defaultSec: 200, hint: "Abort if the first streamed chunk takes longer (streaming only)." },
+  { msKey: "stallMs", stateKey: "stall", label: "Stall", defaultSec: 360, hint: "Abort if no data arrives for this long mid-stream (streaming only)." },
+];
+
+const TIMEOUT_MIN_SEC = 1;
+const TIMEOUT_MAX_SEC = 3600;
+
+function parseTimeoutSec(raw) {
+  if (raw === "" || raw == null) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < TIMEOUT_MIN_SEC) return undefined;
+  return Math.min(TIMEOUT_MAX_SEC, Math.max(TIMEOUT_MIN_SEC, Math.round(n))) * 1000;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -71,6 +89,7 @@ export default function ProviderDetailPage() {
   const [providerStrategy, setProviderStrategy] = useState(null);
   const [providerStickyLimit, setProviderStickyLimit] = useState("");
   const [thinkingMode, setThinkingMode] = useState("auto");
+  const [timeoutInputs, setTimeoutInputs] = useState({ connect: "", firstChunk: "", stall: "" });
   const [autoPing, setAutoPing] = useState({ enabled: false, connections: {} });
   const [suggestedModels, setSuggestedModels] = useState([]);
   const [liveModels, setLiveModels] = useState([]);
@@ -322,6 +341,13 @@ export default function ProviderDetailPage() {
       // Load per-provider thinking config
       const thinkingCfg = (settingsData.providerThinking || {})[providerId] || {};
       setThinkingMode(thinkingCfg.mode || "auto");
+      // Load per-provider timeout overrides (ms → seconds inputs, empty = default)
+      const timeoutCfg = (settingsData.providerTimeouts || {})[providerId] || {};
+      setTimeoutInputs({
+        connect: timeoutCfg.connectMs ? String(timeoutCfg.connectMs / 1000) : "",
+        firstChunk: timeoutCfg.firstChunkMs ? String(timeoutCfg.firstChunkMs / 1000) : "",
+        stall: timeoutCfg.stallMs ? String(timeoutCfg.stallMs / 1000) : "",
+      });
       const autoPingSettingsKey = AUTO_PING_SETTINGS_KEYS[providerId];
       const apCfg = autoPingSettingsKey ? settingsData[autoPingSettingsKey] || {} : {};
       setAutoPing({ enabled: apCfg.enabled === true, connections: apCfg.connections || {} });
@@ -440,6 +466,39 @@ export default function ProviderDetailPage() {
   const handleThinkingModeChange = (mode) => {
     setThinkingMode(mode);
     saveThinkingConfig(mode);
+  };
+
+  const saveProviderTimeouts = async (overrides) => {
+    try {
+      const settingsRes = await fetch("/api/settings", { cache: "no-store" });
+      const settingsData = settingsRes.ok ? await settingsRes.json() : {};
+      const current = settingsData.providerTimeouts || {};
+      const updated = { ...current };
+      if (Object.keys(overrides).length === 0) {
+        delete updated[providerId];
+      } else {
+        updated[providerId] = overrides;
+      }
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerTimeouts: updated }),
+      });
+    } catch (error) {
+      console.log("Error saving provider timeouts:", error);
+    }
+  };
+
+  const handleTimeoutChange = (field, raw) => {
+    const merged = { ...timeoutInputs, [field.stateKey]: raw };
+    setTimeoutInputs(merged);
+    if (parseTimeoutSec(raw) === undefined) return;
+    const overrides = {};
+    for (const f of TIMEOUT_FIELDS) {
+      const ms = parseTimeoutSec(merged[f.stateKey]);
+      if (ms != null) overrides[f.msKey] = ms;
+    }
+    saveProviderTimeouts(overrides);
   };
 
   const saveAutoPing = async (next) => {
@@ -1878,6 +1937,32 @@ export default function ProviderDetailPage() {
           )}
         </Card>
       )}
+
+      {/* Timeouts */}
+      <Card>
+        <div className="mb-3 flex flex-col gap-1">
+          <h2 className="text-lg font-semibold">Timeouts</h2>
+          <p className="text-sm text-text-muted">
+            Per-provider chat timeouts in seconds. Empty uses the global default.
+            Applies to combo members served by this provider. First-token and stall apply to streaming only.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {TIMEOUT_FIELDS.map((field) => (
+            <Input
+              key={field.stateKey}
+              label={field.label}
+              type="number"
+              min={TIMEOUT_MIN_SEC}
+              max={TIMEOUT_MAX_SEC}
+              placeholder={`Default: ${field.defaultSec}s`}
+              value={timeoutInputs[field.stateKey]}
+              onChange={(e) => handleTimeoutChange(field, e.target.value)}
+              hint={field.hint}
+            />
+          ))}
+        </div>
+      </Card>
 
       {/* Models */}
       <Card>

@@ -1,5 +1,5 @@
 // Stream handler with disconnect detection - shared for all providers
-import { STREAM_STALL_TIMEOUT_MS } from "../config/runtimeConfig.js";
+import { STREAM_STALL_TIMEOUT_MS, STREAM_FIRST_CHUNK_TIMEOUT_MS } from "../config/runtimeConfig.js";
 import { dbg, isDebugEnabled } from "./debugLog.js";
 
 // Get HH:MM:SS timestamp
@@ -185,11 +185,15 @@ export function createDisconnectAwareStream(transformStream, streamController, o
  * Any upstream chunk resets the timer. If no bytes arrive for
  * STREAM_STALL_TIMEOUT_MS, abort the underlying fetch via the controller.
  *
+ * firstChunkTimeoutMs bounds the wait for the very first upstream chunk
+ * (prompt prefill). Fires independently of the stall timer and is cleared
+ * as soon as the first chunk arrives.
+ *
  * @param {Response} providerResponse - Response from provider
  * @param {TransformStream} transformStream - Transform stream for SSE
  * @param {object} streamController - Stream controller from createStreamController
  */
-export function pipeWithDisconnect(providerResponse, transformStream, streamController, onAbortTerminal = null, stallTimeoutMs = STREAM_STALL_TIMEOUT_MS) {
+export function pipeWithDisconnect(providerResponse, transformStream, streamController, onAbortTerminal = null, stallTimeoutMs = STREAM_STALL_TIMEOUT_MS, firstChunkTimeoutMs = STREAM_FIRST_CHUNK_TIMEOUT_MS) {
   let stallTimer = null;
   let chunkCount = 0;
   let totalBytes = 0;
@@ -212,22 +216,39 @@ export function pipeWithDisconnect(providerResponse, transformStream, streamCont
   // Wrap controller so every termination path clears the stall timer.
   // Without this, abort/cancel/downstream-error paths leave the timer armed
   // and a stale abort could fire after the request has already ended.
+  // (clearFirstChunk is defined below; these run after it is initialized.)
   const wrappedController = {
     signal: streamController.signal,
     startTime: streamController.startTime,
     isConnected: () => streamController.isConnected(),
-    handleComplete: () => { dbg(tag, `complete | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearStall(); streamController.handleComplete(); },
-    handleError: (e) => { dbg(tag, `error: ${e?.message} | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearStall(); streamController.handleError(e); },
-    handleDisconnect: (r) => { dbg(tag, `disconnect: ${r} | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearStall(); streamController.handleDisconnect(r); },
-    abort: () => { clearStall(); streamController.abort(); }
+    handleComplete: () => { dbg(tag, `complete | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearStall(); clearFirstChunk(); streamController.handleComplete(); },
+    handleError: (e) => { dbg(tag, `error: ${e?.message} | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearStall(); clearFirstChunk(); streamController.handleError(e); },
+    handleDisconnect: (r) => { dbg(tag, `disconnect: ${r} | chunks=${chunkCount} | bytes=${totalBytes} | dur=${Date.now() - t0}ms`); clearStall(); clearFirstChunk(); streamController.handleDisconnect(r); },
+    abort: () => { clearStall(); clearFirstChunk(); streamController.abort(); }
   };
 
   armStall();
-  dbg(tag, `pipe start | stallTimeout=${stallTimeoutMs}ms`);
+  dbg(tag, `pipe start | stallTimeout=${stallTimeoutMs}ms | firstChunkTimeout=${firstChunkTimeoutMs}ms`);
+
+  let firstChunkTimer = null;
+  if (firstChunkTimeoutMs) {
+    firstChunkTimer = setTimeout(() => {
+      firstChunkTimer = null;
+      if (chunkCount === 0) {
+        dbg(tag, `FIRST CHUNK TIMEOUT ${firstChunkTimeoutMs}ms | no bytes received`);
+        streamController.handleError?.(new Error("first chunk timeout"));
+        streamController.abort?.();
+      }
+    }, firstChunkTimeoutMs);
+  }
+  const clearFirstChunk = () => {
+    if (firstChunkTimer) { clearTimeout(firstChunkTimer); firstChunkTimer = null; }
+  };
 
   const upstreamTap = new TransformStream({
     transform(chunk, controller) {
       chunkCount++;
+      clearFirstChunk();
       const sz = chunk?.byteLength || chunk?.length || 0;
       totalBytes += sz;
       const now = Date.now();
