@@ -10,6 +10,22 @@ function mapUser(row) {
   return { ...row, data: parseJson(row.data, {}) };
 }
 
+export class ModelCatalogConflictError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ModelCatalogConflictError";
+    this.code = "MODEL_CATALOG_CONFLICT";
+  }
+}
+
+export class ModelCatalogNotFoundError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = "ModelCatalogNotFoundError";
+    this.code = "MODEL_CATALOG_NOT_FOUND";
+  }
+}
+
 async function refreshRuntime() {
   const { refreshModelCatalogRuntime } = await import("./runtime.js");
   await refreshModelCatalogRuntime();
@@ -80,6 +96,93 @@ export async function deleteOpenRouterModel(pattern) {
 export async function getUserModelCatalog() {
   const db = await getAdapter();
   return db.all(`SELECT provider, pattern, name, data, createdAt, updatedAt FROM userModelCatalog ORDER BY provider, pattern`).map(mapUser);
+}
+
+function normalizedUserRule({ provider = "*", pattern, name = null, data }) {
+  return {
+    provider: normalizeProvider(provider),
+    pattern: normalizePattern(pattern),
+    name: name ? String(name).trim() : null,
+    data: sanitizeCatalogData(data),
+  };
+}
+
+function findUserRuleCaseInsensitive(db, provider, pattern) {
+  return db.get(
+    `SELECT provider, pattern, name, data, createdAt, updatedAt
+     FROM userModelCatalog WHERE provider = ? AND LOWER(pattern) = LOWER(?)`,
+    [provider, pattern],
+  );
+}
+
+export async function createUserModelCatalogRule(entry) {
+  const rule = normalizedUserRule(entry);
+  const db = await getAdapter();
+  const now = new Date().toISOString();
+  db.transaction(() => {
+    if (findUserRuleCaseInsensitive(db, rule.provider, rule.pattern)) {
+      throw new ModelCatalogConflictError(`Pattern already exists: ${rule.pattern}`);
+    }
+    db.run(
+      `INSERT INTO userModelCatalog(provider, pattern, name, data, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?)`,
+      [rule.provider, rule.pattern, rule.name, stringifyJson(rule.data), now, now],
+    );
+  });
+  await refreshRuntime();
+  return mapUser(db.get(
+    `SELECT provider, pattern, name, data, createdAt, updatedAt FROM userModelCatalog WHERE provider = ? AND pattern = ?`,
+    [rule.provider, rule.pattern],
+  ));
+}
+
+export async function updateUserModelCatalogRule(originalIdentity, entry) {
+  const original = {
+    provider: normalizeProvider(originalIdentity?.provider),
+    pattern: normalizePattern(originalIdentity?.pattern),
+  };
+  const rule = normalizedUserRule(entry);
+  const db = await getAdapter();
+  const now = new Date().toISOString();
+
+  db.transaction(() => {
+    const existing = db.get(
+      `SELECT provider, pattern FROM userModelCatalog WHERE provider = ? AND pattern = ?`,
+      [original.provider, original.pattern],
+    );
+    if (!existing) throw new ModelCatalogNotFoundError(`Pattern not found: ${original.pattern}`);
+
+    const target = findUserRuleCaseInsensitive(db, rule.provider, rule.pattern);
+    const targetIsOriginal = target
+      && target.provider === original.provider
+      && target.pattern.toLowerCase() === original.pattern.toLowerCase();
+    if (target && !targetIsOriginal) {
+      throw new ModelCatalogConflictError(`Pattern already exists: ${rule.pattern}`);
+    }
+
+    db.run(
+      `UPDATE userModelCatalog
+       SET provider = ?, pattern = ?, name = ?, data = ?, updatedAt = ?
+       WHERE provider = ? AND pattern = ?`,
+      [rule.provider, rule.pattern, rule.name, stringifyJson(rule.data), now, original.provider, original.pattern],
+    );
+
+    const originalPattern = original.pattern.toLowerCase();
+    for (const row of db.all(`SELECT key, value FROM kv WHERE scope = 'customModels'`)) {
+      const model = parseJson(row.value, {});
+      const ref = model.catalogRef;
+      if (ref?.source !== "user") continue;
+      if (String(ref.provider || "*").trim().toLowerCase() !== original.provider) continue;
+      if (String(ref.pattern || "").trim().toLowerCase() !== originalPattern) continue;
+      model.catalogRef = { ...ref, provider: rule.provider, pattern: rule.pattern };
+      db.run(`UPDATE kv SET value = ? WHERE scope = 'customModels' AND key = ?`, [stringifyJson(model), row.key]);
+    }
+  });
+
+  await refreshRuntime();
+  return mapUser(db.get(
+    `SELECT provider, pattern, name, data, createdAt, updatedAt FROM userModelCatalog WHERE provider = ? AND pattern = ?`,
+    [rule.provider, rule.pattern],
+  ));
 }
 
 export async function upsertUserModelCatalogRule({ provider = "*", pattern, name = null, data }) {

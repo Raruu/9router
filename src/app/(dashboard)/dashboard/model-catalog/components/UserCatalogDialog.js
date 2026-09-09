@@ -71,7 +71,7 @@ function toNumber(value) {
 export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSave }) {
   const [form, setForm] = useState(() => entry ? editForm(entry) : emptyForm());
   const [error, setError] = useState("");
-  const editing = Boolean(entry);
+  const editing = entry?.source === "user";
 
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
   const updateCapability = (field, value) => setForm((current) => ({
@@ -131,8 +131,8 @@ export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSa
     >
       <form id="user-catalog-form" onSubmit={submit} className="space-y-6">
         <div className="grid gap-4 sm:grid-cols-2">
-          <Select label="Match type" value={form.matchType} onChange={(event) => update("matchType", event.target.value)} options={[{ value: "exact", label: "Exact" }, { value: "glob", label: "Glob" }]} disabled={editing} />
-          <Input label="Model pattern" value={form.pattern} onChange={(event) => update("pattern", event.target.value)} placeholder={form.matchType === "glob" ? "*claude*sonnet*" : "claude-sonnet-4-6"} required disabled={editing} hint={editing ? "The pattern cannot be changed after creation." : undefined} />
+          <Select label="Match type" value={form.matchType} onChange={(event) => update("matchType", event.target.value)} options={[{ value: "exact", label: "Exact" }, { value: "glob", label: "Glob" }]} />
+          <Input label="Model pattern" value={form.pattern} onChange={(event) => update("pattern", event.target.value)} placeholder={form.matchType === "glob" ? "*claude*sonnet*" : "claude-sonnet-4-6"} required />
         </div>
 
         <fieldset>

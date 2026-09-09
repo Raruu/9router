@@ -120,13 +120,16 @@ export default function ModelCatalogPage() {
   };
 
   const saveUser = async (entry) => {
-    const wasEditing = Boolean(editing);
+    const wasEditing = editing?.source === "user";
     setBusy("user");
     try {
       await requestJson("/api/models/catalog/user", {
-        method: "POST",
+        method: wasEditing ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(entry),
+        body: JSON.stringify(wasEditing ? {
+          ...entry,
+          originalIdentity: { provider: editing.provider, pattern: editing.pattern },
+        } : entry),
       });
       setDialogOpen(false);
       setEditing(null);

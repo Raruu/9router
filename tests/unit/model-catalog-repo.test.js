@@ -72,4 +72,60 @@ describe("model catalog repository", () => {
     await db.addCustomModel({ providerAlias: "acme", id: "opaque", clearCatalogMetadata: true });
     expect((await db.getCustomModels())[0].catalogRef).toBeUndefined();
   });
+
+  it("renames user patterns and migrates matching custom model references atomically", async () => {
+    const db = await import("../../src/lib/db/index.js");
+    await db.createUserModelCatalogRule({
+      provider: "*",
+      pattern: "old-*",
+      data: { capabilities: { vision: true } },
+    });
+    await db.addCustomModel({
+      providerAlias: "acme",
+      id: "opaque",
+      catalogRef: { source: "user", provider: "*", pattern: "old-*" },
+    });
+    await db.addCustomModel({
+      providerAlias: "acme",
+      id: "other",
+      catalogRef: { source: "openrouter", provider: "*", pattern: "old-*" },
+    });
+
+    await db.updateUserModelCatalogRule(
+      { provider: "*", pattern: "old-*" },
+      { provider: "*", pattern: "new-*", data: { capabilities: { reasoning: true } } },
+    );
+
+    expect(await db.getUserModelCatalog()).toMatchObject([{
+      provider: "*",
+      pattern: "new-*",
+      data: { capabilities: { reasoning: true } },
+    }]);
+    const models = await db.getCustomModels();
+    expect(models.find((model) => model.id === "opaque").catalogRef).toEqual({
+      source: "user",
+      provider: "*",
+      pattern: "new-*",
+    });
+    expect(models.find((model) => model.id === "other").catalogRef.pattern).toBe("old-*");
+  });
+
+  it("leaves rules and references unchanged after a conflicting rename", async () => {
+    const db = await import("../../src/lib/db/index.js");
+    await db.createUserModelCatalogRule({ provider: "*", pattern: "first-*", data: {} });
+    await db.createUserModelCatalogRule({ provider: "*", pattern: "second-*", data: {} });
+    await db.addCustomModel({
+      providerAlias: "acme",
+      id: "opaque",
+      catalogRef: { source: "user", provider: "*", pattern: "first-*" },
+    });
+
+    await expect(db.updateUserModelCatalogRule(
+      { provider: "*", pattern: "first-*" },
+      { provider: "*", pattern: "SECOND-*", data: {} },
+    )).rejects.toMatchObject({ code: "MODEL_CATALOG_CONFLICT" });
+
+    expect((await db.getUserModelCatalog()).map((rule) => rule.pattern)).toEqual(["first-*", "second-*"]);
+    expect((await db.getCustomModels())[0].catalogRef.pattern).toBe("first-*");
+  });
 });

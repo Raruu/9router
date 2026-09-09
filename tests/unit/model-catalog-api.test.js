@@ -88,4 +88,77 @@ describe("model catalog API backend", () => {
     expect(await backend.deleteOpenRouterEntry({ pattern: "*first*" })).toBe(true);
     expect((await backend.getCatalog()).openrouter.models).toMatchObject([{ pattern: "*second*" }]);
   });
+
+  it("rejects duplicate user patterns case-insensitively within a provider", async () => {
+    const backend = await import("../../src/app/api/models/catalog/_backend.js");
+    const first = backend.validateUserEntry({
+      provider: "*",
+      pattern: "Foo-*",
+      matchType: "glob",
+      capabilities: { vision: true },
+    });
+    const duplicate = backend.validateUserEntry({
+      provider: "*",
+      pattern: "foo-*",
+      matchType: "glob",
+      capabilities: { reasoning: true },
+    });
+
+    await backend.saveUserEntry(first);
+    await expect(backend.saveUserEntry(duplicate)).rejects.toMatchObject({ status: 409 });
+    expect((await backend.getCatalog()).userDefined).toMatchObject([{
+      pattern: "Foo-*",
+      capabilities: { vision: true },
+    }]);
+  });
+
+  it("allows the same pattern under a different provider", async () => {
+    const backend = await import("../../src/app/api/models/catalog/_backend.js");
+    const entry = (provider) => backend.validateUserEntry({
+      provider,
+      pattern: "foo-*",
+      matchType: "glob",
+      capabilities: { vision: true },
+    });
+
+    await backend.saveUserEntry(entry("*"));
+    await backend.saveUserEntry(entry("acme"));
+
+    expect((await backend.getCatalog()).userDefined).toHaveLength(2);
+  });
+
+  it("renames a user pattern and rejects an occupied destination", async () => {
+    const backend = await import("../../src/app/api/models/catalog/_backend.js");
+    const entry = (pattern) => backend.validateUserEntry({
+      provider: "*",
+      pattern,
+      matchType: "glob",
+      capabilities: { tools: true },
+    });
+    await backend.saveUserEntry(entry("old-*"));
+    await backend.saveUserEntry(entry("taken-*"));
+
+    await backend.updateUserEntry({ provider: "*", pattern: "old-*" }, entry("new-*"));
+    await expect(backend.updateUserEntry(
+      { provider: "*", pattern: "new-*" },
+      entry("TAKEN-*"),
+    )).rejects.toMatchObject({ status: 409 });
+
+    expect((await backend.getCatalog()).userDefined.map((rule) => rule.pattern).sort()).toEqual(["new-*", "taken-*"]);
+  });
+
+  it("returns not found when editing a missing user pattern", async () => {
+    const backend = await import("../../src/app/api/models/catalog/_backend.js");
+    const entry = backend.validateUserEntry({
+      provider: "*",
+      pattern: "new-*",
+      matchType: "glob",
+      capabilities: {},
+    });
+
+    await expect(backend.updateUserEntry(
+      { provider: "*", pattern: "missing-*" },
+      entry,
+    )).rejects.toMatchObject({ status: 404 });
+  });
 });

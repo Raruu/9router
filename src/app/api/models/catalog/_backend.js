@@ -1,14 +1,16 @@
 import {
   clearOpenRouterModels,
+  createUserModelCatalogRule,
   deleteOpenRouterModel,
   deleteUserModelCatalogRule,
   getOpenRouterModels,
   getSettings,
   getUserModelCatalog,
   replaceOpenRouterModels,
+  updateUserModelCatalogRule,
   updateSettings,
-  upsertUserModelCatalogRule,
 } from "@/lib/db/index.js";
+import { ModelCatalogConflictError, ModelCatalogNotFoundError } from "@/lib/modelCatalog/repository.js";
 import { getHardcodedCatalogEntries } from "@/lib/modelCatalog/catalog.js";
 import { normalizeOpenRouterModels } from "@/lib/modelCatalog/normalize.js";
 import { sanitizeCatalogData } from "@/lib/modelCatalog/validation.js";
@@ -136,7 +138,33 @@ export function validateUserEntry(value) {
 }
 
 export async function saveUserEntry(entry) {
-  return await upsertUserModelCatalogRule(entry);
+  try {
+    return await createUserModelCatalogRule(entry);
+  } catch (error) {
+    if (error instanceof ModelCatalogConflictError) {
+      throw new CatalogBackendError(error.message, 409);
+    }
+    throw error;
+  }
+}
+
+export async function updateUserEntry(originalIdentity, entry) {
+  const provider = optionalString(originalIdentity?.provider, "originalIdentity.provider", 100);
+  const pattern = optionalString(originalIdentity?.pattern, "originalIdentity.pattern", 512);
+  if (!provider || !pattern) {
+    throw new CatalogBackendError("Original provider and pattern are required", 400);
+  }
+  try {
+    return await updateUserModelCatalogRule({ provider, pattern }, entry);
+  } catch (error) {
+    if (error instanceof ModelCatalogConflictError) {
+      throw new CatalogBackendError(error.message, 409);
+    }
+    if (error instanceof ModelCatalogNotFoundError) {
+      throw new CatalogBackendError(error.message, 404);
+    }
+    throw error;
+  }
 }
 
 export async function deleteUserEntry(identity) {

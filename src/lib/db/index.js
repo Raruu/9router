@@ -53,7 +53,8 @@ export {
 // Model catalog
 export {
   getOpenRouterModels, replaceOpenRouterModels, clearOpenRouterModels, deleteOpenRouterModel,
-  getUserModelCatalog, upsertUserModelCatalogRule, deleteUserModelCatalogRule,
+  getUserModelCatalog, createUserModelCatalogRule, updateUserModelCatalogRule,
+  upsertUserModelCatalogRule, deleteUserModelCatalogRule,
   replaceUserModelCatalog,
 } from "../modelCatalog/repository.js";
 
