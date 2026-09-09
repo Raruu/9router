@@ -29,6 +29,7 @@ export function getProviderCustomModelRows({
       fullModel,
       source: "custom",
       type: rowType,
+      ...(model.locked ? { locked: true } : {}),
       ...(model.caps ? { caps: model.caps } : {}),
       ...(model.catalogRef ? { catalogRef: model.catalogRef } : {}),
     });

@@ -3,10 +3,10 @@
 import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import { Badge, Button, Input, Modal, Select } from "@/shared/components";
+import { COMPATIBLE_NODE_TYPES } from "@/shared/constants/providers";
 
 const VARIANT_CONFIG = {
   openai: {
-    title: "Add OpenAI Compatible",
     type: "openai-compatible",
     defaultBaseUrl: "https://api.openai.com/v1",
     namePlaceholder: "OpenAI Compatible (Prod)",
@@ -17,7 +17,6 @@ const VARIANT_CONFIG = {
     hasApiType: true,
   },
   anthropic: {
-    title: "Add Anthropic Compatible",
     type: "anthropic-compatible",
     defaultBaseUrl: "https://api.anthropic.com/v1",
     namePlaceholder: "Anthropic Compatible (Prod)",
@@ -34,8 +33,11 @@ const API_TYPE_OPTIONS = [
   { value: "responses", label: "Responses API" },
 ];
 
-function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
-  const config = VARIANT_CONFIG[variant];
+function AddCompatibleModal({ isOpen, onClose, onCreated }) {
+  const [nodeType, setNodeType] = useState("openai-compatible");
+  const variantKey = nodeType === "anthropic-compatible" ? "anthropic" : "openai";
+  const config = VARIANT_CONFIG[variantKey];
+  const selectedIsAnthropic = variantKey === "anthropic";
   const initialFormData = () => ({
     name: "",
     prefix: "",
@@ -50,16 +52,29 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState(null);
 
-  // openai: reset baseUrl when apiType changes; anthropic: reset checks when opened
+  // Reset everything when opened; baseUrl resets are handled in the
+  // type/apiType change handlers below (no render-chasing effects).
   useEffect(() => {
-    if (config.hasApiType) {
-      setFormData((prev) => ({ ...prev, baseUrl: config.defaultBaseUrl }));
-    } else if (isOpen) {
-      setValidationResult(null);
-      setCheckKey("");
-      setCheckModelId("");
-    }
-  }, [config.hasApiType ? formData.apiType : isOpen]);
+    if (!isOpen) return;
+    setNodeType("openai-compatible");
+    setFormData({ name: "", prefix: "", apiType: "chat", baseUrl: VARIANT_CONFIG.openai.defaultBaseUrl });
+    setValidationResult(null);
+    setCheckKey("");
+    setCheckModelId("");
+  }, [isOpen]);
+
+  const handleTypeChange = (e) => {
+    const next = e.target.value;
+    const nextConfig = VARIANT_CONFIG[next === "anthropic-compatible" ? "anthropic" : "openai"];
+    setNodeType(next);
+    setFormData((prev) => ({
+      name: prev.name,
+      prefix: prev.prefix,
+      ...(nextConfig.hasApiType ? { apiType: "chat" } : {}),
+      baseUrl: nextConfig.defaultBaseUrl,
+    }));
+    setValidationResult(null);
+  };
 
   const handleSubmit = async () => {
     if (!formData.name.trim() || !formData.prefix.trim() || !formData.baseUrl.trim()) return;
@@ -134,65 +149,18 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
   };
 
   return (
-    <Modal isOpen={isOpen} title={config.title} onClose={onClose}>
-      <div className="flex flex-col gap-4">
-        <Input
-          label="Name"
-          value={formData.name}
-          onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-          placeholder={config.namePlaceholder}
-          hint="Required. A friendly label for this node."
-        />
-        <Input
-          label="Prefix"
-          value={formData.prefix}
-          onChange={(e) => setFormData({ ...formData, prefix: e.target.value })}
-          placeholder={config.prefixPlaceholder}
-          hint="Required. Used as the provider prefix for model IDs."
-        />
-        {config.hasApiType && (
-          <Select
-            label="API Type"
-            options={API_TYPE_OPTIONS}
-            value={formData.apiType}
-            onChange={(e) => setFormData({ ...formData, apiType: e.target.value })}
-          />
-        )}
-        <Input
-          label="Base URL"
-          value={formData.baseUrl}
-          onChange={(e) => setFormData({ ...formData, baseUrl: e.target.value })}
-          placeholder={config.defaultBaseUrl}
-          hint={config.baseUrlHint}
-        />
-        <Input
-          label="API Key (for Check)"
-          type="password"
-          value={checkKey}
-          onChange={(e) => setCheckKey(e.target.value)}
-        />
-        <Input
-          label="Model ID (optional)"
-          value={checkModelId}
-          onChange={(e) => setCheckModelId(e.target.value)}
-          placeholder={config.modelIdPlaceholder}
-          hint="If provider lacks /models endpoint, enter a model ID to validate via chat/completions instead."
-        />
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
-          <Button
-            onClick={handleValidate}
-            disabled={!checkKey || validating || !formData.baseUrl.trim()}
-            variant="secondary"
-            className="w-full sm:w-auto"
-          >
-            {validating ? "Checking..." : "Check"}
+    <Modal
+      isOpen={isOpen}
+      title={`Add ${selectedIsAnthropic ? "Anthropic" : "OpenAI"} Compatible`}
+      onClose={onClose}
+      size="lg"
+      footer={
+        <>
+          <Button onClick={onClose} variant="ghost">
+            Cancel
           </Button>
-          {renderValidationResult()}
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
           <Button
             onClick={handleSubmit}
-            fullWidth
             disabled={
               !formData.name.trim() ||
               !formData.prefix.trim() ||
@@ -202,17 +170,88 @@ function AddCompatibleModal({ variant, isOpen, onClose, onCreated }) {
           >
             {submitting ? "Creating..." : "Create"}
           </Button>
-          <Button onClick={onClose} variant="ghost" fullWidth>
-            Cancel
-          </Button>
+        </>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Input
+            label="Name"
+            value={formData.name}
+            onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+            placeholder={config.namePlaceholder}
+            hint="Required. A friendly label for this node."
+          />
+          <Input
+            label="Prefix"
+            value={formData.prefix}
+            onChange={(e) => setFormData({ ...formData, prefix: e.target.value })}
+            placeholder={config.prefixPlaceholder}
+            hint="Required. Used as the provider prefix for model IDs."
+          />
         </div>
+        <div className={`grid grid-cols-1 gap-4 ${selectedIsAnthropic ? "" : "sm:grid-cols-2"}`}>
+          <Select
+            label="Provider Type"
+            options={COMPATIBLE_NODE_TYPES}
+            value={nodeType}
+            onChange={handleTypeChange}
+          />
+          {config.hasApiType && (
+            <Select
+              label="API Type"
+              options={API_TYPE_OPTIONS}
+              value={formData.apiType}
+              onChange={(e) => setFormData({ ...formData, apiType: e.target.value, baseUrl: VARIANT_CONFIG.openai.defaultBaseUrl })}
+            />
+          )}
+        </div>
+        <Input
+          label="Base URL"
+          value={formData.baseUrl}
+          onChange={(e) => setFormData({ ...formData, baseUrl: e.target.value })}
+          placeholder={config.defaultBaseUrl}
+          hint={config.baseUrlHint}
+        />
+        <details className="rounded-lg border border-border-subtle px-3 py-2">
+          <summary className="cursor-pointer text-sm font-medium text-text-muted hover:text-primary">
+            Test connection (optional)
+          </summary>
+          <div className="flex flex-col gap-4 pt-3">
+            <div className="flex gap-2">
+              <Input
+                label="API Key (for Check)"
+                type="password"
+                value={checkKey}
+                onChange={(e) => setCheckKey(e.target.value)}
+                className="flex-1"
+              />
+              <div className="pt-6">
+                <Button
+                  onClick={handleValidate}
+                  disabled={!checkKey || validating || !formData.baseUrl.trim()}
+                  variant="secondary"
+                >
+                  {validating ? "Checking..." : "Check"}
+                </Button>
+              </div>
+            </div>
+            <Input
+              label="Model ID (optional)"
+              value={checkModelId}
+              onChange={(e) => setCheckModelId(e.target.value)}
+              placeholder={config.modelIdPlaceholder}
+              hint="If provider lacks /models endpoint, enter a model ID to validate via chat/completions instead."
+            />
+            {renderValidationResult()}
+          </div>
+        </details>
       </div>
     </Modal>
   );
 }
 
 AddCompatibleModal.propTypes = {
-  variant: PropTypes.oneOf(["openai", "anthropic"]).isRequired,
   isOpen: PropTypes.bool.isRequired,
   onClose: PropTypes.func.isRequired,
   onCreated: PropTypes.func.isRequired,

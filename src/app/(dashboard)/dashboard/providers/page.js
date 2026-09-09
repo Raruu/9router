@@ -102,8 +102,6 @@ export default function ProvidersPage() {
   const [loading, setLoading] = useState(true);
   const [showAllApikey, setShowAllApikey] = useState(false);
   const [showAddCompatibleModal, setShowAddCompatibleModal] = useState(false);
-  const [showAddAnthropicCompatibleModal, setShowAddAnthropicCompatibleModal] =
-    useState(false);
   const [testingMode, setTestingMode] = useState(null);
   const [testResults, setTestResults] = useState(null);
   const [statusFilter, setStatusFilter] = useState("all");
@@ -422,19 +420,10 @@ export default function ProvidersPage() {
             <Button
               size="sm"
               icon="add"
-              onClick={() => setShowAddAnthropicCompatibleModal(true)}
+              onClick={() => setShowAddCompatibleModal(true)}
               className="w-full sm:w-auto"
             >
-              Add Anthropic Compatible
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              icon="add"
-              onClick={() => setShowAddCompatibleModal(true)}
-              className="w-full !bg-white !text-black hover:!bg-gray-100 sm:w-auto"
-            >
-              Add OpenAI Compatible
+              Add Custom Provider
             </Button>
           </div>
         </div>
@@ -442,7 +431,7 @@ export default function ProvidersPage() {
         anthropicCompatibleProviders.length === 0 ? (
           <div className="flex items-center justify-center gap-2 py-2 border border-dashed border-border rounded-xl text-text-muted text-sm">
             <span className="material-symbols-outlined text-[18px]">extension</span>
-            <span>No custom providers — use buttons above to add OpenAI/Anthropic compatible endpoints</span>
+            <span>No custom providers — use the button above to add OpenAI/Anthropic compatible endpoints</span>
           </div>
         ) : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
@@ -644,21 +633,11 @@ export default function ProvidersPage() {
       </div> */}
 
       <AddCompatibleModal
-        variant="openai"
         isOpen={showAddCompatibleModal}
         onClose={() => setShowAddCompatibleModal(false)}
         onCreated={(node) => {
           setProviderNodes((prev) => [...prev, node]);
           setShowAddCompatibleModal(false);
-        }}
-      />
-      <AddCompatibleModal
-        variant="anthropic"
-        isOpen={showAddAnthropicCompatibleModal}
-        onClose={() => setShowAddAnthropicCompatibleModal(false)}
-        onCreated={(node) => {
-          setProviderNodes((prev) => [...prev, node]);
-          setShowAddAnthropicCompatibleModal(false);
         }}
       />
 

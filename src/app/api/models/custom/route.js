@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getCustomModels, addCustomModel, deleteCustomModel } from "@/models";
+import { getCustomModels, addCustomModel, deleteCustomModel, setCustomModelLocked, clearProviderModels } from "@/models";
 import { CAPACITY_META } from "@/shared/constants/models";
 
 export const dynamic = "force-dynamic";
@@ -64,15 +64,43 @@ export async function POST(request) {
   }
 }
 
+// PUT /api/models/custom - Toggle the locked (bulk-clear protection) flag
+export async function PUT(request) {
+  try {
+    const body = await request.json();
+    const { providerAlias, id, type, locked } = body;
+    if (!providerAlias || !id) {
+      return NextResponse.json({ error: "providerAlias and id required" }, { status: 400 });
+    }
+    if (typeof locked !== "boolean") {
+      return NextResponse.json({ error: "locked must be a boolean" }, { status: 400 });
+    }
+    const updated = await setCustomModelLocked({ providerAlias, id, type: type || "llm", locked });
+    if (!updated) {
+      return NextResponse.json({ error: "Custom model not found" }, { status: 404 });
+    }
+    return NextResponse.json({ success: true, locked });
+  } catch (error) {
+    console.log("Error updating custom model lock:", error);
+    return NextResponse.json({ error: "Failed to update custom model" }, { status: 500 });
+  }
+}
+
 // DELETE /api/models/custom?providerAlias=xxx&id=yyy&type=zzz
+// Without `id`: remove every custom model of the provider except locked ones,
+// plus all legacy aliases pointing at that provider.
 export async function DELETE(request) {
   try {
     const { searchParams } = new URL(request.url);
     const providerAlias = searchParams.get("providerAlias");
     const id = searchParams.get("id");
     const type = searchParams.get("type") || "llm";
-    if (!providerAlias || !id) {
-      return NextResponse.json({ error: "providerAlias and id required" }, { status: 400 });
+    if (!providerAlias) {
+      return NextResponse.json({ error: "providerAlias required" }, { status: 400 });
+    }
+    if (!id) {
+      const result = await clearProviderModels(providerAlias);
+      return NextResponse.json({ success: true, ...result });
     }
     await deleteCustomModel({ providerAlias, id, type });
     return NextResponse.json({ success: true });

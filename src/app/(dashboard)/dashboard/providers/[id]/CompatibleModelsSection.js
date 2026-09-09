@@ -5,7 +5,7 @@ import PropTypes from "prop-types";
 import { CapacityBadges, ModelDetailModal } from "@/shared/components";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
 
-function CompatibleModelRow({ modelId, modelName, fullModel, copied, onCopy, onDeleteAlias, onEdit, onTest, testStatus, isTesting, caps }) {
+function CompatibleModelRow({ modelId, modelName, fullModel, locked, copied, onCopy, onDeleteAlias, onEdit, onToggleLock, onTest, testStatus, isTesting, caps }) {
   const [showDetail, setShowDetail] = useState(false);
   const borderColor = testStatus === "ok"
     ? "border-green-500/40"
@@ -84,6 +84,15 @@ function CompatibleModelRow({ modelId, modelName, fullModel, copied, onCopy, onD
           <span className="material-symbols-outlined text-sm">edit</span>
         </button>
       )}
+      {onToggleLock && (
+        <button
+          onClick={onToggleLock}
+          className={`rounded p-1 transition-opacity hover:bg-sidebar group-hover:opacity-100 ${locked ? "text-amber-500 opacity-100" : "text-text-muted opacity-50 hover:text-primary"}`}
+          title={locked ? "Unlock model (allow bulk clear)" : "Lock model (keep on bulk clear)"}
+        >
+          <span className="material-symbols-outlined text-sm">{locked ? "lock" : "lock_open"}</span>
+        </button>
+      )}
       <button
         onClick={onDeleteAlias}
         className="rounded p-1 text-red-500 opacity-50 transition-opacity hover:bg-red-50 group-hover:opacity-100"
@@ -103,7 +112,7 @@ function CompatibleModelRow({ modelId, modelName, fullModel, copied, onCopy, onD
   );
 }
 
-export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onEditModel, onDeleteCustomModel, getModelCaps, connections, isAnthropic }) {
+export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onEditModel, onDeleteCustomModel, onToggleLock, getModelCaps, connections, isAnthropic }) {
   const [testingModelId, setTestingModelId] = useState(null);
   const [modelTestResults, setModelTestResults] = useState({});
 
@@ -148,16 +157,18 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
 
       {allModels.length > 0 && (
         <div className="flex flex-col gap-3">
-          {allModels.map(({ id, name, alias, source, catalogRef }) => (
+          {allModels.map(({ id, name, alias, source, catalogRef, locked }) => (
             <CompatibleModelRow
               key={`${source}-${providerStorageAlias}/${id}`}
               modelId={id}
               modelName={name}
               fullModel={`${providerDisplayAlias}/${id}`}
+              locked={locked}
               copied={copied}
               onCopy={onCopy}
               onDeleteAlias={() => source === "custom" ? onDeleteCustomModel(id) : onDeleteAlias(alias)}
               onEdit={source === "custom" ? () => onEditModel({ id, name, catalogRef }) : undefined}
+              onToggleLock={source === "custom" ? () => onToggleLock(id, !locked) : undefined}
               onTest={connections.length > 0 ? () => handleTestModel(id) : undefined}
               testStatus={modelTestResults[id]}
               isTesting={testingModelId === id}
@@ -180,6 +191,7 @@ CompatibleModelsSection.propTypes = {
   onDeleteAlias: PropTypes.func.isRequired,
   onEditModel: PropTypes.func.isRequired,
   onDeleteCustomModel: PropTypes.func.isRequired,
+  onToggleLock: PropTypes.func.isRequired,
   getModelCaps: PropTypes.func,
   connections: PropTypes.arrayOf(PropTypes.shape({
     id: PropTypes.string,

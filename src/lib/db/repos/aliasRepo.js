@@ -31,7 +31,8 @@ export async function getCustomModels() {
 
 // Atomic upsert inside transaction to prevent duplicate races.
 // Re-adding an existing model updates metadata without changing its identity.
-export async function addCustomModel({ providerAlias, id, type = "llm", name, caps, catalogRef, clearCatalogMetadata = false }) {
+// `locked` is only overwritten when explicitly provided, so edits never drop it.
+export async function addCustomModel({ providerAlias, id, type = "llm", name, caps, catalogRef, clearCatalogMetadata = false, locked }) {
   const k = customKey(providerAlias, id, type);
   const db = await getAdapter();
   let added = false;
@@ -49,10 +50,14 @@ export async function addCustomModel({ providerAlias, id, type = "llm", name, ca
         next.catalogRef = catalogRef;
         delete next.caps;
       }
+      if (locked !== undefined) {
+        if (locked) next.locked = true;
+        else delete next.locked;
+      }
       db.run(`UPDATE kv SET value = ? WHERE scope = 'customModels' AND key = ?`, [stringifyJson(next), k]);
       return;
     }
-    const value = stringifyJson({ providerAlias, id, type, name: name || id, ...(caps ? { caps } : {}), ...(catalogRef ? { catalogRef } : {}) });
+    const value = stringifyJson({ providerAlias, id, type, name: name || id, ...(caps ? { caps } : {}), ...(catalogRef ? { catalogRef } : {}), ...(locked ? { locked: true } : {}) });
     db.run(`INSERT INTO kv(scope, key, value) VALUES('customModels', ?, ?)`, [k, value]);
     added = true;
   });
@@ -65,6 +70,52 @@ export async function deleteCustomModel({ providerAlias, id, type = "llm" }) {
   await customKv.remove(customKey(providerAlias, id, type));
   const { refreshModelCatalogRuntime } = await import("../../modelCatalog/runtime.js");
   await refreshModelCatalogRuntime();
+}
+
+// Toggle the locked flag (bulk-clear protection) on one custom model.
+// Returns false when the model does not exist.
+export async function setCustomModelLocked({ providerAlias, id, type = "llm", locked }) {
+  const k = customKey(providerAlias, id, type);
+  const db = await getAdapter();
+  let found = false;
+  db.transaction(() => {
+    const row = db.get(`SELECT value FROM kv WHERE scope = 'customModels' AND key = ?`, [k]);
+    if (!row) return;
+    const next = { ...(parseJson(row.value) || {}), providerAlias, id, type };
+    if (locked) next.locked = true;
+    else delete next.locked;
+    db.run(`UPDATE kv SET value = ? WHERE scope = 'customModels' AND key = ?`, [stringifyJson(next), k]);
+    found = true;
+  });
+  return found;
+}
+
+// Remove every custom model of one provider except locked ones, plus all
+// legacy aliases pointing at that provider. Returns operation counts.
+export async function clearProviderModels(providerAlias) {
+  const db = await getAdapter();
+  const result = { deleted: 0, skippedLocked: 0, aliasesDeleted: 0 };
+  db.transaction(() => {
+    for (const entry of db.all(`SELECT key, value FROM kv WHERE scope = 'customModels'`)) {
+      if (!entry.key.startsWith(`${providerAlias}|`)) continue;
+      const value = parseJson(entry.value, {});
+      if (value?.locked) {
+        result.skippedLocked += 1;
+        continue;
+      }
+      db.run(`DELETE FROM kv WHERE scope = 'customModels' AND key = ?`, [entry.key]);
+      result.deleted += 1;
+    }
+    for (const entry of db.all(`SELECT key, value FROM kv WHERE scope = 'modelAliases'`)) {
+      const model = parseJson(entry.value, entry.value);
+      if (typeof model !== "string" || !model.startsWith(`${providerAlias}/`)) continue;
+      db.run(`DELETE FROM kv WHERE scope = 'modelAliases' AND key = ?`, [entry.key]);
+      result.aliasesDeleted += 1;
+    }
+  });
+  const { refreshModelCatalogRuntime } = await import("../../modelCatalog/runtime.js");
+  await refreshModelCatalogRuntime();
+  return result;
 }
 
 // mitmAlias: key=toolName, value=mappings object

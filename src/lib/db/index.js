@@ -43,6 +43,7 @@ export {
 export {
   getModelAliases, setModelAlias, deleteModelAlias,
   getCustomModels, addCustomModel, deleteCustomModel,
+  setCustomModelLocked, clearProviderModels,
   getMitmAlias, setMitmAliasAll,
 } from "./repos/aliasRepo.js";
 

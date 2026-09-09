@@ -14,6 +14,7 @@ import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { translate } from "@/i18n/runtime";
 import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
+import { filterCombosUsingModel, stripModelsFromComboMembers } from "@/shared/utils/comboMembers";
 import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
@@ -63,6 +64,7 @@ export default function ProviderDetailPage() {
   const [showAddCustomModel, setShowAddCustomModel] = useState(false);
   const [editingCustomModel, setEditingCustomModel] = useState(null);
   const [importingCompatModels, setImportingCompatModels] = useState(false);
+  const [clearingModels, setClearingModels] = useState(false);
   const [selectedConnectionIds, setSelectedConnectionIds] = useState([]);
   const [bulkProxyPoolId, setBulkProxyPoolId] = useState("__none__");
   const [bulkUpdatingProxy, setBulkUpdatingProxy] = useState(false);
@@ -526,11 +528,10 @@ export default function ProviderDetailPage() {
       const res = await fetch(`/api/models/alias?alias=${encodeURIComponent(alias)}`, {
         method: "DELETE",
       });
-      if (res.ok) {
-        await fetchAliases();
-      }
+      return res.ok;
     } catch (error) {
       console.log("Error deleting alias:", error);
+      return false;
     }
   };
 
@@ -557,12 +558,163 @@ export default function ProviderDetailPage() {
     try {
       const params = new URLSearchParams({ providerAlias: providerAliasOverride, id: modelId, type });
       const res = await fetch(`/api/models/custom?${params}`, { method: "DELETE" });
-      if (res.ok) {
-        await fetchCustomModels();
-        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
-      }
+      return res.ok;
     } catch (error) {
       console.log("Error deleting custom model:", error);
+      return false;
+    }
+  };
+
+  const fetchCombos = async () => {
+    try {
+      const res = await fetch("/api/combos", { cache: "no-store" });
+      const data = await res.json();
+      return res.ok && Array.isArray(data.combos) ? data.combos : [];
+    } catch (error) {
+      console.log("Error fetching combos:", error);
+      return [];
+    }
+  };
+
+  const refreshModelLists = async () => {
+    await Promise.all([fetchCustomModels(), fetchAliases()]);
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
+  };
+
+  // Remove member forms from using combos (combos left with no members are kept).
+  const stripFormsFromCombos = async (affected, forms) => {
+    let stripped = 0;
+    for (const combo of affected) {
+      const next = stripModelsFromComboMembers(combo.models, forms);
+      if (next.length === (combo.models || []).length) continue;
+      try {
+        const res = await fetch(`/api/combos/${combo.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ models: next }),
+        });
+        if (res.ok) stripped += 1;
+      } catch (error) {
+        console.log("Error stripping model from combo:", error);
+      }
+    }
+    return stripped;
+  };
+
+  // Every model/alias row deletion runs through here: instant when no combo
+  // references the model, otherwise confirm and strip combo members first.
+  const handleRowDelete = async ({ forms, label, verb = "Delete", action }) => {
+    const users = filterCombosUsingModel(await fetchCombos(), forms);
+    if (users.length === 0) {
+      if (!(await action())) alert("Failed to delete model");
+      await refreshModelLists();
+      return;
+    }
+    const names = users.map((c) => c.name).join(", ");
+    setConfirmState({
+      title: `${verb} Model`,
+      message: `${label} is used in ${users.length} combo${users.length === 1 ? "" : "s"} (${names}). ${verb} it and remove it from ${users.length === 1 ? "that combo" : "those combos"}? Combos left with no members are kept.`,
+      confirmText: verb,
+      onConfirm: async () => {
+        setConfirmState(null);
+        if (!(await action())) {
+          alert("Failed to delete model");
+          return;
+        }
+        await stripFormsFromCombos(users, forms);
+        await refreshModelLists();
+      },
+    });
+  };
+
+  const modelIdForms = (modelId) => {
+    const forms = [`${providerStorageAlias}/${modelId}`];
+    if (providerDisplayAlias && providerDisplayAlias !== providerStorageAlias) {
+      forms.push(`${providerDisplayAlias}/${modelId}`);
+    }
+    return forms;
+  };
+
+  const handleDeleteCustomModelRow = (modelId) =>
+    handleRowDelete({
+      forms: modelIdForms(modelId),
+      label: `${providerDisplayAlias}/${modelId}`,
+      action: () => handleDeleteCustomModel(modelId, "llm", providerStorageAlias),
+    });
+
+  const handleDeleteAliasRow = (alias) => {
+    const target = modelAliases[alias];
+    const forms = target ? [target] : [];
+    if (target && providerDisplayAlias && target.startsWith(`${providerStorageAlias}/`)) {
+      forms.push(`${providerDisplayAlias}${target.slice(providerStorageAlias.length)}`);
+    }
+    return handleRowDelete({
+      forms,
+      label: target ? `${alias} (${target})` : alias,
+      verb: "Remove",
+      action: () => handleDeleteAlias(alias),
+    });
+  };
+
+  const handleToggleModelLock = async (modelId, locked) => {
+    try {
+      const res = await fetch("/api/models/custom", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerAlias: providerStorageAlias, id: modelId, type: "llm", locked }),
+      });
+      if (res.ok) {
+        await fetchCustomModels();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || "Failed to update lock");
+      }
+    } catch (error) {
+      console.log("Error updating model lock:", error);
+    }
+  };
+
+  const clearFormsForRows = (rows) => {
+    const forms = new Set();
+    for (const row of rows) {
+      for (const form of modelIdForms(row.id)) forms.add(form);
+    }
+    return [...forms];
+  };
+
+  const openClearModelsConfirm = async () => {
+    const customs = compatModelRows.filter((m) => m.source === "custom");
+    const aliasCount = compatModelRows.length - customs.length;
+    const lockedCount = customs.filter((m) => m.locked).length;
+    if (compatModelRows.length === 0) return;
+    const users = filterCombosUsingModel(await fetchCombos(), clearFormsForRows(compatModelRows));
+    setConfirmState({
+      title: "Clear Models",
+      message: `Remove ${customs.length} custom model${customs.length === 1 ? "" : "s"}${lockedCount ? ` (${lockedCount} locked kept)` : ""} and ${aliasCount} alias${aliasCount === 1 ? "" : "es"}${users.length ? `, and remove them from ${users.length} combo${users.length === 1 ? "" : "s"} (${users.map((c) => c.name).join(", ")})` : ""}? This cannot be undone.`,
+      confirmText: "Clear All",
+      onConfirm: handleClearModels,
+    });
+  };
+
+  const handleClearModels = async () => {
+    setConfirmState(null);
+    setClearingModels(true);
+    try {
+      const params = new URLSearchParams({ providerAlias: providerStorageAlias });
+      const res = await fetch(`/api/models/custom?${params}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || "Failed to clear models");
+        return;
+      }
+      const users = filterCombosUsingModel(await fetchCombos(), clearFormsForRows(compatModelRows));
+      const stripped = await stripFormsFromCombos(users, clearFormsForRows(compatModelRows));
+      await refreshModelLists();
+      alert(`Cleared ${data.deleted} model${data.deleted === 1 ? "" : "s"} and ${data.aliasesDeleted} alias${data.aliasesDeleted === 1 ? "" : "es"}${data.skippedLocked ? `, kept ${data.skippedLocked} locked` : ""}${stripped ? `, updated ${stripped} combo${stripped === 1 ? "" : "s"}` : ""}.`);
+    } catch (error) {
+      console.log("Error clearing models:", error);
+    } finally {
+      setClearingModels(false);
     }
   };
 
@@ -1150,9 +1302,10 @@ export default function ProviderDetailPage() {
           copied={copied}
           onCopy={copy}
           onSetAlias={handleSetAlias}
-          onDeleteAlias={handleDeleteAlias}
+          onDeleteAlias={(alias) => handleDeleteAliasRow(alias)}
           onEditModel={(entry) => openCompatModelModal(entry)}
-          onDeleteCustomModel={(modelId) => handleDeleteCustomModel(modelId, "llm", providerStorageAlias)}
+          onDeleteCustomModel={(modelId) => handleDeleteCustomModelRow(modelId)}
+          onToggleLock={(modelId, locked) => handleToggleModelLock(modelId, locked)}
           getModelCaps={getCaps}
           connections={connections}
           isAnthropic={isAnthropicCompatible}
@@ -1190,9 +1343,9 @@ export default function ProviderDetailPage() {
             onSetAlias={() => {}}
             onDeleteAlias={() => {
               if (model.source === "custom") {
-                handleDeleteCustomModel(model.id, "llm", providerStorageAlias);
+                handleDeleteCustomModelRow(model.id);
               } else {
-                handleDeleteAlias(model.alias);
+                handleDeleteAliasRow(model.alias);
               }
             }}
             onEdit={model.source === "custom" ? () => {
@@ -1224,7 +1377,12 @@ export default function ProviderDetailPage() {
               copied={copied}
               onCopy={copy}
               onSetAlias={(alias) => handleSetAlias(model.id, alias, providerStorageAlias)}
-              onDeleteAlias={() => handleDeleteAlias(existingAlias)}
+              onDeleteAlias={() => handleRowDelete({
+                forms: modelIdForms(model.id),
+                label: `${providerDisplayAlias}/${model.id}`,
+                verb: "Remove",
+                action: () => handleDeleteAlias(existingAlias),
+              })}
               testStatus={modelTestResults[model.id]}
               onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(model.id) : undefined}
               isTesting={testingModelIds.has(model.id)}
@@ -1761,6 +1919,16 @@ export default function ProviderDetailPage() {
               >
                 {importingCompatModels ? "Importing..." : "Import from /models"}
               </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                icon="delete_sweep"
+                onClick={openClearModelsConfirm}
+                disabled={compatModelRows.length === 0 || clearingModels}
+                className="w-full sm:w-auto"
+              >
+                {clearingModels ? "Clearing..." : "Clear"}
+              </Button>
             </div>
           ) : (() => {
             const allIds = [
@@ -1918,6 +2086,7 @@ export default function ProviderDetailPage() {
         onConfirm={confirmState?.onConfirm}
         title={confirmState?.title || "Confirm"}
         message={confirmState?.message}
+        confirmText={confirmState?.confirmText || "Confirm"}
         variant="danger"
       />
     </div>
