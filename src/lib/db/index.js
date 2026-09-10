@@ -13,6 +13,7 @@ export {
   createProviderConnection, updateProviderConnection,
   deleteProviderConnection, deleteProviderConnectionsByProvider,
   reorderProviderConnections, cleanupProviderConnections,
+  resetProviderRetryBackoffOnStartup,
 } from "./repos/connectionsRepo.js";
 
 // Provider nodes

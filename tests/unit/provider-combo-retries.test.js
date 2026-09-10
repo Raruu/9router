@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   isRetryableStatus,
   resolveProviderRetries,
@@ -7,6 +10,7 @@ import {
   DEFAULT_MEMBER_RETRIES,
 } from "../../open-sse/config/retries.js";
 import { handleComboChat } from "../../open-sse/services/combo.js";
+import { checkFallbackError } from "../../open-sse/services/accountFallback.js";
 
 describe("resolveProviderRetries", () => {
   it("returns tries for an enabled config", () => {
@@ -218,5 +222,102 @@ describe("handleComboChat same-member retries", () => {
     });
     expect(res.ok).toBe(true);
     expect(calls).toEqual(["p1/a", "p2/b"]);
+  });
+});
+
+describe("provider combo retries after restart", () => {
+  const providerId = "openai-compatible-chat-restart-test";
+  const model = "glm-5.3-flash";
+  let tempDir;
+  let originalDataDir;
+
+  beforeEach(() => {
+    originalDataDir = process.env.DATA_DIR;
+    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "9router-provider-retries-restart-"));
+    process.env.DATA_DIR = tempDir;
+    delete global._dbAdapter;
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    try { global._dbAdapter?.instance?.close?.(); } catch {}
+    delete global._dbAdapter;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    if (originalDataDir === undefined) delete process.env.DATA_DIR;
+    else process.env.DATA_DIR = originalDataDir;
+  });
+
+  it("resets persisted backoff on boot so an enabled custom provider retries again", async () => {
+    const db = await import("../../src/lib/db/index.js");
+    const connection = await db.createProviderConnection({
+      provider: providerId,
+      authType: "apikey",
+      name: "Restart test",
+      apiKey: "test-key",
+    });
+    const activeLock = new Date(Date.now() + 60_000).toISOString();
+    const expiredLock = new Date(Date.now() - 60_000).toISOString();
+    await db.updateProviderConnection(connection.id, {
+      backoffLevel: 6,
+      [`modelLock_${model}`]: activeLock,
+      modelLock_expired: expiredLock,
+      lastError: "rate limited",
+    });
+    await db.updateSettings({
+      providerRetries: { [providerId]: { enabled: true, tries: 2 } },
+    });
+
+    // Real restart: close the adapter, discard every loaded DB module, then
+    // reopen the same SQLite file and run the awaited startup cleanup.
+    global._dbAdapter.instance.close();
+    delete global._dbAdapter;
+    vi.resetModules();
+
+    const { resetProviderRetryBackoffOnStartup, getProviderConnectionById } = await import(
+      "../../src/lib/db/repos/connectionsRepo.js"
+    );
+    await resetProviderRetryBackoffOnStartup();
+
+    const restarted = await getProviderConnectionById(connection.id);
+    expect(restarted.backoffLevel).toBe(0);
+    expect(restarted[`modelLock_${model}`]).toBe(activeLock);
+    expect(restarted.modelLock_expired).toBeUndefined();
+    expect(restarted.lastError).toBe("rate limited");
+
+    const { getSettings } = await import("../../src/lib/db/repos/settingsRepo.js");
+    const settings = await getSettings();
+    const resolveMemberRetries = (id) => resolveProviderRetries(settings.providerRetries?.[id]);
+    expect(resolveMemberRetries(providerId)).toEqual({ enabled: true, tries: 2 });
+
+    // Once the pre-restart lock expires, the next 429 starts at level 1 (2s),
+    // not the persisted level 7 (64s) that exceeded the combo retry wait cap.
+    const next429 = checkFallbackError(429, "openai_error", restarted.backoffLevel);
+    expect(next429.cooldownMs).toBeLessThanOrEqual(MAX_RETRY_WAIT_MS);
+
+    vi.useFakeTimers();
+    const calls = [];
+    const resultPromise = handleComboChat({
+      body: {},
+      models: [`seek-ai/${model}`, "p2/fallback"],
+      handleSingleModel: async (body, member) => {
+        calls.push(member);
+        if (member === "p2/fallback" || calls.length > 1) return okResponse();
+        return failResponse({
+          signal: transientSignal({
+            providerId,
+            retryAfterMs: next429.cooldownMs,
+          }),
+        });
+      },
+      log: silentLog,
+      comboName: "restart-retry",
+      resolveMemberRetries,
+    });
+    await vi.runAllTimersAsync();
+    const result = await resultPromise;
+
+    expect(result.ok).toBe(true);
+    expect(calls).toEqual([`seek-ai/${model}`, `seek-ai/${model}`]);
   });
 });

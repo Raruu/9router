@@ -8,6 +8,15 @@ export async function register() {
     const { installModelCatalogRuntime } = await import("@/lib/modelCatalog/runtime.js");
     await installModelCatalogRuntime();
 
+    // Reset persisted exponential 429 backoff once per process. Keep active
+    // model locks intact so restart never bypasses a real cooldown.
+    const startupState = globalThis[Symbol.for("9router.startupState")] ||= {};
+    if (!startupState.providerRetryBackoffReset) {
+      const { resetProviderRetryBackoffOnStartup } = await import("@/lib/db/repos/connectionsRepo.js");
+      await resetProviderRetryBackoffOnStartup();
+      startupState.providerRetryBackoffReset = true;
+    }
+
     const { startModelCatalogSync } = await import("@/lib/modelCatalog/sync.js");
     startModelCatalogSync();
   }

@@ -259,3 +259,34 @@ export async function cleanupProviderConnections() {
   });
   return cleaned;
 }
+
+// Exponential 429 backoff is useful within one process lifetime, but carrying a
+// high level across a restart can make an enabled combo retry appear disabled:
+// the next lock may exceed MAX_RETRY_WAIT_MS and the combo advances immediately.
+// Reset only the accumulated level at startup. Active model locks remain in
+// force, while expired lock fields are removed during the same scan.
+export async function resetProviderRetryBackoffOnStartup(now = Date.now()) {
+  const db = await getAdapter();
+  let updated = 0;
+  db.transaction(() => {
+    for (const row of db.all(`SELECT * FROM providerConnections`)) {
+      const conn = rowToConn(row);
+      let dirty = false;
+      if (Number(conn.backoffLevel || 0) !== 0) {
+        conn.backoffLevel = 0;
+        dirty = true;
+      }
+      for (const [key, value] of Object.entries(conn)) {
+        if (!key.startsWith("modelLock_") || !value) continue;
+        const expiresAt = new Date(value).getTime();
+        if (!Number.isFinite(expiresAt) || expiresAt > now) continue;
+        delete conn[key];
+        dirty = true;
+      }
+      if (!dirty) continue;
+      upsert(db, { ...conn, updatedAt: new Date(now).toISOString() });
+      updated += 1;
+    }
+  });
+  return updated;
+}
