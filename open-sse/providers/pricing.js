@@ -383,11 +383,14 @@ export function matchPattern(pattern, model) {
   return regex.test(model);
 }
 
-let catalogPricingSource = null;
+// Next can load instrumentation and request routes from separate chunks. Keep
+// the startup-installed resolver process-global so every server module instance
+// observes it; browser bundles remain isolated on their own globalThis.
+const CATALOG_PRICING_SOURCE_KEY = Symbol.for("9router.modelCatalog.pricingSource");
 
 /** Install a synchronous server catalog source without coupling this module to SQLite. */
 export function setCatalogPricingSource(source) {
-  catalogPricingSource = source;
+  globalThis[CATALOG_PRICING_SOURCE_KEY] = source;
 }
 
 function getHardcodedPricing(provider, model) {
@@ -415,6 +418,7 @@ function getHardcodedPricing(provider, model) {
 export function getPricingForModel(provider, model) {
   if (!model) return null;
   const hardcoded = getHardcodedPricing(provider, model) || {};
+  const catalogPricingSource = globalThis[CATALOG_PRICING_SOURCE_KEY] || null;
   const resolved = catalogPricingSource?.getPricing?.(provider, model, hardcoded);
   const result = resolved ? { ...hardcoded, ...resolved } : hardcoded;
   return Object.keys(result).length ? result : null;

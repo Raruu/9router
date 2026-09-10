@@ -428,15 +428,17 @@ export const PATTERN_CAPABILITIES = [
  */
 const MODALITY_KEYS = ["vision", "pdf", "audioInput", "videoInput"];
 
-// Catalog resolution is installed by the server at startup. The seam is sync so
-// this hot path remains usable by browser bundles without importing DB/node APIs.
-let catalogSource = null;
+// Catalog resolution is installed by the server at startup. Next can bundle
+// instrumentation and request routes into separate module instances, so keep
+// the source process-global: startup hydration must be visible to every server
+// chunk. Browser bundles have their own globalThis and continue with null.
+const CATALOG_SOURCE_KEY = Symbol.for("9router.modelCatalog.capabilitySource");
 
 /**
  * @param {{ getCapabilities?: Function, getModalities?: Function, getLimits?: Function } | null} source
  */
 export function setCatalogSource(source) {
-  catalogSource = source;
+  globalThis[CATALOG_SOURCE_KEY] = source;
 }
 
 // Apply the synced catalog + name heuristic on top of a table-resolved result.
@@ -449,6 +451,7 @@ function refine(base, provider, model) {
   if (hardcoded.vision !== true && looksLikeVisionModel(model)) hardcoded.vision = true;
   let result = { ...DEFAULT_CAPABILITIES, ...hardcoded };
 
+  const catalogSource = globalThis[CATALOG_SOURCE_KEY] || null;
   if (catalogSource?.getCapabilities) {
     result = { ...DEFAULT_CAPABILITIES, ...(catalogSource.getCapabilities(provider, model, hardcoded) || {}) };
   } else if (catalogSource) {
