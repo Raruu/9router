@@ -51,6 +51,61 @@ export function buildCompatibleNodeId(type, apiType, suffix) {
   return `openai-compatible-${apiType}-${suffix}`;
 }
 
+// Numeric counters inside a usageDaily aggregate bucket.
+const USAGE_COUNTER_FIELDS = ["requests", "promptTokens", "completionTokens", "cachedTokens", "cost"];
+
+function mergeUsageCounter(target, source) {
+  if (!target || typeof target !== "object" || !source || typeof source !== "object") return;
+  for (const field of USAGE_COUNTER_FIELDS) {
+    target[field] = (target[field] || 0) + (source[field] || 0);
+  }
+}
+
+// Re-point one usageDaily aggregate blob from oldId to newId. Buckets keyed by
+// provider ("byProvider") or embedding "model|provider" ("byModel/byApiKey/
+// byEndpoint") are renamed; when the new-id bucket already exists the counters
+// merge so nothing is double-counted or lost. Per-account buckets are keyed by
+// connection id (which survives conversion) — only their embedded provider
+// meta is updated. Returns true when the blob changed.
+export function remapUsageDay(day, oldId, newId) {
+  if (!day || typeof day !== "object") return false;
+  let changed = false;
+  const suffix = `|${oldId}`;
+  for (const mapKey of ["byProvider", "byModel", "byApiKey", "byEndpoint"]) {
+    const map = day[mapKey];
+    if (!map || typeof map !== "object") continue;
+    for (const key of Object.keys(map)) {
+      let nextKey = null;
+      if (key === oldId) nextKey = newId;
+      else if (key.endsWith(suffix)) nextKey = key.slice(0, -oldId.length) + newId;
+      if (!nextKey || nextKey === key) continue;
+      const entry = map[key];
+      delete map[key];
+      const existing = map[nextKey];
+      if (existing && typeof existing === "object" && entry && typeof entry === "object") {
+        mergeUsageCounter(existing, entry);
+      } else if (entry !== undefined) {
+        map[nextKey] = entry;
+      }
+      const placed = map[nextKey];
+      if (placed && typeof placed === "object" && placed.provider === oldId) {
+        placed.provider = newId;
+      }
+      changed = true;
+    }
+  }
+  const byAccount = day.byAccount;
+  if (byAccount && typeof byAccount === "object") {
+    for (const entry of Object.values(byAccount)) {
+      if (entry && typeof entry === "object" && entry.provider === oldId) {
+        entry.provider = newId;
+        changed = true;
+      }
+    }
+  }
+  return changed;
+}
+
 function sanitizeCompatBaseUrl(type, baseUrl) {
   let out = baseUrl.trim().replace(/\/$/, "");
   if (type === COMPATIBLE_ANTHROPIC_NODE_TYPE && out.endsWith("/messages")) {
@@ -119,7 +174,10 @@ export async function deleteProviderNode(id) {
 // The kind is keyed off the node id prefix everywhere, so the node gets a new
 // id and every reference moves with it in one transaction: connections
 // (provider + providerSpecificData), custom models, aliases, disabled-model
-// entries, and provider-keyed settings. Returns the new node, or null when
+// entries, pricing overrides, mitmAlias targets, combo members, provider-keyed
+// settings (strategies, thinking, quota visibility, timeouts, retries,
+// capacity-adapter lists), and usage history (usageHistory, requestDetails,
+// usageDaily aggregates). Returns the new node, or null when
 // the source node does not exist. Throws on invalid input (rolls back).
 export async function convertProviderNodeType(id, { type, apiType, name, prefix, baseUrl }) {
   if (!CONVERTIBLE_NODE_TYPES.includes(type)) {
@@ -205,10 +263,20 @@ export async function convertProviderNodeType(id, { type, apiType, name, prefix,
     if (settingsRow) {
       const settings = parseJson(settingsRow.data, {});
       let changed = false;
-      for (const key of ["providerStrategies", "providerThinking", "quotaVisibility"]) {
+      for (const key of ["providerStrategies", "providerThinking", "quotaVisibility", "providerTimeouts", "providerRetries"]) {
         if (settings[key] && Object.prototype.hasOwnProperty.call(settings[key], id)) {
           settings[key] = { ...settings[key], [newId]: settings[key][id] };
           delete settings[key][id];
+          changed = true;
+        }
+      }
+      // Capacity-adapter model lists hold "provider/model" strings.
+      const adapter = settings.capacityAdapter;
+      if (adapter && typeof adapter === "object") {
+        for (const cap of Object.values(adapter)) {
+          if (!cap || !Array.isArray(cap.models)) continue;
+          if (!cap.models.some((m) => typeof m === "string" && m.startsWith(`${id}/`))) continue;
+          cap.models = cap.models.map((m) => (typeof m === "string" && m.startsWith(`${id}/`) ? `${newId}${m.slice(id.length)}` : m));
           changed = true;
         }
       }
@@ -217,8 +285,66 @@ export async function convertProviderNodeType(id, { type, apiType, name, prefix,
       }
     }
 
+    // Combo members are plain "provider/model" strings — re-point this node's.
+    for (const combo of db.all(`SELECT id, models FROM combos`)) {
+      const members = parseJson(combo.models, []);
+      if (!Array.isArray(members) || !members.some((m) => typeof m === "string" && m.startsWith(`${id}/`))) continue;
+      const renamed = members.map((m) => (typeof m === "string" && m.startsWith(`${id}/`) ? `${newId}${m.slice(id.length)}` : m));
+      db.run(`UPDATE combos SET models = ?, updatedAt = ? WHERE id = ?`, [stringifyJson(renamed), now, combo.id]);
+    }
+
+    // Pricing overrides and mitmAlias targets keyed by / pointing at this node.
+    const pricing = db.get(`SELECT value FROM kv WHERE scope = 'pricing' AND key = ?`, [id]);
+    if (pricing) {
+      db.run(`DELETE FROM kv WHERE scope = 'pricing' AND key = ?`, [id]);
+      db.run(`INSERT INTO kv(scope, key, value) VALUES('pricing', ?, ?)`, [newId, pricing.value]);
+    }
+    for (const entry of db.all(`SELECT key, value FROM kv WHERE scope = 'mitmAlias'`)) {
+      const mappings = parseJson(entry.value, null);
+      if (!mappings || typeof mappings !== "object" || Array.isArray(mappings)) continue;
+      let changed = false;
+      const next = {};
+      for (const [from, to] of Object.entries(mappings)) {
+        const renamed = (typeof to === "string" && to.startsWith(`${id}/`)) ? `${newId}${to.slice(id.length)}` : to;
+        if (renamed !== to) changed = true;
+        next[from] = renamed;
+      }
+      if (changed) {
+        db.run(`UPDATE kv SET value = ? WHERE scope = 'mitmAlias' AND key = ?`, [stringifyJson(next), entry.key]);
+      }
+    }
+
+    // Usage history records the serving provider id at write time — re-point
+    // rows so past usage stays grouped under the converted provider instead of
+    // a ghost id. Daily aggregates are re-keyed (merging into an existing
+    // new-id bucket when both fired on the same day).
+    db.run(`UPDATE usageHistory SET provider = ? WHERE provider = ?`, [newId, id]);
+    for (const detail of db.all(`SELECT id, data FROM requestDetails WHERE provider = ?`, [id])) {
+      const record = parseJson(detail.data, null);
+      if (record && typeof record === "object" && !Array.isArray(record)) {
+        if (record.provider === id) record.provider = newId;
+        db.run(`UPDATE requestDetails SET provider = ?, data = ? WHERE id = ?`, [newId, stringifyJson(record), detail.id]);
+      } else {
+        db.run(`UPDATE requestDetails SET provider = ? WHERE id = ?`, [newId, detail.id]);
+      }
+    }
+    for (const day of db.all(`SELECT dateKey, data FROM usageDaily WHERE data LIKE ?`, [`%${id}%`])) {
+      const blob = parseJson(day.data, null);
+      if (!remapUsageDay(blob, id, newId)) continue;
+      db.run(`UPDATE usageDaily SET data = ? WHERE dateKey = ?`, [stringifyJson(blob), day.dateKey]);
+    }
+
     db.run(`DELETE FROM providerNodes WHERE id = ?`, [id]);
     result = { ...newNode };
   });
+
+  // Post-commit: the raw-SQL moves above bypass the in-memory catalog runtime
+  // and pricing cache — refresh both (same pattern as aliasRepo mutations).
+  const [{ refreshModelCatalogRuntime }, { invalidatePricingCache }] = await Promise.all([
+    import("../../modelCatalog/runtime.js"),
+    import("./pricingRepo.js"),
+  ]);
+  invalidatePricingCache();
+  await refreshModelCatalogRuntime();
   return result;
 }

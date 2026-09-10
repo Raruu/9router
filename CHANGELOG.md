@@ -1,3 +1,18 @@
+# v0.5.69-4 (2026-09-10)
+
+## Features
+- **Models**: per-provider combo retries — when a member fails with a transient
+  error (rate limit, overloaded, network), the same member is retried a few
+  times before falling through to the next provider. Off by default; enable per
+  provider on the new Retries card with 1–10 extra tries. Waits out short
+  lockouts (up to 30s per retry); longer outages skip to the next member
+  immediately, and auth/quota/bad-request failures still advance at once
+- **Models**: switching a custom provider between OpenAI and Anthropic type now
+  migrates everything tied to the old id — usage history (no more ghost
+  provider rows; daily aggregates re-keyed with merging), timeouts, retries,
+  combo members, capacity-adapter lists, pricing overrides and mitmAlias
+  targets — and refreshes the pricing/catalog caches the move bypasses
+
 # v0.5.69-3 (2026-09-10)
 
 ## Features

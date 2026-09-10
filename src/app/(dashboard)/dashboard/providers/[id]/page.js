@@ -43,6 +43,17 @@ const TIMEOUT_FIELDS = [
 const TIMEOUT_MIN_SEC = 1;
 const TIMEOUT_MAX_SEC = 3600;
 
+const RETRY_MIN_TRIES = 1;
+const RETRY_MAX_TRIES = 10;
+const RETRY_DEFAULT_TRIES = 2;
+
+function parseRetryTries(raw) {
+  if (raw === "" || raw == null) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return undefined;
+  return Math.min(RETRY_MAX_TRIES, Math.max(RETRY_MIN_TRIES, Math.floor(n)));
+}
+
 function parseTimeoutSec(raw) {
   if (raw === "" || raw == null) return null;
   const n = Number(raw);
@@ -90,6 +101,7 @@ export default function ProviderDetailPage() {
   const [providerStickyLimit, setProviderStickyLimit] = useState("");
   const [thinkingMode, setThinkingMode] = useState("auto");
   const [timeoutInputs, setTimeoutInputs] = useState({ connect: "", firstChunk: "", stall: "" });
+  const [retryCfg, setRetryCfg] = useState({ enabled: false, tries: "" });
   const [autoPing, setAutoPing] = useState({ enabled: false, connections: {} });
   const [suggestedModels, setSuggestedModels] = useState([]);
   const [liveModels, setLiveModels] = useState([]);
@@ -348,6 +360,12 @@ export default function ProviderDetailPage() {
         firstChunk: timeoutCfg.firstChunkMs ? String(timeoutCfg.firstChunkMs / 1000) : "",
         stall: timeoutCfg.stallMs ? String(timeoutCfg.stallMs / 1000) : "",
       });
+      // Load per-provider combo retry config (off unless explicitly enabled)
+      const retryCfgRaw = (settingsData.providerRetries || {})[providerId] || {};
+      setRetryCfg({
+        enabled: retryCfgRaw.enabled === true,
+        tries: retryCfgRaw.tries != null ? String(retryCfgRaw.tries) : "",
+      });
       const autoPingSettingsKey = AUTO_PING_SETTINGS_KEYS[providerId];
       const apCfg = autoPingSettingsKey ? settingsData[autoPingSettingsKey] || {} : {};
       setAutoPing({ enabled: apCfg.enabled === true, connections: apCfg.connections || {} });
@@ -499,6 +517,42 @@ export default function ProviderDetailPage() {
       if (ms != null) overrides[f.msKey] = ms;
     }
     saveProviderTimeouts(overrides);
+  };
+
+  const saveProviderRetries = async (next) => {
+    try {
+      const settingsRes = await fetch("/api/settings", { cache: "no-store" });
+      const settingsData = settingsRes.ok ? await settingsRes.json() : {};
+      const current = settingsData.providerRetries || {};
+      const updated = { ...current };
+      if (!next.enabled) {
+        delete updated[providerId];
+      } else {
+        updated[providerId] = { enabled: true, tries: next.tries };
+      }
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerRetries: updated }),
+      });
+    } catch (error) {
+      console.log("Error saving provider retries:", error);
+    }
+  };
+
+  const handleRetryToggle = (enabled) => {
+    const tries = parseRetryTries(retryCfg.tries) ?? RETRY_DEFAULT_TRIES;
+    const next = { enabled, tries: enabled ? String(tries) : retryCfg.tries };
+    setRetryCfg(next);
+    saveProviderRetries({ enabled, tries: enabled ? tries : 0 });
+  };
+
+  const handleRetryTriesChange = (raw) => {
+    setRetryCfg({ ...retryCfg, tries: raw });
+    if (!retryCfg.enabled) return;
+    const tries = parseRetryTries(raw);
+    if (tries === undefined || tries === null) return;
+    saveProviderRetries({ enabled: true, tries });
   };
 
   const saveAutoPing = async (next) => {
@@ -1961,6 +2015,39 @@ export default function ProviderDetailPage() {
               hint={field.hint}
             />
           ))}
+        </div>
+      </Card>
+
+      {/* Combo retries */}
+      <Card>
+        <div className="mb-3 flex flex-col gap-1">
+          <h2 className="text-lg font-semibold">Combo Retries</h2>
+          <p className="text-sm text-text-muted">
+            When this provider fails inside a combo with a transient error (rate limit, overloaded, network),
+            retry the same member before moving to the next provider. Off by default. Waits out short lockouts
+            (up to 30s per retry); longer outages skip to the next member immediately.
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-text-muted">Enabled</span>
+            <Toggle
+              checked={retryCfg.enabled}
+              onChange={handleRetryToggle}
+            />
+          </div>
+          {retryCfg.enabled && (
+            <Input
+              label="Extra tries"
+              type="number"
+              min={RETRY_MIN_TRIES}
+              max={RETRY_MAX_TRIES}
+              placeholder={`Default: ${RETRY_DEFAULT_TRIES}`}
+              value={retryCfg.tries}
+              onChange={(e) => handleRetryTriesChange(e.target.value)}
+              hint="Same-member attempts after the first failure (1–10)."
+            />
+          )}
         </div>
       </Card>
 
