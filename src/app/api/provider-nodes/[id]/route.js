@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
-import { deleteProviderConnectionsByProvider, deleteProviderNode, getProviderConnections, getProviderNodeById, updateProviderConnection, updateProviderNode } from "@/models";
+import { convertProviderNodeType, deleteProviderConnectionsByProvider, deleteProviderNode, getProviderConnections, getProviderNodeById, updateProviderConnection, updateProviderNode } from "@/models";
 
 // PUT /api/provider-nodes/[id] - Update provider node
 export async function PUT(request, { params }) {
   try {
     const { id } = await params;
     const body = await request.json();
-    const { name, prefix, apiType, baseUrl } = body;
+    const { name, prefix, apiType, baseUrl, type } = body;
     const node = await getProviderNodeById(id);
 
     if (!node) {
@@ -19,6 +19,27 @@ export async function PUT(request, { params }) {
 
     if (!prefix?.trim()) {
       return NextResponse.json({ error: "Prefix is required" }, { status: 400 });
+    }
+
+    // Switching between OpenAI and Anthropic compatible moves the node to a
+    // new id (the kind is keyed off the id prefix) and migrates every
+    // reference — connections, custom models, aliases, disabled entries and
+    // provider-keyed settings — in one transaction.
+    if (type !== undefined && type !== node.type) {
+      if (!["openai-compatible", "anthropic-compatible"].includes(node.type) || !["openai-compatible", "anthropic-compatible"].includes(type)) {
+        return NextResponse.json({ error: "Switching provider type is only supported between OpenAI and Anthropic compatible nodes" }, { status: 400 });
+      }
+      if (type === "openai-compatible" && (!apiType || !["chat", "responses"].includes(apiType))) {
+        return NextResponse.json({ error: "Invalid OpenAI compatible API type" }, { status: 400 });
+      }
+      if (!baseUrl?.trim()) {
+        return NextResponse.json({ error: "Base URL is required" }, { status: 400 });
+      }
+      const converted = await convertProviderNodeType(id, { type, apiType, name, prefix, baseUrl });
+      if (!converted) {
+        return NextResponse.json({ error: "Provider node not found" }, { status: 404 });
+      }
+      return NextResponse.json({ node: converted, converted: true, previousId: id });
     }
 
     // Only validate apiType for OpenAI Compatible nodes

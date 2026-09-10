@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { createProviderNode, getProviderNodes } from "@/models";
-import { OPENAI_COMPATIBLE_PREFIX, ANTHROPIC_COMPATIBLE_PREFIX, CUSTOM_EMBEDDING_PREFIX } from "@/shared/constants/providers";
+import { buildCompatibleNodeId, createProviderNode, getProviderNodes } from "@/models";
+import { CUSTOM_EMBEDDING_PREFIX } from "@/shared/constants/providers";
 import { generateId } from "@/shared/utils";
 
 export const dynamic = "force-dynamic";
@@ -51,7 +51,7 @@ export async function POST(request) {
       }
 
       const node = await createProviderNode({
-        id: `${OPENAI_COMPATIBLE_PREFIX}${apiType}-${generateId()}`,
+        id: buildCompatibleNodeId("openai-compatible", apiType, generateId()),
         type: "openai-compatible",
         prefix: prefix.trim(),
         apiType,
@@ -87,7 +87,7 @@ export async function POST(request) {
       }
 
       const node = await createProviderNode({
-        id: `${ANTHROPIC_COMPATIBLE_PREFIX}${generateId()}`,
+        id: buildCompatibleNodeId("anthropic-compatible", null, generateId()),
         type: "anthropic-compatible",
         prefix: prefix.trim(),
         baseUrl: sanitizedBaseUrl,

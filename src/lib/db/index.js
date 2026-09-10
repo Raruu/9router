@@ -19,6 +19,7 @@ export {
 export {
   getProviderNodes, getProviderNodeById,
   createProviderNode, updateProviderNode, deleteProviderNode,
+  convertProviderNodeType, buildCompatibleNodeId,
 } from "./repos/nodesRepo.js";
 
 // Proxy pools
@@ -42,6 +43,7 @@ export {
 export {
   getModelAliases, setModelAlias, deleteModelAlias,
   getCustomModels, addCustomModel, deleteCustomModel,
+  setCustomModelLocked, clearProviderModels,
   getMitmAlias, setMitmAliasAll,
 } from "./repos/aliasRepo.js";
 

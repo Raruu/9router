@@ -1,3 +1,29 @@
+# v0.5.69-3 (2026-09-10)
+
+## Features
+- **Models**: custom compatible nodes can switch between OpenAI and Anthropic
+  type in Edit — a transactional migration moves the node to a new prefixed id
+  with connections, custom models, aliases, disabled entries and provider-keyed
+  settings following it. Add Model and Import moved into the Available Models
+  card header as same-size buttons, and the Edit dialog was re-laid out with
+  Save/Cancel pinned in the footer, two-column fields and a collapsible
+  connection check, so no scrolling is needed to save
+- **Models**: Clear models on custom providers removes non-locked custom models
+  plus aliases behind a confirm, strips the members from affected combos and
+  reports counts. Custom rows have a lock toggle that guards bulk clear only.
+  Every model/alias row deletion checks combo usage first — instant when unused,
+  otherwise a confirm naming the combos with member stripping (emptied combos
+  are kept). Adding providers is a single unified Add Compatible dialog with a
+  Provider Type select
+- **Models**: combo member rows (including the Edit Combo dialog) and Available
+  Models chips show the full per-capability colored badges instead of muted or
+  missing icons
+- **Models**: per-provider chat timeout overrides (connect, first token, stall)
+  on the provider detail page, in seconds with empty meaning the global
+  default. Combo members resolve their own provider's values. The first-token
+  timeout is now enforced (200s default, previously dormant), and the global
+  env vars are documented in `.env.example`
+
 # v0.5.69-2 (2026-09-09)
 
 ## Features

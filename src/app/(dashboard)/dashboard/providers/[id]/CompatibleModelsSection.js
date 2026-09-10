@@ -2,11 +2,10 @@
 
 import { useState } from "react";
 import PropTypes from "prop-types";
-import { Button, CapacityBadges, ModelDetailModal } from "@/shared/components";
+import { CapacityBadges, ModelDetailModal } from "@/shared/components";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
-import AddCustomModelModal from "./AddCustomModelModal";
 
-function CompatibleModelRow({ modelId, modelName, fullModel, copied, onCopy, onDeleteAlias, onEdit, onTest, testStatus, isTesting, caps }) {
+function CompatibleModelRow({ modelId, modelName, fullModel, locked, copied, onCopy, onDeleteAlias, onEdit, onToggleLock, onTest, testStatus, isTesting, caps }) {
   const [showDetail, setShowDetail] = useState(false);
   const borderColor = testStatus === "ok"
     ? "border-green-500/40"
@@ -85,6 +84,15 @@ function CompatibleModelRow({ modelId, modelName, fullModel, copied, onCopy, onD
           <span className="material-symbols-outlined text-sm">edit</span>
         </button>
       )}
+      {onToggleLock && (
+        <button
+          onClick={onToggleLock}
+          className={`rounded p-1 transition-opacity hover:bg-sidebar group-hover:opacity-100 ${locked ? "text-amber-500 opacity-100" : "text-text-muted opacity-50 hover:text-primary"}`}
+          title={locked ? "Unlock model (allow bulk clear)" : "Lock model (keep on bulk clear)"}
+        >
+          <span className="material-symbols-outlined text-sm">{locked ? "lock" : "lock_open"}</span>
+        </button>
+      )}
       <button
         onClick={onDeleteAlias}
         className="rounded p-1 text-red-500 opacity-50 transition-opacity hover:bg-red-50 group-hover:opacity-100"
@@ -104,10 +112,7 @@ function CompatibleModelRow({ modelId, modelName, fullModel, copied, onCopy, onD
   );
 }
 
-export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onAddCustomModel, onDeleteCustomModel, getModelCaps, connections, isAnthropic }) {
-  const [showModelModal, setShowModelModal] = useState(false);
-  const [editingModel, setEditingModel] = useState(null);
-  const [importing, setImporting] = useState(false);
+export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onEditModel, onDeleteCustomModel, onToggleLock, getModelCaps, connections, isAnthropic }) {
   const [testingModelId, setTestingModelId] = useState(null);
   const [modelTestResults, setModelTestResults] = useState({});
 
@@ -136,52 +141,6 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
     type: "llm",
   });
 
-  const handleSaveModel = async (modelId, catalogRef) => {
-    if (!editingModel && allModels.some((model) => model.id === modelId)) {
-      alert("Model already exists for this provider.");
-      return;
-    }
-    await onAddCustomModel(modelId, catalogRef);
-    setShowModelModal(false);
-    setEditingModel(null);
-  };
-
-  const handleImport = async () => {
-    if (importing) return;
-    const activeConnection = connections.find((conn) => conn.isActive !== false);
-    if (!activeConnection) return;
-
-    setImporting(true);
-    try {
-      const res = await fetch(`/api/providers/${activeConnection.id}/models`);
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || "Failed to import models");
-        return;
-      }
-      const models = data.models || [];
-      if (models.length === 0) {
-        alert("No models returned from /models.");
-        return;
-      }
-      let importedCount = 0;
-      for (const model of models) {
-        const modelId = model.id || model.name || model.model;
-        if (!modelId) continue;
-        if (allModels.some((entry) => entry.id === modelId)) continue;
-        await onAddCustomModel(modelId);
-        importedCount += 1;
-      }
-      if (importedCount === 0) {
-        alert("No new models were added.");
-      }
-    } catch (error) {
-      console.log("Error importing models:", error);
-    } finally {
-      setImporting(false);
-    }
-  };
-
   const canImport = connections.some((conn) => conn.isActive !== false);
 
   return (
@@ -189,20 +148,6 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
       <p className="text-sm text-text-muted">
         Add {isAnthropic ? "Anthropic" : "OpenAI"}-compatible models manually or import them from the /models endpoint.
       </p>
-
-      <div className="flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={() => { setEditingModel(null); setShowModelModal(true); }}
-          className="flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/40 px-3 py-2 text-xs text-primary transition-colors hover:border-primary hover:bg-primary/5"
-        >
-          <span className="material-symbols-outlined text-sm">add</span>
-          Add Model
-        </button>
-        <Button size="sm" variant="secondary" icon="download" onClick={handleImport} disabled={!canImport || importing}>
-          {importing ? "Importing..." : "Import from /models"}
-        </Button>
-      </div>
 
       {!canImport && (
         <p className="text-xs text-text-muted">
@@ -212,19 +157,18 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
 
       {allModels.length > 0 && (
         <div className="flex flex-col gap-3">
-          {allModels.map(({ id, name, alias, source, catalogRef }) => (
+          {allModels.map(({ id, name, alias, source, catalogRef, locked }) => (
             <CompatibleModelRow
               key={`${source}-${providerStorageAlias}/${id}`}
               modelId={id}
               modelName={name}
               fullModel={`${providerDisplayAlias}/${id}`}
+              locked={locked}
               copied={copied}
               onCopy={onCopy}
               onDeleteAlias={() => source === "custom" ? onDeleteCustomModel(id) : onDeleteAlias(alias)}
-              onEdit={source === "custom" ? () => {
-                setEditingModel({ id, name, catalogRef });
-                setShowModelModal(true);
-              } : undefined}
+              onEdit={source === "custom" ? () => onEditModel({ id, name, catalogRef }) : undefined}
+              onToggleLock={source === "custom" ? () => onToggleLock(id, !locked) : undefined}
               onTest={connections.length > 0 ? () => handleTestModel(id) : undefined}
               testStatus={modelTestResults[id]}
               isTesting={testingModelId === id}
@@ -233,18 +177,6 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
           ))}
         </div>
       )}
-
-      <AddCustomModelModal
-        key={editingModel?.id || "add"}
-        isOpen={showModelModal}
-        providerAlias={providerStorageAlias}
-        existingModel={editingModel}
-        onSave={handleSaveModel}
-        onClose={() => {
-          setShowModelModal(false);
-          setEditingModel(null);
-        }}
-      />
     </div>
   );
 }
@@ -257,8 +189,9 @@ CompatibleModelsSection.propTypes = {
   copied: PropTypes.string,
   onCopy: PropTypes.func.isRequired,
   onDeleteAlias: PropTypes.func.isRequired,
-  onAddCustomModel: PropTypes.func.isRequired,
+  onEditModel: PropTypes.func.isRequired,
   onDeleteCustomModel: PropTypes.func.isRequired,
+  onToggleLock: PropTypes.func.isRequired,
   getModelCaps: PropTypes.func,
   connections: PropTypes.arrayOf(PropTypes.shape({
     id: PropTypes.string,

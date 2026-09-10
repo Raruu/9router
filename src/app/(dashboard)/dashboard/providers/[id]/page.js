@@ -14,6 +14,7 @@ import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { translate } from "@/i18n/runtime";
 import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
+import { filterCombosUsingModel, stripModelsFromComboMembers } from "@/shared/utils/comboMembers";
 import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
@@ -30,6 +31,24 @@ const AUTO_PING_SETTINGS_KEYS = {
   claude: "claudeAutoPing",
   codex: "codexAutoPing",
 };
+
+// Per-provider chat timeout overrides (seconds in the UI, ms in settings).
+// Empty = global default. Stall/first-token apply to streaming only.
+const TIMEOUT_FIELDS = [
+  { msKey: "connectMs", stateKey: "connect", label: "Connect", defaultSec: 60, hint: "Abort if the upstream sends no response headers within this time." },
+  { msKey: "firstChunkMs", stateKey: "firstChunk", label: "First token", defaultSec: 200, hint: "Abort if the first streamed chunk takes longer (streaming only)." },
+  { msKey: "stallMs", stateKey: "stall", label: "Stall", defaultSec: 360, hint: "Abort if no data arrives for this long mid-stream (streaming only)." },
+];
+
+const TIMEOUT_MIN_SEC = 1;
+const TIMEOUT_MAX_SEC = 3600;
+
+function parseTimeoutSec(raw) {
+  if (raw === "" || raw == null) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < TIMEOUT_MIN_SEC) return undefined;
+  return Math.min(TIMEOUT_MAX_SEC, Math.max(TIMEOUT_MIN_SEC, Math.round(n))) * 1000;
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -62,12 +81,15 @@ export default function ProviderDetailPage() {
   const [testingModelIds, setTestingModelIds] = useState(() => new Set());
   const [showAddCustomModel, setShowAddCustomModel] = useState(false);
   const [editingCustomModel, setEditingCustomModel] = useState(null);
+  const [importingCompatModels, setImportingCompatModels] = useState(false);
+  const [clearingModels, setClearingModels] = useState(false);
   const [selectedConnectionIds, setSelectedConnectionIds] = useState([]);
   const [bulkProxyPoolId, setBulkProxyPoolId] = useState("__none__");
   const [bulkUpdatingProxy, setBulkUpdatingProxy] = useState(false);
   const [providerStrategy, setProviderStrategy] = useState(null);
   const [providerStickyLimit, setProviderStickyLimit] = useState("");
   const [thinkingMode, setThinkingMode] = useState("auto");
+  const [timeoutInputs, setTimeoutInputs] = useState({ connect: "", firstChunk: "", stall: "" });
   const [autoPing, setAutoPing] = useState({ enabled: false, connections: {} });
   const [suggestedModels, setSuggestedModels] = useState([]);
   const [liveModels, setLiveModels] = useState([]);
@@ -319,6 +341,13 @@ export default function ProviderDetailPage() {
       // Load per-provider thinking config
       const thinkingCfg = (settingsData.providerThinking || {})[providerId] || {};
       setThinkingMode(thinkingCfg.mode || "auto");
+      // Load per-provider timeout overrides (ms → seconds inputs, empty = default)
+      const timeoutCfg = (settingsData.providerTimeouts || {})[providerId] || {};
+      setTimeoutInputs({
+        connect: timeoutCfg.connectMs ? String(timeoutCfg.connectMs / 1000) : "",
+        firstChunk: timeoutCfg.firstChunkMs ? String(timeoutCfg.firstChunkMs / 1000) : "",
+        stall: timeoutCfg.stallMs ? String(timeoutCfg.stallMs / 1000) : "",
+      });
       const autoPingSettingsKey = AUTO_PING_SETTINGS_KEYS[providerId];
       const apCfg = autoPingSettingsKey ? settingsData[autoPingSettingsKey] || {} : {};
       setAutoPing({ enabled: apCfg.enabled === true, connections: apCfg.connections || {} });
@@ -356,6 +385,11 @@ export default function ProviderDetailPage() {
       });
       const data = await res.json();
       if (res.ok) {
+        // Switching provider type moves the node to a new id — follow it.
+        if (data.converted && data.node?.id && data.node.id !== providerId) {
+          router.push(`/dashboard/providers/${data.node.id}`);
+          return;
+        }
         setProviderNode(data.node);
         await fetchConnections();
         setShowEditNodeModal(false);
@@ -432,6 +466,39 @@ export default function ProviderDetailPage() {
   const handleThinkingModeChange = (mode) => {
     setThinkingMode(mode);
     saveThinkingConfig(mode);
+  };
+
+  const saveProviderTimeouts = async (overrides) => {
+    try {
+      const settingsRes = await fetch("/api/settings", { cache: "no-store" });
+      const settingsData = settingsRes.ok ? await settingsRes.json() : {};
+      const current = settingsData.providerTimeouts || {};
+      const updated = { ...current };
+      if (Object.keys(overrides).length === 0) {
+        delete updated[providerId];
+      } else {
+        updated[providerId] = overrides;
+      }
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerTimeouts: updated }),
+      });
+    } catch (error) {
+      console.log("Error saving provider timeouts:", error);
+    }
+  };
+
+  const handleTimeoutChange = (field, raw) => {
+    const merged = { ...timeoutInputs, [field.stateKey]: raw };
+    setTimeoutInputs(merged);
+    if (parseTimeoutSec(raw) === undefined) return;
+    const overrides = {};
+    for (const f of TIMEOUT_FIELDS) {
+      const ms = parseTimeoutSec(merged[f.stateKey]);
+      if (ms != null) overrides[f.msKey] = ms;
+    }
+    saveProviderTimeouts(overrides);
   };
 
   const saveAutoPing = async (next) => {
@@ -520,11 +587,10 @@ export default function ProviderDetailPage() {
       const res = await fetch(`/api/models/alias?alias=${encodeURIComponent(alias)}`, {
         method: "DELETE",
       });
-      if (res.ok) {
-        await fetchAliases();
-      }
+      return res.ok;
     } catch (error) {
       console.log("Error deleting alias:", error);
+      return false;
     }
   };
 
@@ -551,12 +617,223 @@ export default function ProviderDetailPage() {
     try {
       const params = new URLSearchParams({ providerAlias: providerAliasOverride, id: modelId, type });
       const res = await fetch(`/api/models/custom?${params}`, { method: "DELETE" });
-      if (res.ok) {
-        await fetchCustomModels();
-        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
-      }
+      return res.ok;
     } catch (error) {
       console.log("Error deleting custom model:", error);
+      return false;
+    }
+  };
+
+  const fetchCombos = async () => {
+    try {
+      const res = await fetch("/api/combos", { cache: "no-store" });
+      const data = await res.json();
+      return res.ok && Array.isArray(data.combos) ? data.combos : [];
+    } catch (error) {
+      console.log("Error fetching combos:", error);
+      return [];
+    }
+  };
+
+  const refreshModelLists = async () => {
+    await Promise.all([fetchCustomModels(), fetchAliases()]);
+    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
+  };
+
+  // Remove member forms from using combos (combos left with no members are kept).
+  const stripFormsFromCombos = async (affected, forms) => {
+    let stripped = 0;
+    for (const combo of affected) {
+      const next = stripModelsFromComboMembers(combo.models, forms);
+      if (next.length === (combo.models || []).length) continue;
+      try {
+        const res = await fetch(`/api/combos/${combo.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ models: next }),
+        });
+        if (res.ok) stripped += 1;
+      } catch (error) {
+        console.log("Error stripping model from combo:", error);
+      }
+    }
+    return stripped;
+  };
+
+  // Every model/alias row deletion runs through here: instant when no combo
+  // references the model, otherwise confirm and strip combo members first.
+  const handleRowDelete = async ({ forms, label, verb = "Delete", action }) => {
+    const users = filterCombosUsingModel(await fetchCombos(), forms);
+    if (users.length === 0) {
+      if (!(await action())) alert("Failed to delete model");
+      await refreshModelLists();
+      return;
+    }
+    const names = users.map((c) => c.name).join(", ");
+    setConfirmState({
+      title: `${verb} Model`,
+      message: `${label} is used in ${users.length} combo${users.length === 1 ? "" : "s"} (${names}). ${verb} it and remove it from ${users.length === 1 ? "that combo" : "those combos"}? Combos left with no members are kept.`,
+      confirmText: verb,
+      onConfirm: async () => {
+        setConfirmState(null);
+        if (!(await action())) {
+          alert("Failed to delete model");
+          return;
+        }
+        await stripFormsFromCombos(users, forms);
+        await refreshModelLists();
+      },
+    });
+  };
+
+  const modelIdForms = (modelId) => {
+    const forms = [`${providerStorageAlias}/${modelId}`];
+    if (providerDisplayAlias && providerDisplayAlias !== providerStorageAlias) {
+      forms.push(`${providerDisplayAlias}/${modelId}`);
+    }
+    return forms;
+  };
+
+  const handleDeleteCustomModelRow = (modelId) =>
+    handleRowDelete({
+      forms: modelIdForms(modelId),
+      label: `${providerDisplayAlias}/${modelId}`,
+      action: () => handleDeleteCustomModel(modelId, "llm", providerStorageAlias),
+    });
+
+  const handleDeleteAliasRow = (alias) => {
+    const target = modelAliases[alias];
+    const forms = target ? [target] : [];
+    if (target && providerDisplayAlias && target.startsWith(`${providerStorageAlias}/`)) {
+      forms.push(`${providerDisplayAlias}${target.slice(providerStorageAlias.length)}`);
+    }
+    return handleRowDelete({
+      forms,
+      label: target ? `${alias} (${target})` : alias,
+      verb: "Remove",
+      action: () => handleDeleteAlias(alias),
+    });
+  };
+
+  const handleToggleModelLock = async (modelId, locked) => {
+    try {
+      const res = await fetch("/api/models/custom", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ providerAlias: providerStorageAlias, id: modelId, type: "llm", locked }),
+      });
+      if (res.ok) {
+        await fetchCustomModels();
+      } else {
+        const data = await res.json().catch(() => ({}));
+        alert(data.error || "Failed to update lock");
+      }
+    } catch (error) {
+      console.log("Error updating model lock:", error);
+    }
+  };
+
+  const clearFormsForRows = (rows) => {
+    const forms = new Set();
+    for (const row of rows) {
+      for (const form of modelIdForms(row.id)) forms.add(form);
+    }
+    return [...forms];
+  };
+
+  const openClearModelsConfirm = async () => {
+    const customs = compatModelRows.filter((m) => m.source === "custom");
+    const aliasCount = compatModelRows.length - customs.length;
+    const lockedCount = customs.filter((m) => m.locked).length;
+    if (compatModelRows.length === 0) return;
+    const users = filterCombosUsingModel(await fetchCombos(), clearFormsForRows(compatModelRows));
+    setConfirmState({
+      title: "Clear Models",
+      message: `Remove ${customs.length} custom model${customs.length === 1 ? "" : "s"}${lockedCount ? ` (${lockedCount} locked kept)` : ""} and ${aliasCount} alias${aliasCount === 1 ? "" : "es"}${users.length ? `, and remove them from ${users.length} combo${users.length === 1 ? "" : "s"} (${users.map((c) => c.name).join(", ")})` : ""}? This cannot be undone.`,
+      confirmText: "Clear All",
+      onConfirm: handleClearModels,
+    });
+  };
+
+  const handleClearModels = async () => {
+    setConfirmState(null);
+    setClearingModels(true);
+    try {
+      const params = new URLSearchParams({ providerAlias: providerStorageAlias });
+      const res = await fetch(`/api/models/custom?${params}`, { method: "DELETE" });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        alert(data.error || "Failed to clear models");
+        return;
+      }
+      const users = filterCombosUsingModel(await fetchCombos(), clearFormsForRows(compatModelRows));
+      const stripped = await stripFormsFromCombos(users, clearFormsForRows(compatModelRows));
+      await refreshModelLists();
+      alert(`Cleared ${data.deleted} model${data.deleted === 1 ? "" : "s"} and ${data.aliasesDeleted} alias${data.aliasesDeleted === 1 ? "" : "es"}${data.skippedLocked ? `, kept ${data.skippedLocked} locked` : ""}${stripped ? `, updated ${stripped} combo${stripped === 1 ? "" : "s"}` : ""}.`);
+    } catch (error) {
+      console.log("Error clearing models:", error);
+    } finally {
+      setClearingModels(false);
+    }
+  };
+
+  // Rows for OpenAI/Anthropic compatible nodes (no built-in models).
+  const compatModelRows = getProviderCustomModelRows({
+    customModels,
+    modelAliases,
+    providerAlias: providerStorageAlias,
+    type: "llm",
+  });
+  const canImportCompatModels = connections.some((conn) => conn.isActive !== false);
+
+  const openCompatModelModal = (existing = null) => {
+    setEditingCustomModel(existing);
+    setShowAddCustomModel(true);
+  };
+
+  const handleSaveCompatModel = async (modelId, catalogRef) => {
+    if (!editingCustomModel && compatModelRows.some((model) => model.id === modelId)) {
+      alert("Model already exists for this provider.");
+      return;
+    }
+    await handleAddCustomModel(modelId, "llm", providerStorageAlias, catalogRef);
+    setShowAddCustomModel(false);
+    setEditingCustomModel(null);
+  };
+
+  const handleImportCompatModels = async () => {
+    if (importingCompatModels) return;
+    const activeConnection = connections.find((conn) => conn.isActive !== false);
+    if (!activeConnection) return;
+
+    setImportingCompatModels(true);
+    try {
+      const res = await fetch(`/api/providers/${activeConnection.id}/models`);
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || "Failed to import models");
+        return;
+      }
+      const models = data.models || [];
+      if (models.length === 0) {
+        alert("No models returned from /models.");
+        return;
+      }
+      let importedCount = 0;
+      for (const model of models) {
+        const modelId = model.id || model.name || model.model;
+        if (!modelId) continue;
+        if (compatModelRows.some((entry) => entry.id === modelId)) continue;
+        await handleAddCustomModel(modelId, "llm", providerStorageAlias);
+        importedCount += 1;
+      }
+      if (importedCount === 0) {
+        alert("No new models were added.");
+      }
+    } catch (error) {
+      console.log("Error importing models:", error);
+    } finally {
+      setImportingCompatModels(false);
     }
   };
 
@@ -1084,9 +1361,10 @@ export default function ProviderDetailPage() {
           copied={copied}
           onCopy={copy}
           onSetAlias={handleSetAlias}
-          onDeleteAlias={handleDeleteAlias}
-          onAddCustomModel={(modelId, catalogRef) => handleAddCustomModel(modelId, "llm", providerStorageAlias, catalogRef)}
-          onDeleteCustomModel={(modelId) => handleDeleteCustomModel(modelId, "llm", providerStorageAlias)}
+          onDeleteAlias={(alias) => handleDeleteAliasRow(alias)}
+          onEditModel={(entry) => openCompatModelModal(entry)}
+          onDeleteCustomModel={(modelId) => handleDeleteCustomModelRow(modelId)}
+          onToggleLock={(modelId, locked) => handleToggleModelLock(modelId, locked)}
           getModelCaps={getCaps}
           connections={connections}
           isAnthropic={isAnthropicCompatible}
@@ -1124,9 +1402,9 @@ export default function ProviderDetailPage() {
             onSetAlias={() => {}}
             onDeleteAlias={() => {
               if (model.source === "custom") {
-                handleDeleteCustomModel(model.id, "llm", providerStorageAlias);
+                handleDeleteCustomModelRow(model.id);
               } else {
-                handleDeleteAlias(model.alias);
+                handleDeleteAliasRow(model.alias);
               }
             }}
             onEdit={model.source === "custom" ? () => {
@@ -1158,7 +1436,12 @@ export default function ProviderDetailPage() {
               copied={copied}
               onCopy={copy}
               onSetAlias={(alias) => handleSetAlias(model.id, alias, providerStorageAlias)}
-              onDeleteAlias={() => handleDeleteAlias(existingAlias)}
+              onDeleteAlias={() => handleRowDelete({
+                forms: modelIdForms(model.id),
+                label: `${providerDisplayAlias}/${model.id}`,
+                verb: "Remove",
+                action: () => handleDeleteAlias(existingAlias),
+              })}
               testStatus={modelTestResults[model.id]}
               onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(model.id) : undefined}
               isTesting={testingModelIds.has(model.id)}
@@ -1655,6 +1938,32 @@ export default function ProviderDetailPage() {
         </Card>
       )}
 
+      {/* Timeouts */}
+      <Card>
+        <div className="mb-3 flex flex-col gap-1">
+          <h2 className="text-lg font-semibold">Timeouts</h2>
+          <p className="text-sm text-text-muted">
+            Per-provider chat timeouts in seconds. Empty uses the global default.
+            Applies to combo members served by this provider. First-token and stall apply to streaming only.
+          </p>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {TIMEOUT_FIELDS.map((field) => (
+            <Input
+              key={field.stateKey}
+              label={field.label}
+              type="number"
+              min={TIMEOUT_MIN_SEC}
+              max={TIMEOUT_MAX_SEC}
+              placeholder={`Default: ${field.defaultSec}s`}
+              value={timeoutInputs[field.stateKey]}
+              onChange={(e) => handleTimeoutChange(field, e.target.value)}
+              hint={field.hint}
+            />
+          ))}
+        </div>
+      </Card>
+
       {/* Models */}
       <Card>
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -1675,7 +1984,38 @@ export default function ProviderDetailPage() {
               </select>
             )}
           </div>
-          {!isCompatible && (() => {
+          {isCompatible ? (
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                icon="add"
+                onClick={() => openCompatModelModal()}
+                className="w-full sm:w-auto"
+              >
+                Add Model
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                icon="download"
+                onClick={handleImportCompatModels}
+                disabled={!canImportCompatModels || importingCompatModels}
+                className="w-full sm:w-auto"
+              >
+                {importingCompatModels ? "Importing..." : "Import from /models"}
+              </Button>
+              <Button
+                size="sm"
+                variant="danger"
+                icon="delete_sweep"
+                onClick={openClearModelsConfirm}
+                disabled={compatModelRows.length === 0 || clearingModels}
+                className="w-full sm:w-auto"
+              >
+                {clearingModels ? "Clearing..." : "Clear"}
+              </Button>
+            </div>
+          ) : (() => {
             const allIds = [
               ...models,
               ...kiloFreeModels.filter((fm) => !models.some((m) => m.id === fm.id)),
@@ -1774,26 +2114,27 @@ export default function ProviderDetailPage() {
           node={providerNode}
           onSave={handleUpdateNode}
           onClose={() => setShowEditNodeModal(false)}
-          isAnthropic={isAnthropicCompatible}
         />
       )}
-      {!isCompatible && (
-        <AddCustomModelModal
-          key={editingCustomModel?.id || "add"}
-          isOpen={showAddCustomModel}
-          providerAlias={providerStorageAlias}
-          existingModel={editingCustomModel}
-          onSave={async (modelId, catalogRef) => {
-            await handleAddCustomModel(modelId, "llm", providerStorageAlias, catalogRef);
-            setShowAddCustomModel(false);
-            setEditingCustomModel(null);
-          }}
-          onClose={() => {
-            setShowAddCustomModel(false);
-            setEditingCustomModel(null);
-          }}
-        />
-      )}
+      <AddCustomModelModal
+        key={editingCustomModel?.id || "add"}
+        isOpen={showAddCustomModel}
+        providerAlias={providerStorageAlias}
+        existingModel={editingCustomModel}
+        onSave={async (modelId, catalogRef) => {
+          if (isCompatible) {
+            await handleSaveCompatModel(modelId, catalogRef);
+            return;
+          }
+          await handleAddCustomModel(modelId, "llm", providerStorageAlias, catalogRef);
+          setShowAddCustomModel(false);
+          setEditingCustomModel(null);
+        }}
+        onClose={() => {
+          setShowAddCustomModel(false);
+          setEditingCustomModel(null);
+        }}
+      />
 
       {providerId === "codex" && (
         <BulkImportCodexModal
@@ -1830,6 +2171,7 @@ export default function ProviderDetailPage() {
         onConfirm={confirmState?.onConfirm}
         title={confirmState?.title || "Confirm"}
         message={confirmState?.message}
+        confirmText={confirmState?.confirmText || "Confirm"}
         variant="danger"
       />
     </div>
