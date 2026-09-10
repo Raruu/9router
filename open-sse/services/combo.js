@@ -249,18 +249,22 @@ export function getRotatedModels(models, comboName, strategy, stickyLimit = 1) {
 // apply: no resolver, no in-process retry signal, unconfigured provider, or a
 // non-transient underlying status. Fail-open throughout — any lookup problem
 // means "advance", never a throw.
-function getMemberTries(resolveMemberRetries, result) {
+function getMemberRetryConfig(resolveMemberRetries, result) {
   try {
-    if (typeof resolveMemberRetries !== "function") return 0;
+    if (typeof resolveMemberRetries !== "function") return null;
     const signal = result?.retrySignal;
-    if (!signal || typeof signal !== "object" || !signal.providerId) return 0;
-    if (!isRetryableStatus(signal.status)) return 0;
+    if (!signal || typeof signal !== "object" || !signal.providerId) return null;
+    if (!isRetryableStatus(signal.status)) return null;
     const cfg = resolveMemberRetries(signal.providerId);
-    if (!cfg || cfg.enabled !== true) return 0;
+    if (!cfg || cfg.enabled !== true) return null;
     const tries = Math.floor(cfg.tries);
-    return Number.isFinite(tries) && tries > 0 ? tries : 0;
+    if (!Number.isFinite(tries) || tries <= 0) return null;
+    const maxBackoffMs = Number.isFinite(cfg.maxBackoffMs)
+      ? Math.min(MAX_RETRY_WAIT_MS, Math.max(0, cfg.maxBackoffMs))
+      : MAX_RETRY_WAIT_MS;
+    return { tries, maxBackoffMs };
   } catch {
-    return 0;
+    return null;
   }
 }
 
@@ -383,9 +387,10 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       }
 
       // Same-member retry on transient failures when the serving provider opted in.
-      if (attempt < getMemberTries(resolveMemberRetries, result)) {
+      const retryConfig = getMemberRetryConfig(resolveMemberRetries, result);
+      if (retryConfig && attempt < retryConfig.tries) {
         const waitMs = getRetryWaitMs(result);
-        if (waitMs <= MAX_RETRY_WAIT_MS) {
+        if (waitMs <= retryConfig.maxBackoffMs) {
           attempt += 1;
           const signal = result.retrySignal || {};
           log.info("COMBO", `Model ${modelStr} transient ${signal.status}, retry ${attempt} after ${waitMs}ms`);

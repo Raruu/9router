@@ -131,7 +131,7 @@ export async function handleChat(request, clientRawRequest = null) {
       body,
       models: augmentedModels,
       handleSingleModel: withCapacityAdapterStripping(
-        (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, modelStr),
+        (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, modelStr, true),
         adapterAdded
       ),
       log,
@@ -152,7 +152,7 @@ export async function handleChat(request, clientRawRequest = null) {
       body,
       models: soloAugmented,
       handleSingleModel: withCapacityAdapterStripping(
-        (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey),
+        (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, null, true),
         adapterAdded
       ),
       log,
@@ -212,7 +212,7 @@ function memberRetryResolver(settings) {
   const providerRetries = (settings && settings.providerRetries) || {};
   return (providerId) => resolveProviderRetries(providerRetries[providerId]);
 }
-async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, responseModelOverride = null) {
+async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, responseModelOverride = null, comboRetryContext = false) {
   const modelInfo = await getModelInfo(modelStr);
 
   // If provider is null, this might be a combo name - check and handle
@@ -255,7 +255,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         body,
         models: augmentedModels,
         handleSingleModel: withCapacityAdapterStripping(
-          (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, nestedOverride),
+          (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, nestedOverride, true),
           adapterAdded
         ),
         log,
@@ -327,6 +327,9 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     const chatSettings = await getSettings();
     const providerThinking = (chatSettings.providerThinking || {})[provider] || null;
     const timeoutOverrides = resolveProviderTimeouts((chatSettings.providerTimeouts || {})[provider]);
+    const providerRetryConfig = comboRetryContext
+      ? resolveProviderRetries((chatSettings.providerRetries || {})[provider])
+      : null;
     const result = await handleChatCore({
       body: { ...body, model: `${provider}/${model}` },
       modelInfo: { provider, model },
@@ -390,7 +393,15 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     // Do not persist a modelLock_* for this path.
     const shouldFallback = provider === "antigravity" && quotaResetMs
       ? true
-      : (await markAccountUnavailable(credentials.connectionId, result.status, result.error, provider, model, resetsAtMs)).shouldFallback;
+      : (await markAccountUnavailable(
+          credentials.connectionId,
+          result.status,
+          result.error,
+          provider,
+          model,
+          resetsAtMs,
+          providerRetryConfig ? { maxBackoffMs: providerRetryConfig.maxBackoffMs } : {},
+        )).shouldFallback;
 
     if (shouldFallback) {
       log.warn("FALLBACK", `⇄ ACC:${credentials.connectionName} UNAVAILABLE (${result.status}) → NEXT ACCOUNT`);

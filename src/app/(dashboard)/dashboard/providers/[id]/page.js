@@ -46,12 +46,22 @@ const TIMEOUT_MAX_SEC = 3600;
 const RETRY_MIN_TRIES = 1;
 const RETRY_MAX_TRIES = 10;
 const RETRY_DEFAULT_TRIES = 2;
+const RETRY_MIN_BACKOFF_SEC = 1;
+const RETRY_MAX_BACKOFF_SEC = 30;
+const RETRY_DEFAULT_BACKOFF_SEC = 16;
 
 function parseRetryTries(raw) {
   if (raw === "" || raw == null) return null;
   const n = Number(raw);
   if (!Number.isFinite(n)) return undefined;
   return Math.min(RETRY_MAX_TRIES, Math.max(RETRY_MIN_TRIES, Math.floor(n)));
+}
+
+function parseRetryBackoffSec(raw) {
+  if (raw === "" || raw == null) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return undefined;
+  return Math.min(RETRY_MAX_BACKOFF_SEC, Math.max(RETRY_MIN_BACKOFF_SEC, Math.floor(n)));
 }
 
 function parseTimeoutSec(raw) {
@@ -101,7 +111,7 @@ export default function ProviderDetailPage() {
   const [providerStickyLimit, setProviderStickyLimit] = useState("");
   const [thinkingMode, setThinkingMode] = useState("auto");
   const [timeoutInputs, setTimeoutInputs] = useState({ connect: "", firstChunk: "", stall: "" });
-  const [retryCfg, setRetryCfg] = useState({ enabled: false, tries: "" });
+  const [retryCfg, setRetryCfg] = useState({ enabled: false, tries: "", maxBackoffSeconds: "" });
   const [autoPing, setAutoPing] = useState({ enabled: false, connections: {} });
   const [suggestedModels, setSuggestedModels] = useState([]);
   const [liveModels, setLiveModels] = useState([]);
@@ -365,6 +375,7 @@ export default function ProviderDetailPage() {
       setRetryCfg({
         enabled: retryCfgRaw.enabled === true,
         tries: retryCfgRaw.tries != null ? String(retryCfgRaw.tries) : "",
+        maxBackoffSeconds: retryCfgRaw.maxBackoffSeconds != null ? String(retryCfgRaw.maxBackoffSeconds) : "",
       });
       const autoPingSettingsKey = AUTO_PING_SETTINGS_KEYS[providerId];
       const apCfg = autoPingSettingsKey ? settingsData[autoPingSettingsKey] || {} : {};
@@ -528,7 +539,11 @@ export default function ProviderDetailPage() {
       if (!next.enabled) {
         delete updated[providerId];
       } else {
-        updated[providerId] = { enabled: true, tries: next.tries };
+        updated[providerId] = {
+          enabled: true,
+          tries: next.tries,
+          maxBackoffSeconds: next.maxBackoffSeconds,
+        };
       }
       await fetch("/api/settings", {
         method: "PATCH",
@@ -542,9 +557,14 @@ export default function ProviderDetailPage() {
 
   const handleRetryToggle = (enabled) => {
     const tries = parseRetryTries(retryCfg.tries) ?? RETRY_DEFAULT_TRIES;
-    const next = { enabled, tries: enabled ? String(tries) : retryCfg.tries };
+    const maxBackoffSeconds = parseRetryBackoffSec(retryCfg.maxBackoffSeconds) ?? RETRY_DEFAULT_BACKOFF_SEC;
+    const next = {
+      enabled,
+      tries: enabled ? String(tries) : retryCfg.tries,
+      maxBackoffSeconds: enabled ? String(maxBackoffSeconds) : retryCfg.maxBackoffSeconds,
+    };
     setRetryCfg(next);
-    saveProviderRetries({ enabled, tries: enabled ? tries : 0 });
+    saveProviderRetries({ enabled, tries: enabled ? tries : 0, maxBackoffSeconds });
   };
 
   const handleRetryTriesChange = (raw) => {
@@ -552,7 +572,17 @@ export default function ProviderDetailPage() {
     if (!retryCfg.enabled) return;
     const tries = parseRetryTries(raw);
     if (tries === undefined || tries === null) return;
-    saveProviderRetries({ enabled: true, tries });
+    const maxBackoffSeconds = parseRetryBackoffSec(retryCfg.maxBackoffSeconds) ?? RETRY_DEFAULT_BACKOFF_SEC;
+    saveProviderRetries({ enabled: true, tries, maxBackoffSeconds });
+  };
+
+  const handleRetryBackoffChange = (raw) => {
+    setRetryCfg({ ...retryCfg, maxBackoffSeconds: raw });
+    if (!retryCfg.enabled) return;
+    const maxBackoffSeconds = parseRetryBackoffSec(raw);
+    if (maxBackoffSeconds === undefined || maxBackoffSeconds === null) return;
+    const tries = parseRetryTries(retryCfg.tries) ?? RETRY_DEFAULT_TRIES;
+    saveProviderRetries({ enabled: true, tries, maxBackoffSeconds });
   };
 
   const saveAutoPing = async (next) => {
@@ -2024,8 +2054,8 @@ export default function ProviderDetailPage() {
           <h2 className="text-lg font-semibold">Combo Retries</h2>
           <p className="text-sm text-text-muted">
             When this provider fails inside a combo with a transient error (rate limit, overloaded, network),
-            retry the same member before moving to the next provider. Off by default. Waits out short lockouts
-            (up to 30s per retry); longer outages skip to the next member immediately.
+            retry the same member before moving to the next provider. Off by default. Local exponential backoff
+            is capped per retry; genuine provider reset times beyond the cap still skip to the next member.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-4">
@@ -2037,16 +2067,28 @@ export default function ProviderDetailPage() {
             />
           </div>
           {retryCfg.enabled && (
-            <Input
-              label="Extra tries"
-              type="number"
-              min={RETRY_MIN_TRIES}
-              max={RETRY_MAX_TRIES}
-              placeholder={`Default: ${RETRY_DEFAULT_TRIES}`}
-              value={retryCfg.tries}
-              onChange={(e) => handleRetryTriesChange(e.target.value)}
-              hint="Same-member attempts after the first failure (1–10)."
-            />
+            <>
+              <Input
+                label="Extra tries"
+                type="number"
+                min={RETRY_MIN_TRIES}
+                max={RETRY_MAX_TRIES}
+                placeholder={`Default: ${RETRY_DEFAULT_TRIES}`}
+                value={retryCfg.tries}
+                onChange={(e) => handleRetryTriesChange(e.target.value)}
+                hint="Same-member attempts after the first failure (1–10)."
+              />
+              <Input
+                label="Max backoff"
+                type="number"
+                min={RETRY_MIN_BACKOFF_SEC}
+                max={RETRY_MAX_BACKOFF_SEC}
+                placeholder={`Default: ${RETRY_DEFAULT_BACKOFF_SEC}s`}
+                value={retryCfg.maxBackoffSeconds}
+                onChange={(e) => handleRetryBackoffChange(e.target.value)}
+                hint="Maximum local wait per retry in seconds (1–30)."
+              />
+            </>
           )}
         </div>
       </Card>
