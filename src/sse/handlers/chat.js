@@ -16,10 +16,12 @@ import { getTransform as getPxpipeTransform } from "@/lib/pxpipe/loader.js";
 import { appendPxpipeEvent } from "@/lib/pxpipe/events.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { handleComboChat, handleFusionChat, detectRequiredCapabilities } from "open-sse/services/combo.js";
+import { checkFallbackError } from "open-sse/services/accountFallback.js";
 import { augmentModelsWithCapacityAdapter, withCapacityAdapterStripping, getActiveAdapterStrategy } from "open-sse/services/capacityAdapter.js";
 import { handleBypassRequest } from "open-sse/utils/bypassHandler.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { resolveProviderTimeouts } from "open-sse/config/timeouts.js";
+import { resolveProviderRetries } from "open-sse/config/retries.js";
 import { detectFormatByEndpoint } from "open-sse/translator/formats.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
@@ -135,7 +137,8 @@ export async function handleChat(request, clientRawRequest = null) {
       log,
       comboName: modelStr,
       comboStrategy,
-      comboStickyLimit
+      comboStickyLimit,
+      resolveMemberRetries: memberRetryResolver(settings)
     });
   }
 
@@ -154,7 +157,8 @@ export async function handleChat(request, clientRawRequest = null) {
       ),
       log,
       comboName: modelStr,
-      comboStrategy: getActiveAdapterStrategy(requiredCapabilities, settings)
+      comboStrategy: getActiveAdapterStrategy(requiredCapabilities, settings),
+      resolveMemberRetries: memberRetryResolver(settings)
     });
   }
 
@@ -168,6 +172,46 @@ export async function handleChat(request, clientRawRequest = null) {
  *   response `model` (opt-in via the comboNameInResponse setting). Set by the
  *   combo branches; an outer combo wins over a nested one via `??`.
  */
+
+// In-process retry signal for combo same-member retries. Attached as a plain
+// property (never a header) so it stays server-side: the combo loop reads the
+// serving provider id, the underlying error status, and how long until the
+// accounts are usable again. The outer response status alone can't express
+// this (e.g. a 503 from 429-locked accounts is retryable after the lock, a
+// 503 from 401-locked accounts is not). Fail-open: advisory only.
+function withRetrySignal(response, provider, status, retryAfterMs) {
+  try {
+    response.retrySignal = {
+      providerId: provider,
+      status: status ?? null,
+      retryAfterMs: typeof retryAfterMs === "number" && Number.isFinite(retryAfterMs)
+        ? Math.max(0, retryAfterMs)
+        : 0,
+    };
+  } catch {
+    // Ignore — a missing signal just means "advance", never a throw.
+  }
+  return response;
+}
+
+// Milliseconds until rate-limited accounts are usable again, from the ISO
+// retryAfter date the credentials layer reports. Falls back to the
+// classification cooldown when the date is missing or unparseable.
+function resolveRetryWaitMs(retryAfter, status, errorText) {
+  const remaining = Date.parse(retryAfter) - Date.now();
+  if (Number.isFinite(remaining)) return Math.max(0, remaining);
+  try {
+    return checkFallbackError(status || 503, errorText || "").cooldownMs || 0;
+  } catch {
+    return 0;
+  }
+}
+
+// Per-provider combo retry lookup for handleComboChat, built from settings.
+function memberRetryResolver(settings) {
+  const providerRetries = (settings && settings.providerRetries) || {};
+  return (providerId) => resolveProviderRetries(providerRetries[providerId]);
+}
 async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, responseModelOverride = null) {
   const modelInfo = await getModelInfo(modelStr);
 
@@ -217,7 +261,8 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         log,
         comboName: modelStr,
         comboStrategy,
-        comboStickyLimit
+        comboStickyLimit,
+        resolveMemberRetries: memberRetryResolver(chatSettings)
       });
     }
     log.warn("CHAT", "Invalid model format", { model: modelStr });
@@ -245,14 +290,24 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         const errorMsg = lastError || credentials.lastError || "Unavailable";
         const status = HTTP_STATUS.SERVICE_UNAVAILABLE;
         log.warn("CHAT", `[${provider}/${model}] ${errorMsg} (${credentials.retryAfterHuman})`);
-        return unavailableResponse(status, `[${provider}/${model}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman);
+        return withRetrySignal(
+          unavailableResponse(status, `[${provider}/${model}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman),
+          provider,
+          lastStatus,
+          resolveRetryWaitMs(credentials.retryAfter, lastStatus, errorMsg)
+        );
       }
       if (excludeConnectionIds.size === 0) {
         log.warn("AUTH", `No active credentials for provider: ${provider}`);
         return errorResponse(HTTP_STATUS.NOT_FOUND, `No active credentials for provider: ${provider}`);
       }
       log.warn("CHAT", "No more accounts available", { provider });
-      return errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable");
+      return withRetrySignal(
+        errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable"),
+        provider,
+        lastStatus,
+        resolveRetryWaitMs(null, lastStatus, lastError)
+      );
     }
 
     // Account selection shown in the unified "▶" line (acc:...)
@@ -345,6 +400,6 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       continue;
     }
 
-    return result.response;
+    return withRetrySignal(result.response, provider, result.status, 0);
   }
 }

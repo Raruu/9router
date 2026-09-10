@@ -4,6 +4,7 @@
 
 import { checkFallbackError, formatRetryAfter } from "./accountFallback.js";
 import { unavailableResponse } from "../utils/error.js";
+import { isRetryableStatus, MAX_RETRY_WAIT_MS } from "../config/retries.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
 
@@ -239,10 +240,40 @@ export function getRotatedModels(models, comboName, strategy, stickyLimit = 1) {
 /**
  * Reset in-memory rotation state when combo/settings change
  * @param {string} [comboName] - Combo name to reset; omit to clear all
- */
-export function resetComboRotation(comboName) {
+ */export function resetComboRotation(comboName) {
   if (comboName) comboRotationState.delete(comboName);
   else comboRotationState.clear();
+}
+
+// Extra same-member attempts for a failed member, or 0 when retries don't
+// apply: no resolver, no in-process retry signal, unconfigured provider, or a
+// non-transient underlying status. Fail-open throughout — any lookup problem
+// means "advance", never a throw.
+function getMemberTries(resolveMemberRetries, result) {
+  try {
+    if (typeof resolveMemberRetries !== "function") return 0;
+    const signal = result?.retrySignal;
+    if (!signal || typeof signal !== "object" || !signal.providerId) return 0;
+    if (!isRetryableStatus(signal.status)) return 0;
+    const cfg = resolveMemberRetries(signal.providerId);
+    if (!cfg || cfg.enabled !== true) return 0;
+    const tries = Math.floor(cfg.tries);
+    return Number.isFinite(tries) && tries > 0 ? tries : 0;
+  } catch {
+    return 0;
+  }
+}
+
+// Milliseconds to wait before a same-member retry. Locks that outlast
+// MAX_RETRY_WAIT_MS make the caller skip the member instead of sleeping.
+function getRetryWaitMs(result) {
+  try {
+    const waitMs = result?.retrySignal?.retryAfterMs;
+    if (typeof waitMs !== "number" || !Number.isFinite(waitMs)) return 0;
+    return Math.max(0, waitMs);
+  } catch {
+    return 0;
+  }
 }
 
 /**
@@ -275,9 +306,14 @@ export function getComboModelsFromData(modelStr, combosData) {
  * @param {string} [options.comboName] - Name of the combo (for round-robin tracking)
  * @param {string} [options.comboStrategy] - Strategy: "fallback" or "round-robin"
  * @param {number|string} [options.comboStickyLimit=1] - Requests per combo model before switching
+ * @param {Function} [options.resolveMemberRetries] - Optional per-provider retry
+ *   lookup: (providerId) => ({ enabled: true, tries: N } | null). The provider id
+ *   comes from the failure response's in-process `retrySignal` (set by the app's
+ *   single-model handler), never from the member string, so aliases and nested
+ *   combos resolve to the provider that actually served the attempt.
  * @returns {Promise<Response>}
  */
-export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true }) {
+export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true, resolveMemberRetries = null }) {
   // Apply rotation strategy if enabled
   let rotatedModels = getRotatedModels(models, comboName, comboStrategy, comboStickyLimit);
 
@@ -301,9 +337,16 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
     const modelStr = rotatedModels[i];
     log.info("COMBO", `Trying model ${i + 1}/${rotatedModels.length}: ${modelStr}`);
 
+    // Same-member retries: a transient failure on a provider with retries
+    // enabled re-runs this member (up to `tries` extra attempts) before the
+    // loop advances. Anything non-transient, unconfigured, over the wait cap,
+    // or out of tries falls through to the next member below.
+    let attempt = 0;
+    let advancing = false;
+    while (!advancing) {
     try {
       const result = await handleSingleModel(body, modelStr);
-      
+
       // Success (2xx) - return response
       if (result.ok) {
         log.info("COMBO", `Model ${modelStr} succeeded`);
@@ -339,6 +382,18 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
         return result;
       }
 
+      // Same-member retry on transient failures when the serving provider opted in.
+      if (attempt < getMemberTries(resolveMemberRetries, result)) {
+        const waitMs = getRetryWaitMs(result);
+        if (waitMs <= MAX_RETRY_WAIT_MS) {
+          attempt += 1;
+          const signal = result.retrySignal || {};
+          log.info("COMBO", `Model ${modelStr} transient ${signal.status}, retry ${attempt} after ${waitMs}ms`);
+          if (waitMs > 0) await new Promise(r => setTimeout(r, waitMs));
+          continue;
+        }
+      }
+
       // For transient errors (503/502/504), wait for cooldown before falling through
       // so a briefly-overloaded provider gets a chance to recover rather than being
       // skipped immediately (fixes: combo falls through on transient 503)
@@ -352,11 +407,14 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       lastError = errorText || String(result.status);
       if (!lastStatus) lastStatus = result.status;
       log.warn("COMBO", `Model ${modelStr} failed, trying next`, { status: result.status });
+      advancing = true;
     } catch (error) {
       // Catch unexpected exceptions to ensure fallback continues
       lastError = error.message || String(error);
       if (!lastStatus) lastStatus = 500;
       log.warn("COMBO", `Model ${modelStr} threw error, trying next`, { error: lastError });
+      advancing = true;
+    }
     }
   }
 
