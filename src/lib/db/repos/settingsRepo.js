@@ -25,6 +25,11 @@ export const DEFAULT_SETTINGS = {
   // smallest. Advertised only — routing/clamping always use the member that
   // actually served the request.
   comboLimitStrategy: "max",
+  // Which member thinking levels a combo advertises as capabilities.effort_tiers:
+  // "union" (default) = every level any member supports (routing clamps the
+  // request to what the serving member accepts); "intersection" = only levels
+  // every member supports.
+  comboEffortStrategy: "union",
   // What GET /v1/models advertises: "all" | "combos" | "models".
   modelsExposure: "all",
   capacityAdapter: {

@@ -35,12 +35,12 @@ function json(data, options = {}) {
 
 // Keep single-model lookups consistent with GET /v1/models: a combo's
 // advertised limits must not depend on which endpoint answered.
-async function comboLimitStrategy() {
+async function comboStrategies() {
   try {
-    const { comboLimitStrategy } = await getSettings();
-    return comboLimitStrategy;
+    const { comboLimitStrategy, comboEffortStrategy } = await getSettings();
+    return { comboLimitStrategy, comboEffortStrategy };
   } catch {
-    return undefined;
+    return {};
   }
 }
 
@@ -55,7 +55,7 @@ export async function GET(_request, { params }) {
     const path = Array.isArray(model) ? model : [model];
     const identifier = path.filter(Boolean).join("/");
     const kindFilter = path.length === 1 ? KIND_SLUG_MAP[identifier] : null;
-    const limits = { comboLimitStrategy: await comboLimitStrategy() };
+    const limits = { ...(await comboStrategies()) };
 
     if (kindFilter) {
       const data = await buildModelsList(kindFilter, limits);

@@ -4,6 +4,8 @@
 // importing that route's provider connections and live-catalog resolvers.
 
 import { DEFAULT_CAPABILITIES, getCapabilitiesForModel } from "./capabilities.js";
+import { getThinkingLevels } from "./thinkingLevels.js";
+import { EFFORT_LEVELS } from "../translator/concerns/thinking.js";
 
 // Combos can list other combos as members, so resolution recurses. The cap is
 // a guard against a pathological chain, not a supported nesting depth.
@@ -81,6 +83,90 @@ export function comboCapabilities(combo, ctx, depth = 0, visited = new Set()) {
   }
 }
 
+// Which member thinking levels a combo advertises as `capabilities.effort_tiers`:
+// "union" (default) offers every level any member supports — routing clamps the
+// request to what the serving member accepts (see clampLevelToSupport) — while
+// "intersection" offers only levels every member supports. Selected in the
+// dashboard (Combos → Effort tiers strategy), stored as settings.comboEffortStrategy.
+export const COMBO_EFFORT_STRATEGIES = ["union", "intersection"];
+
+// Rank for canonical tier order: "none" first, then the low→high EFFORT_LEVELS,
+// then any format-specific extras ("thinking", "ultra") in first-seen order.
+const EFFORT_RANK = new Map([["none", -1], ...EFFORT_LEVELS.map((level, index) => [level, index])]);
+
+function sortEffortTiers(tiers) {
+  const seen = new Map();
+  for (const tier of tiers) {
+    if (typeof tier !== "string" || !tier || seen.has(tier)) continue;
+    seen.set(tier, seen.size);
+  }
+  return [...seen.keys()].sort((a, b) => {
+    const rankA = EFFORT_RANK.has(a) ? EFFORT_RANK.get(a) : EFFORT_LEVELS.length;
+    const rankB = EFFORT_RANK.has(b) ? EFFORT_RANK.get(b) : EFFORT_LEVELS.length;
+    if (rankA !== rankB) return rankA - rankB;
+    return seen.get(a) - seen.get(b);
+  });
+}
+
+// Pure merge of per-member level lists — unit-testable without a ctx.
+export function mergeEffortTiers(memberLevels, strategy = "union") {
+  const lists = (memberLevels || []).filter((list) => Array.isArray(list) && list.length > 0);
+  if (lists.length === 0) return null;
+  let tiers;
+  if (strategy === "intersection") {
+    tiers = lists[0].filter((level) => lists.every((list) => list.includes(level)));
+  } else {
+    tiers = [...new Set(lists.flat())];
+  }
+  const sorted = sortEffortTiers(tiers);
+  return sorted.length > 0 ? sorted : null;
+}
+
+// Raw per-member level lists for one combo, recursing into nested combos without
+// merging first so the top-level strategy applies to every member uniformly.
+// Mirrors comboMemberCapabilities' bare-member resolution (nested combo →
+// recurse, alias → resolve, else provider-as-model contributes nothing).
+function collectComboMemberLevels(combo, ctx, depth = 0, visited = new Set()) {
+  if (depth >= MAX_COMBO_NESTING_DEPTH) return [];
+  const name = typeof combo?.name === "string" ? combo.name : null;
+  if (name !== null) {
+    if (visited.has(name)) return [];
+    visited.add(name);
+  }
+  try {
+    const levels = [];
+    for (const member of combo?.models || []) {
+      if (typeof member !== "string") continue;
+      let fullModel = member.trim();
+      if (!fullModel) continue;
+      if (!fullModel.includes("/")) {
+        const nested = ctx?.comboByName?.get(fullModel);
+        if (nested) {
+          levels.push(...collectComboMemberLevels(nested, ctx, depth + 1, visited));
+          continue;
+        }
+        const resolved = ctx?.modelAliases?.[fullModel];
+        if (typeof resolved !== "string" || !resolved.includes("/")) continue;
+        fullModel = resolved;
+      }
+      const parsed = resolveComboMember(fullModel, ctx);
+      if (!parsed) continue;
+      const memberLevels = getThinkingLevels(parsed.providerId, parsed.modelId);
+      if (Array.isArray(memberLevels) && memberLevels.length > 0) levels.push(memberLevels);
+    }
+    return levels;
+  } finally {
+    if (name !== null) visited.delete(name);
+  }
+}
+
+// Advertised thinking levels for a combo, or null when no member reports any.
+// Strategy comes from ctx.comboEffortStrategy (settings.comboEffortStrategy),
+// defaulting to "union" for any other value.
+export function comboEffortTiers(combo, ctx) {
+  const strategy = ctx?.comboEffortStrategy === "intersection" ? "intersection" : "union";
+  return mergeEffortTiers(collectComboMemberLevels(combo, ctx), strategy);
+}
 // null means "no clamp", so a member without a range constrains nothing; the
 // combo's range spans every member that does clamp.
 function unionThinkingRanges(ranges) {

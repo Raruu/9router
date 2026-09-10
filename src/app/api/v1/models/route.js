@@ -19,7 +19,7 @@ import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { capabilitiesFromServiceKind, getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
-import { comboCapabilities, mergeMemberCapabilities } from "open-sse/providers/comboCapabilities.js";
+import { comboCapabilities, comboEffortTiers, mergeMemberCapabilities } from "open-sse/providers/comboCapabilities.js";
 import { buildProviderIdByPrefix } from "@/lib/providerPrefixMap";
 
 // Per-provider live model resolvers. Each receives a connection record and
@@ -268,6 +268,7 @@ export { mergeMemberCapabilities };
  * @param {boolean} [options.skipDynamicFetch] - Skip upstream /models fetches.
  * @param {"all"|"combos"|"models"} [options.exposure] - Which entries to advertise.
  * @param {"max"|"min"} [options.comboLimitStrategy] - Which member's numeric limits a combo advertises.
+ * @param {"union"|"intersection"} [options.comboEffortStrategy] - Which member thinking levels a combo advertises as capabilities.effort_tiers.
  */
 export async function buildModelsList(kindFilter, options = {}) {
   // When this header is present, the /v1/models request came from another
@@ -336,6 +337,7 @@ export async function buildModelsList(kindFilter, options = {}) {
     modelAliases,
     comboByName,
     comboLimitStrategy: options.comboLimitStrategy,
+    comboEffortStrategy: options.comboEffortStrategy,
   };
 
   // Combos first (filtered by kind). Web combos expose `kind` so AI knows search vs fetch.
@@ -354,6 +356,10 @@ export async function buildModelsList(kindFilter, options = {}) {
       const caps = comboCapabilities(combo, capabilityContext);
       if (caps) {
         entry.capabilities = caps;
+        if (caps.reasoning) {
+          const effortTiers = comboEffortTiers(combo, capabilityContext);
+          if (effortTiers) caps.effort_tiers = effortTiers;
+        }
         if (Number.isFinite(caps.contextWindow)) {
           entry.context_length = caps.contextWindow;
           entry.max_input_tokens = caps.contextWindow;
@@ -666,7 +672,7 @@ async function resolveCatalogOptions(request) {
   }
   try {
     if (await hasValidCliToken(request)) {
-      return { exposure: "all", comboLimitStrategy: settings.comboLimitStrategy };
+      return { exposure: "all", comboLimitStrategy: settings.comboLimitStrategy, comboEffortStrategy: settings.comboEffortStrategy };
     }
   } catch {
     // Token check failed (no machine-id file yet) — fall through to the setting.
@@ -674,6 +680,7 @@ async function resolveCatalogOptions(request) {
   return {
     exposure: settings.modelsExposure,
     comboLimitStrategy: settings.comboLimitStrategy,
+    comboEffortStrategy: settings.comboEffortStrategy,
   };
 }
 
@@ -685,8 +692,8 @@ export async function GET(request) {
   try {
     // Detect cross-instance recursive /models fetch (another 9router fetching our /models)
     const skipDynamicFetch = request?.headers?.get(INTERNAL_MODELS_FETCH_HEADER) === "1";
-    const { exposure, comboLimitStrategy } = await resolveCatalogOptions(request);
-    const data = await buildModelsList([LLM_KIND], { skipDynamicFetch, exposure, comboLimitStrategy });
+    const { exposure, comboLimitStrategy, comboEffortStrategy } = await resolveCatalogOptions(request);
+    const data = await buildModelsList([LLM_KIND], { skipDynamicFetch, exposure, comboLimitStrategy, comboEffortStrategy });
     return Response.json({ object: "list", data }, {
       headers: { "Access-Control-Allow-Origin": "*" },
     });
