@@ -19,7 +19,7 @@ export {
 export {
   getProviderNodes, getProviderNodeById,
   createProviderNode, updateProviderNode, deleteProviderNode,
-  convertProviderNodeType, buildCompatibleNodeId,
+  convertProviderNodeType, buildCompatibleNodeId, remapUsageDay,
 } from "./repos/nodesRepo.js";
 
 // Proxy pools

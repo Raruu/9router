@@ -23,8 +23,9 @@ export async function PUT(request, { params }) {
 
     // Switching between OpenAI and Anthropic compatible moves the node to a
     // new id (the kind is keyed off the id prefix) and migrates every
-    // reference — connections, custom models, aliases, disabled entries and
-    // provider-keyed settings — in one transaction.
+    // reference — connections, custom models, aliases, disabled entries,
+    // pricing overrides, mitmAlias targets, combo members, provider-keyed
+    // settings and usage history — in one transaction.
     if (type !== undefined && type !== node.type) {
       if (!["openai-compatible", "anthropic-compatible"].includes(node.type) || !["openai-compatible", "anthropic-compatible"].includes(type)) {
         return NextResponse.json({ error: "Switching provider type is only supported between OpenAI and Anthropic compatible nodes" }, { status: 400 });

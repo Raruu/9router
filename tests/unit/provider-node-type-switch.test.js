@@ -47,7 +47,26 @@ async function seedOpenAiNode(db, id = "openai-compatible-chat-seed") {
     providerStrategies: { [node.id]: { fallbackStrategy: "round-robin" } },
     providerThinking: { [node.id]: { mode: "high" } },
     quotaVisibility: { [node.id]: { hidden: [] } },
+    providerTimeouts: { [node.id]: { connectMs: 2000 } },
+    providerRetries: { [node.id]: { enabled: true, tries: 3 } },
+    capacityAdapter: { vision: { enabled: true, models: [`${node.id}/seed-model`, "other-p/other-model"] } },
   });
+  await db.updatePricing({ [node.id]: { "seed-model": { input: 1.5, output: 3 } } });
+  await db.createCombo({ name: "seed-combo", models: [`${node.id}/seed-model`, "other-p/other-model"] });
+  await db.setMitmAliasAll("seed-tool", { Claude: `${node.id}/seed-model`, Other: "other-p/other-model" });
+  // Distinct mid-day timestamps: saveRequestUsage dedupes identical rows.
+  const t0 = new Date("2026-09-10T12:00:01.000Z").toISOString();
+  const t1 = new Date("2026-09-10T12:00:02.000Z").toISOString();
+  const usage = { model: "seed-model", connectionId: "conn-seed", endpoint: "chat/completions", tokens: { prompt_tokens: 10, completion_tokens: 5 } };
+  await db.saveRequestUsage({ ...usage, timestamp: t0, provider: node.id });
+  await db.saveRequestUsage({ ...usage, timestamp: t1, provider: node.id, tokens: { prompt_tokens: 20, completion_tokens: 7 } });
+  await db.saveRequestUsage({ ...usage, timestamp: t1, provider: "other-p", model: "other-model", connectionId: "conn-other" });
+  const { getAdapter } = await import("../../src/lib/db/driver.js");
+  const adapter = await getAdapter();
+  adapter.run(
+    `INSERT INTO requestDetails(id, timestamp, provider, model, connectionId, status, data) VALUES(?, ?, ?, ?, ?, ?, ?)`,
+    ["rd-seed-1", t0, node.id, "seed-model", "conn-seed", "ok", JSON.stringify({ id: "rd-seed-1", provider: node.id, model: "seed-model" })]
+  );
   return node;
 }
 
@@ -97,6 +116,40 @@ describe("convertProviderNodeType", () => {
     expect(settings.providerStrategies).toEqual({ [converted.id]: { fallbackStrategy: "round-robin" } });
     expect(settings.providerThinking).toEqual({ [converted.id]: { mode: "high" } });
     expect(settings.quotaVisibility).toEqual({ [converted.id]: { hidden: [] } });
+    expect(settings.providerTimeouts).toEqual({ [converted.id]: { connectMs: 2000 } });
+    expect(settings.providerRetries).toEqual({ [converted.id]: { enabled: true, tries: 3 } });
+    expect(settings.capacityAdapter.vision.models).toEqual([`${converted.id}/seed-model`, "other-p/other-model"]);
+
+    const combos = await db.getCombos();
+    expect(combos.find((c) => c.name === "seed-combo").models).toEqual([`${converted.id}/seed-model`, "other-p/other-model"]);
+
+    const pricing = await db.getPricing();
+    expect(pricing[converted.id]?.["seed-model"]).toMatchObject({ input: 1.5, output: 3 });
+    expect(pricing[node.id]).toBeUndefined();
+
+    expect(await db.getMitmAlias("seed-tool")).toEqual({ Claude: `${converted.id}/seed-model`, Other: "other-p/other-model" });
+
+    // Usage history follows the converted provider; unrelated rows untouched.
+    expect(await db.getUsageHistory({ provider: node.id })).toEqual([]);
+    expect(await db.getUsageHistory({ provider: converted.id })).toHaveLength(2);
+    expect(await db.getUsageHistory({ provider: "other-p" })).toHaveLength(1);
+
+    // Request details: column and embedded JSON provider both rewritten.
+    const { getAdapter } = await import("../../src/lib/db/driver.js");
+    const adapter = await getAdapter();
+    expect(adapter.all(`SELECT provider FROM requestDetails WHERE provider = ?`, [node.id])).toEqual([]);
+    const detailRow = adapter.get(`SELECT provider, data FROM requestDetails WHERE id = 'rd-seed-1'`);
+    expect(detailRow.provider).toBe(converted.id);
+    expect(JSON.parse(detailRow.data).provider).toBe(converted.id);
+
+    // Daily aggregates re-keyed under the new id (day totals unchanged).
+    const blob = JSON.parse(adapter.get(`SELECT data FROM usageDaily`).data);
+    expect(blob.byProvider[converted.id]?.requests).toBe(2);
+    expect(blob.byProvider[node.id]).toBeUndefined();
+    expect(blob.byModel[`seed-model|${converted.id}`]?.requests).toBe(2);
+    expect(blob.byModel[`seed-model|${converted.id}`]?.provider).toBe(converted.id);
+    expect(blob.byModel[`other-model|other-p`]?.requests).toBe(1);
+    expect(blob.requests).toBe(3);
   });
 
   it("moves an Anthropic node to OpenAI with the requested apiType", async () => {
@@ -161,5 +214,60 @@ describe("convertProviderNodeType", () => {
     // Failed conversions leave the source node untouched.
     expect(await db.getProviderNodeById(node.id)).not.toBeNull();
     expect(await db.getProviderConnections({ provider: node.id })).toHaveLength(1);
+  });
+});
+
+describe("remapUsageDay", () => {
+  it("renames provider buckets and composite keys, fixing embedded meta", async () => {
+    const db = await import("../../src/lib/db/index.js");
+    const day = {
+      requests: 2, promptTokens: 30, completionTokens: 12, cost: 0.5,
+      byProvider: { "old-p": { requests: 2, promptTokens: 30, completionTokens: 12, cachedTokens: 0, cost: 0.5 } },
+      byModel: { "m|old-p": { requests: 2, promptTokens: 30, completionTokens: 12, cachedTokens: 0, cost: 0.5, rawModel: "m", provider: "old-p" } },
+      byAccount: { "conn-1": { requests: 2, promptTokens: 30, completionTokens: 12, cachedTokens: 0, cost: 0.5, rawModel: "m", provider: "old-p" } },
+      byApiKey: { "k|m|old-p": { requests: 2, promptTokens: 30, completionTokens: 12, cachedTokens: 0, cost: 0.5, rawModel: "m", provider: "old-p" } },
+      byEndpoint: { "chat|m|old-p": { requests: 2, promptTokens: 30, completionTokens: 12, cachedTokens: 0, cost: 0.5, provider: "old-p" } },
+    };
+    expect(db.remapUsageDay(day, "old-p", "new-p")).toBe(true);
+    expect(day.byProvider).toEqual({ "new-p": { requests: 2, promptTokens: 30, completionTokens: 12, cachedTokens: 0, cost: 0.5 } });
+    expect(day.byModel["m|new-p"]).toMatchObject({ requests: 2, provider: "new-p", rawModel: "m" });
+    expect(day.byModel["m|old-p"]).toBeUndefined();
+    // Account buckets stay keyed by connection id; only meta moves.
+    expect(day.byAccount["conn-1"]).toMatchObject({ requests: 2, provider: "new-p" });
+    expect(day.byApiKey["k|m|new-p"]).toMatchObject({ requests: 2, provider: "new-p" });
+    expect(day.byEndpoint["chat|m|new-p"]).toMatchObject({ requests: 2, provider: "new-p" });
+    // Day-level totals are untouched by a re-key.
+    expect(day.requests).toBe(2);
+    expect(day.cost).toBe(0.5);
+  });
+
+  it("merges counters when the new-id bucket already exists", async () => {
+    const db = await import("../../src/lib/db/index.js");
+    const day = {
+      requests: 3,
+      byProvider: {
+        "old-p": { requests: 2, promptTokens: 20, completionTokens: 10, cachedTokens: 1, cost: 0.4 },
+        "new-p": { requests: 1, promptTokens: 5, completionTokens: 2, cachedTokens: 0, cost: 0.1 },
+      },
+      byModel: {
+        "m|old-p": { requests: 2, promptTokens: 20, completionTokens: 10, cachedTokens: 1, cost: 0.4, rawModel: "m", provider: "old-p" },
+        "m|new-p": { requests: 1, promptTokens: 5, completionTokens: 2, cachedTokens: 0, cost: 0.1, rawModel: "m", provider: "new-p" },
+      },
+    };
+    expect(db.remapUsageDay(day, "old-p", "new-p")).toBe(true);
+    expect(day.byProvider["new-p"]).toMatchObject({ requests: 3, promptTokens: 25, completionTokens: 12, cachedTokens: 1, cost: 0.5 });
+    expect(day.byProvider["old-p"]).toBeUndefined();
+    expect(day.byModel["m|new-p"]).toMatchObject({ requests: 3, promptTokens: 25, provider: "new-p" });
+    expect(day.byModel["m|old-p"]).toBeUndefined();
+    expect(day.requests).toBe(3);
+  });
+
+  it("returns false and changes nothing without the old id", async () => {
+    const db = await import("../../src/lib/db/index.js");
+    const day = { requests: 1, byProvider: { "other-p": { requests: 1 } } };
+    expect(db.remapUsageDay(day, "old-p", "new-p")).toBe(false);
+    expect(day).toEqual({ requests: 1, byProvider: { "other-p": { requests: 1 } } });
+    expect(db.remapUsageDay(null, "old-p", "new-p")).toBe(false);
+    expect(db.remapUsageDay({}, "old-p", "new-p")).toBe(false);
   });
 });
