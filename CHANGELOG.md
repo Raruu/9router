@@ -1,3 +1,95 @@
+# v0.5.75-1 (2026-09-11)
+
+Merged upstream v0.5.75 plus the latest post-release changes. This section
+includes the full upstream release notes and fork work since `4b20ebff`.
+
+## Features
+- **Video**: add OpenRouter and Vertex AI (Veo) video generation on
+  `/v1/videos/*` via a provider adapter layer; poll requests resolve their
+  provider from `x-connection-id` or `?provider=`
+- **Antigravity**: add weekly quota tracking (Gemini weekly / Claude & GPT
+  weekly) and free-tier handling from `retrieveUserQuotaSummary` (#3892)
+- **Codex**: add GPT Image 2.5, Flare and Sunburst image models with multi-image
+  support; add the same ids to the OpenAI catalog
+- **Qoder**: surface usage to all clients and stop inlining large attachments —
+  images upload through `/api/v2/image/upload` like qodercli, oversized file
+  blocks become stubs, and the context tier auto-escalates
+- **OpenCode Go**: add newly published models (glm-5.3, kimi-k3,
+  deepseek-flash, longcat-2.0, hy4-preview and hy3 on chat/completions;
+  qwen3.8-max and qwen3.8-flash on `/messages`; grok-4.6 and gpt-5.6-luna on
+  Responses) and list `deepseek-v4.1-flash` first in the catalog
+- **CLI tools**: group the model selector by provider with full-text search and
+  manual custom model ID entry
+- **CodeBuddy-CN**: replace `deepseek-v4-flash` with
+  `deepseek-v4.1-flash`
+- **Xiaomi MiMo**: merge MiMo Desktop into the existing provider as dual auth.
+  API keys keep the cloud models; Desktop/OAuth adds preview models, local
+  credential import and weekly account quota tracking. The OAuth flow now
+  persists the Desktop pass token and releases completed sessions correctly
+- **Claude Code**: replace the ineffective max-context setting with an
+  auto-compact window selector and add a 1M-context toggle that appends `[1m]`
+  to configured model mappings
+- **Combos**: advertise member thinking choices as
+  `capabilities.effort_tiers` in `/v1/models` and model info. The Combos page
+  can expose the union (default) or intersection of member tiers; requests are
+  clamped to the serving member's nearest supported pass-through effort
+- **Retries**: Combo Retries now has a per-provider max-backoff setting
+  (1–30s, 16s default). Locally generated exponential 429 locks are capped so
+  all 10 configured retries can run; exact provider reset times remain uncapped
+  and long outages still advance immediately
+
+## Fixes
+- **Tools**: scope Claude tool type defaulting to gateways declaring
+  `requireClaudeToolType` — the global default broke Anthropic-compatible
+  endpoints that accept only the legacy typeless shape (#3905)
+- **Claude**: cap re-anchored `cache_control` at the four-marker budget so a
+  spent budget no longer returns 400 and triggers full combo failover; wrap
+  bare single-object content turns before the mid-conversation-system fold
+- **Cline / Airforce**: unwrap the `{"success":true,"data":…}` envelope on
+  non-stream chat completions (#3644); add the live Cline/ClinePass model
+  catalog and refresh Airforce free models
+- **Cline**: stop `workos:`-prefixing ClinePass API keys (401 on every request,
+  #2333) and add ClinePass token refresh
+- **Kiro**: never send a top-level `systemPrompt` (`400 REQUEST_BODY_INVALID`)
+  and route requests through current runtime surfaces (#3776)
+- **Codex**: strip Unicode-property tool schema patterns rejected by the
+  validator (#3922); restore the `Version` header and single-source the CLI
+  version
+- **DeepSeek**: preserve Anthropic-only tool types when forwarding to
+  `/anthropic/v1/messages`
+- **Qoder**: remove Responses usage plumbing from shared translator/handler
+  code after it changed token accounting for providers other than Qoder
+- **Antigravity**: normalize contents and handle intermediate tool responses;
+  protect OAuth token refresh from Google anti-abuse rate limits (#3813)
+- **Providers**: clear stale connection health state (`modelLock_*`,
+  `backoffLevel`, `rateLimitedUntil`, `errorCode`) after successful validation
+  (#3810, #3830); remove the duplicate `qwen` provider that shadowed
+  `alims-intl`
+- **Video / Vertex**: reject job ids and model ids that would escape the request
+  URL path (SSRF)
+- **Usage**: parse the Fable weekly limit from `limits[]` instead of fabricating
+  a row (#3847)
+- **Auth**: set a 24-hour `maxAge` on the dashboard session cookie
+- **Model catalog**: assigned OpenRouter and custom model patterns stopped
+  applying after restart because Next bundled startup instrumentation and API
+  consumers as separate module instances. Capability and pricing resolvers now
+  use process-global symbol keys, with a cold-start persistence regression test
+- **Retries**: persisted exponential 429 backoff could exceed the retry wait cap
+  after restart, making enabled custom-provider retries appear disabled. Startup
+  now resets accumulated backoff once per process while preserving active locks
+  and cleaning expired ones
+
+## Fork Notes
+- Kept the fork's `@raruu/9router` CLI identity and compatible-provider icon
+  resolver while taking upstream's `0.5.75` package, Xiaomi MiMo and provider
+  page changes
+- Upstream's validation-time stale-health cleanup complements the fork's
+  startup retry reset: explicit successful validation clears all health state,
+  while restart resets only accumulated backoff and preserves active locks
+- Fork-only catalog patterns, combo effort tiers, provider retries/timeouts,
+  model exposure, compatible-node migration, latency/usage views and SQLite
+  persistence remain in place
+
 # v0.5.69-4 (2026-09-10)
 
 ## Features
@@ -172,32 +264,6 @@ model-marker fix, Groq quota tracking, and more).
   chart, the latency model filter, the model/combo info modal and
   `/api/models/detail`, `comboNameInResponse`, combo capability inheritance,
   the model-exposure setting, and `@raruu/9router` packaging
-# v0.5.75 (2026-09-10)
-
-## Features
-- **Video**: add OpenRouter and Vertex AI (Veo) video generation on `/v1/videos/*` via a provider adapter layer; poll requests resolve their provider from `x-connection-id` or `?provider=`
-- **Antigravity**: add weekly quota tracking (Gemini weekly / Claude & GPT weekly) and free-tier handling from `retrieveUserQuotaSummary` (#3892)
-- **Codex**: add GPT Image 2.5, Flare and Sunburst image models with multi-image support; add the same ids to the OpenAI catalog
-- **Qoder**: surface usage to all clients and stop inlining large attachments — images upload through `/api/v2/image/upload` like qodercli, oversized file blocks become stubs, context tier auto-escalates
-- **OpenCode Go**: add newly published models (glm-5.3, kimi-k3, deepseek-flash, longcat-2.0, hy4-preview, hy3 on chat/completions; qwen3.8-max, qwen3.8-flash on `/messages`; grok-4.6, gpt-5.6-luna on Responses) and list `deepseek-v4.1-flash` first in the catalog
-- **CLI tools**: group the model selector by provider with full-text search and manual custom model ID entry
-- **CodeBuddy-CN**: replace `deepseek-v4-flash` with `deepseek-v4.1-flash`
-
-## Fixes
-- **Tools**: scope Claude tool type defaulting to gateways declaring `requireClaudeToolType` — the global default broke Anthropic-compatible endpoints that only accept the legacy typeless tool shape (#3905)
-- **Claude**: cap re-anchored `cache_control` at the 4-marker budget so a spent budget no longer 400s and triggers a full combo failover; wrap bare single-object content turns before the mid-conversation-system fold
-- **Cline / Airforce**: unwrap the `{"success":true,"data":…}` envelope on non-stream chat completions (#3644); add the live Cline/ClinePass model catalog and refresh Airforce free models
-- **Cline**: stop `workos:`-prefixing ClinePass API keys (401 on every request, #2333) and add clinepass token refresh
-- **Kiro**: never send a top-level `systemPrompt` (`400 REQUEST_BODY_INVALID`); route requests through current runtime surfaces (#3776)
-- **Codex**: strip Unicode-property tool schema patterns the validator rejects (#3922); restore the `Version` header and single-source the CLI version
-- **DeepSeek**: keep Anthropic-only tool types when forwarding to `/anthropic/v1/messages`
-- **Qoder**: drop the Responses usage plumbing from shared translator/handler code, which changed token accounting for every provider, not just Qoder
-- **Antigravity**: normalize contents and handle intermediate tool responses; protect the OAuth token-refresh path from Google anti-abuse rate limits (#3813)
-- **Providers**: clear stale connection health state (`modelLock_*`, `backoffLevel`, `rateLimitedUntil`, `errorCode`) when a connection is re-validated (#3810, #3830); remove the duplicate `qwen` provider that shadowed `alims-intl`
-- **Video / Vertex**: reject job ids and model ids that would escape the request URL path (SSRF)
-- **Usage**: parse the Fable weekly limit from `limits[]` instead of fabricating a row (#3847)
-- **Auth**: set a 24h `maxAge` on the dashboard session cookie
-
 # v0.5.69 (2026-09-05)
 
 ## Features
