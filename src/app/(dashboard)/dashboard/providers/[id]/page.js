@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { getProviderIconSrcForId, markProviderIconMissing } from "@/shared/utils/providerIcon";
-import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
+import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, XiaomiMimoAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
@@ -85,6 +85,7 @@ export default function ProviderDetailPage() {
   const [providerNode, setProviderNode] = useState(null);
   const [proxyPools, setProxyPools] = useState([]);
   const [showOAuthModal, setShowOAuthModal] = useState(false);
+  const [showXiaomiMimoModal, setShowXiaomiMimoModal] = useState(false);
   const [showIFlowCookieModal, setShowIFlowCookieModal] = useState(false);
   const [showAddApiKeyModal, setShowAddApiKeyModal] = useState(false);
   const [addConnectionError, setAddConnectionError] = useState("");
@@ -126,6 +127,7 @@ export default function ProviderDetailPage() {
   const [oneByOneSummary, setOneByOneSummary] = useState(null);
   const stopOneByOneRef = useRef(false);
   const [importingQoderModels, setImportingQoderModels] = useState(false);
+  const [importingClineModels, setImportingClineModels] = useState(false);
   const { copied, copy } = useCopyToClipboard();
 
   const AG_RISK_STORAGE_KEY = "ag_risk_confirmed";
@@ -141,6 +143,11 @@ export default function ProviderDetailPage() {
         setShowAgRiskModal(true);
         return;
       }
+    }
+    // Xiaomi Desktop: auto-import local credentials first, OAuth as fallback
+    if (providerId === "xiaomi-mimo") {
+      setShowXiaomiMimoModal(true);
+      return;
     }
     if (isOAuth) {
       openOAuthConnection();
@@ -974,6 +981,53 @@ export default function ProviderDetailPage() {
       setImportingQoderModels(false);
     }
   };
+  // Fetch the live Cline /models catalog and add every model not yet present.
+  // Cline and ClinePass share the same catalog endpoint (api.cline.bot/api/v1/models).
+  const handleImportClineModels = async () => {
+    if (importingClineModels) return;
+    const activeConnection = connections.find((conn) => conn.isActive !== false);
+    if (!activeConnection) {
+      alert(translate("Please add an active Cline connection first"));
+      return;
+    }
+    setImportingClineModels(true);
+    try {
+      const res = await fetch(`/api/providers/${activeConnection.id}/models`);
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || translate("Failed to fetch models"));
+        return;
+      }
+      const models = data.models || [];
+      if (models.length === 0) {
+        alert(translate("No models returned"));
+        return;
+      }
+      let importedCount = 0;
+      for (const model of models) {
+        const modelId = model.id || model.name;
+        if (!modelId) continue;
+        const alreadyExists = customModels.some(
+          (entry) => entry.providerAlias === providerStorageAlias && entry.id === modelId && (entry.kind || entry.type || "llm") === "llm"
+        ) || Object.values(modelAliases).includes(`${providerStorageAlias}/${modelId}`);
+        if (alreadyExists) {
+          continue;
+        }
+        await handleAddCustomModel(modelId, "llm", providerStorageAlias);
+        importedCount += 1;
+      }
+      if (importedCount === 0) {
+        alert(translate("All models already exist, no new models added"));
+      } else {
+        alert(translate("Successfully added") + ` ${importedCount} ` + translate("models"));
+      }
+    } catch (error) {
+      console.log("Error importing Cline models:", error);
+      alert(translate("Error fetching models") + ": " + error.message);
+    } finally {
+      setImportingClineModels(false);
+    }
+  };
 
   const handleRunOneByOneTest = async () => {
     if (oneByOneRunning || connections.length === 0) return;
@@ -1560,6 +1614,20 @@ export default function ProviderDetailPage() {
               {importingQoderModels ? "progress_activity" : "download"}
             </span>
             {importingQoderModels ? translate("Fetching...") : translate("Fetch Qoder Models")}
+          </button>
+        )}
+
+        {/* Import Cline /models catalog button — only show for cline and clinepass providers */}
+        {(providerId === "cline" || providerId === "clinepass") && connections.some((conn) => conn.isActive !== false) && (
+          <button
+            onClick={handleImportClineModels}
+            disabled={importingClineModels}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-blue-500/40 px-3 py-2 text-xs text-blue-600 dark:text-blue-400 transition-colors hover:border-blue-500 hover:bg-blue-500/5 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span className="material-symbols-outlined text-sm" style={importingClineModels ? { animation: "spin 1s linear infinite" } : undefined}>
+              {importingClineModels ? "progress_activity" : "download"}
+            </span>
+            {importingClineModels ? translate("Fetching...") : translate("Import from /models")}
           </button>
         )}
 
@@ -2204,6 +2272,13 @@ export default function ProviderDetailPage() {
           onClose={() => setShowOAuthModal(false)}
         />
       )}
+
+      {/* Xiaomi Desktop: auto-import local credentials modal */}
+      <XiaomiMimoAuthModal
+        isOpen={showXiaomiMimoModal}
+        onSuccess={handleOAuthSuccess}
+        onClose={() => setShowXiaomiMimoModal(false)}
+      />
       {providerId === "iflow" && (
         <IFlowCookieModal
           isOpen={showIFlowCookieModal}
