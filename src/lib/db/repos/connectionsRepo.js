@@ -10,6 +10,28 @@ const OPTIONAL_FIELDS = [
   "consecutiveUseCount", "idToken", "lastRefreshAt",
 ];
 
+const MODEL_LOCK_PREFIX = "modelLock_";
+
+function resetHealthStateOnActivation(existing, patch) {
+  if (patch?.testStatus !== "active") return patch;
+
+  const normalized = {
+    ...patch,
+    testStatus: "active",
+    lastError: Object.hasOwn(patch, "lastError") ? patch.lastError : null,
+    lastErrorAt: Object.hasOwn(patch, "lastErrorAt") ? patch.lastErrorAt : null,
+    errorCode: null,
+    rateLimitedUntil: null,
+    backoffLevel: 0,
+  };
+
+  for (const key of Object.keys(existing || {})) {
+    if (key.startsWith(MODEL_LOCK_PREFIX)) normalized[key] = null;
+  }
+
+  return normalized;
+}
+
 function rowToConn(row) {
   if (!row) return null;
   const extra = parseJson(row.data, {});
@@ -147,7 +169,8 @@ export async function createProviderConnection(data) {
     // access_token: never dedup — user manages duplicates manually
 
     if (existing) {
-      const merged = { ...existing, ...data, updatedAt: now };
+      const normalized = resetHealthStateOnActivation(existing, data);
+      const merged = { ...existing, ...normalized, updatedAt: now };
       upsert(db, merged);
       result = merged;
       return;
@@ -196,7 +219,8 @@ export async function updateProviderConnection(id, data) {
     const row = db.get(`SELECT * FROM providerConnections WHERE id = ?`, [id]);
     if (!row) { result = null; return; }
     const existing = rowToConn(row);
-    const merged = { ...existing, ...data, updatedAt: new Date().toISOString() };
+    const normalized = resetHealthStateOnActivation(existing, data);
+    const merged = { ...existing, ...normalized, updatedAt: new Date().toISOString() };
     upsert(db, merged);
     if (data.priority !== undefined) reorderInTx(db, existing.provider);
     result = merged;
@@ -258,4 +282,35 @@ export async function cleanupProviderConnections() {
     }
   });
   return cleaned;
+}
+
+// Exponential 429 backoff is useful within one process lifetime, but carrying a
+// high level across a restart can make an enabled combo retry appear disabled:
+// the next lock may exceed MAX_RETRY_WAIT_MS and the combo advances immediately.
+// Reset only the accumulated level at startup. Active model locks remain in
+// force, while expired lock fields are removed during the same scan.
+export async function resetProviderRetryBackoffOnStartup(now = Date.now()) {
+  const db = await getAdapter();
+  let updated = 0;
+  db.transaction(() => {
+    for (const row of db.all(`SELECT * FROM providerConnections`)) {
+      const conn = rowToConn(row);
+      let dirty = false;
+      if (Number(conn.backoffLevel || 0) !== 0) {
+        conn.backoffLevel = 0;
+        dirty = true;
+      }
+      for (const [key, value] of Object.entries(conn)) {
+        if (!key.startsWith("modelLock_") || !value) continue;
+        const expiresAt = new Date(value).getTime();
+        if (!Number.isFinite(expiresAt) || expiresAt > now) continue;
+        delete conn[key];
+        dirty = true;
+      }
+      if (!dirty) continue;
+      upsert(db, { ...conn, updatedAt: new Date(now).toISOString() });
+      updated += 1;
+    }
+  });
+  return updated;
 }

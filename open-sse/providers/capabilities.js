@@ -214,7 +214,10 @@ export const PROVIDER_CAPABILITIES = {
     "glm-5.3-flash":      { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: true, contextWindow: 1000000, maxOutput: 32000 },
     "kimi-k3-1":          { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: false, contextWindow: 1000000, maxOutput: 32000 },
     "deepseek-v4-pro":    { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: true, contextWindow: 1000000, maxOutput: 50000 },
-    "deepseek-v4-flash":  { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: true, contextWindow: 1000000, maxOutput: 50000 },
+    // deepseek-v4.1-flash replaces v4-flash (dropped from the server list;
+    // the old endpoint still answers 200 but the published list is the
+    // contract). maxOutput 128000 per the server's product-config payload.
+    "deepseek-v4.1-flash": { vision: true, reasoning: true, thinkingFormat: "openai", thinkingCanDisable: true, contextWindow: 1000000, maxOutput: 128000 },
   },
   // Qoder — upstream exposes opaque internal ids (dfmodel, kmodel, …); the
   // registry `name` is display-only and capability lookup matches on the raw
@@ -224,9 +227,9 @@ export const PROVIDER_CAPABILITIES = {
   // windows (GLM-5.3 / Kimi-K3 / Qwen3.8-Max claim 180K but accept more).
   // max_output_tokens arrives as 0 for every model, so outputs are
   // best-guess from the real model family. Vision tags below follow the
-  // upstream is_vl flag per explicit request, even though the executor
-  // currently sends image_urls:null (image pass-through over the agent_chat
-  // SSE protocol is unverified). reasoning:true on all of them — every model can
+  // upstream is_vl flag. The executor uploads inlined images to
+  // /api/v2/image/upload and leaves image_urls/chat_context.imageUrls null
+  // (same as qodercli). reasoning:true on all of them — every model can
   // reason; the upstream is_reasoning flag only drives model_config selection.
   // thinkingFormat keeps the true-model family for documentation/UI, but
   // thinkingCanDisable:false everywhere: the executor only forwards
@@ -428,15 +431,17 @@ export const PATTERN_CAPABILITIES = [
  */
 const MODALITY_KEYS = ["vision", "pdf", "audioInput", "videoInput"];
 
-// Catalog resolution is installed by the server at startup. The seam is sync so
-// this hot path remains usable by browser bundles without importing DB/node APIs.
-let catalogSource = null;
+// Catalog resolution is installed by the server at startup. Next can bundle
+// instrumentation and request routes into separate module instances, so keep
+// the source process-global: startup hydration must be visible to every server
+// chunk. Browser bundles have their own globalThis and continue with null.
+const CATALOG_SOURCE_KEY = Symbol.for("9router.modelCatalog.capabilitySource");
 
 /**
  * @param {{ getCapabilities?: Function, getModalities?: Function, getLimits?: Function } | null} source
  */
 export function setCatalogSource(source) {
-  catalogSource = source;
+  globalThis[CATALOG_SOURCE_KEY] = source;
 }
 
 // Apply the synced catalog + name heuristic on top of a table-resolved result.
@@ -449,6 +454,7 @@ function refine(base, provider, model) {
   if (hardcoded.vision !== true && looksLikeVisionModel(model)) hardcoded.vision = true;
   let result = { ...DEFAULT_CAPABILITIES, ...hardcoded };
 
+  const catalogSource = globalThis[CATALOG_SOURCE_KEY] || null;
   if (catalogSource?.getCapabilities) {
     result = { ...DEFAULT_CAPABILITIES, ...(catalogSource.getCapabilities(provider, model, hardcoded) || {}) };
   } else if (catalogSource) {

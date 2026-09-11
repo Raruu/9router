@@ -236,7 +236,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
  * @param {string|null} model - The specific model that triggered the error
  * @returns {{ shouldFallback: boolean, cooldownMs: number }}
  */
-export async function markAccountUnavailable(connectionId, status, errorText, provider = null, model = null, resetsAtMs = null) {
+export async function markAccountUnavailable(connectionId, status, errorText, provider = null, model = null, resetsAtMs = null, options = {}) {
   if (!connectionId || connectionId === "noauth") return { shouldFallback: false, cooldownMs: 0 };
   const connections = await getProviderConnections({ provider });
   const conn = connections.find(c => c.id === connectionId);
@@ -260,6 +260,12 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
     newBackoffLevel = 0;
   } else {
     ({ shouldFallback, cooldownMs, newBackoffLevel } = checkFallbackError(status, errorText, backoffLevel));
+    // Combo retries may cap locally generated exponential backoff so every
+    // configured attempt remains usable. Exact provider reset timestamps take
+    // the branches above and are intentionally never shortened.
+    if (newBackoffLevel != null && Number.isFinite(options.maxBackoffMs)) {
+      cooldownMs = Math.min(cooldownMs, Math.max(0, options.maxBackoffMs));
+    }
   }
   if (!shouldFallback) return { shouldFallback: false, cooldownMs: 0 };
 

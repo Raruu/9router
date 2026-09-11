@@ -5,7 +5,7 @@
 import { getCapabilitiesForModel } from "../../providers/capabilities.js";
 import { getThinkingLevels } from "../../providers/thinkingLevels.js";
 import { PROVIDERS } from "../../providers/index.js";
-import { LEVEL_TO_BUDGET, budgetToLevel, effortToBudget, effortToThinkingLevel } from "./thinking.js";
+import { EFFORT_LEVELS, LEVEL_TO_BUDGET, budgetToLevel, effortToBudget, effortToThinkingLevel } from "./thinking.js";
 
 // Map a target wire-format to its native thinking format (when capability has none).
 const FORMAT_TO_NATIVE = {
@@ -341,6 +341,37 @@ function applyFormat(fmt, body, cfg, caps, supportedLevels) {
   }
 }
 
+// Clamp an explicit level request to what the serving model supports. A combo
+// member picked for availability may sit below the requested level (e.g. xhigh
+// requested, member tops out at high) — fall back to the nearest supported
+// level at or below the request (nearest above when the request undercuts
+// everything) instead of sending a level the upstream rejects. Unknown support
+// (null/empty list), unranked levels, and "none" pass through untouched —
+// "none" is a disable, never something to upgrade, and unranked extras
+// ("thinking") keep their existing per-format handling.
+const LEVEL_RANK = new Map([...EFFORT_LEVELS.map((level, index) => [level, index]), ["ultra", EFFORT_LEVELS.length]]);
+
+export function clampLevelToSupport(cfg, supportedLevels) {
+  if (!cfg || cfg.mode !== "level" || typeof cfg.level !== "string") return cfg;
+  if (cfg.level === "auto" || cfg.level === "none") return cfg;
+  if (!Array.isArray(supportedLevels) || supportedLevels.length === 0) return cfg;
+  if (supportedLevels.includes(cfg.level)) return cfg;
+  const rank = LEVEL_RANK.get(cfg.level);
+  if (rank === undefined) return cfg;
+  const candidates = supportedLevels.filter((level) => level !== "none" && level !== "auto" && LEVEL_RANK.get(level) !== undefined);
+  if (candidates.length === 0) return cfg;
+  const atOrBelow = candidates.filter((level) => LEVEL_RANK.get(level) <= rank);
+  const pool = atOrBelow.length > 0 ? atOrBelow : candidates;
+  let fallback = pool[0];
+  for (const level of pool) {
+    const better = atOrBelow.length > 0
+      ? LEVEL_RANK.get(level) > LEVEL_RANK.get(fallback)
+      : LEVEL_RANK.get(level) < LEVEL_RANK.get(fallback);
+    if (better) fallback = level;
+  }
+  return { ...cfg, level: fallback };
+}
+
 // Public entry: normalize thinking for the resolved target format.
 // Mutates and returns body. No-op when model has no reasoning capability.
 // `intent` is a pre-captured config (from captureThinking on the original body);
@@ -361,7 +392,14 @@ export function applyThinking(targetFormat, model, body, provider = null, intent
 
   const fmt = resolveFormat(targetFormat, cleanModel, provider);
   const supportedLevels = getThinkingLevels(provider, cleanModel);
+  // Only verbatim pass-through formats can leak an unsupported level to the
+  // wire. Mapping formats (kimi xhigh→max, deepseek, zai, claude-adaptive,
+  // step, gemini-level, …) translate deliberately — clamping first would
+  // destroy those mappings — and budget formats already clamp to thinkingRange.
+  const effectiveCfg = fmt === "openai" || fmt === "tokenrouter"
+    ? clampLevelToSupport(cfg, supportedLevels)
+    : cfg;
   stripAll(body);
-  applyFormat(fmt, body, cfg, caps, supportedLevels);
+  applyFormat(fmt, body, effectiveCfg, caps, supportedLevels);
   return body;
 }

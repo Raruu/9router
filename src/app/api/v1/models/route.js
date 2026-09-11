@@ -10,16 +10,16 @@ import { getDisabledModels } from "@/lib/disabledModelsDb";
 import { hasValidCliToken } from "@/lib/auth/cliToken";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
-import { resolveQoderModels } from "open-sse/services/qoderModels.js";
+import { resolveQoderModels, routableQoderModels } from "open-sse/services/qoderModels.js";
 import { resolveCopilotModels } from "open-sse/services/copilotModels.js";
-import { resolveClinepassModels } from "open-sse/services/clinepassModels.js";
+import { resolveClinepassModels, resolveClineModels } from "open-sse/services/clinepassModels.js";
 import { resolveGrokCliModels } from "open-sse/services/grokCliModels.js";
 import { resolveCursorModels } from "open-sse/services/cursorModels.js";
 import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { capabilitiesFromServiceKind, getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
-import { comboCapabilities, mergeMemberCapabilities } from "open-sse/providers/comboCapabilities.js";
+import { comboCapabilities, comboEffortTiers, mergeMemberCapabilities } from "open-sse/providers/comboCapabilities.js";
 import { buildProviderIdByPrefix } from "@/lib/providerPrefixMap";
 
 // Per-provider live model resolvers. Each receives a connection record and
@@ -37,15 +37,18 @@ const LIVE_MODEL_RESOLVERS = {
   qoder: async (conn) => {
     const result = await resolveQoderModels({
       accessToken: conn.accessToken,
+      // PAT (pt-...) connections keep the token in apiKey; without it the live
+      // catalog silently fails and /v1/models falls back to the static list.
+      apiKey: conn.apiKey,
       refreshToken: conn.refreshToken,
       email: conn.email,
       displayName: conn.displayName,
       providerSpecificData: conn.providerSpecificData || {}
     });
-    if (!result?.models?.length) return null;
-    return {
-      models: result.models.map((m) => ({ id: m.id, name: m.name })),
-    };
+    // Visible + hidden (enable:false) catalog keys — chat routes all of them.
+    const models = routableQoderModels(result);
+    if (!models.length) return null;
+    return { models: models.map((m) => ({ id: m.id, name: m.name })) };
   },
   kimchi: async (conn) => {
     const result = await resolveKimchiModels({
@@ -74,6 +77,13 @@ const LIVE_MODEL_RESOLVERS = {
   },
   clinepass: async (conn) => {
     const result = await resolveClinepassModels({
+      accessToken: conn.accessToken,
+      apiKey: conn.apiKey,
+    });
+    return result?.models?.length ? { models: result.models } : null;
+  },
+  cline: async (conn) => {
+    const result = await resolveClineModels({
       accessToken: conn.accessToken,
       apiKey: conn.apiKey,
     });
@@ -268,6 +278,7 @@ export { mergeMemberCapabilities };
  * @param {boolean} [options.skipDynamicFetch] - Skip upstream /models fetches.
  * @param {"all"|"combos"|"models"} [options.exposure] - Which entries to advertise.
  * @param {"max"|"min"} [options.comboLimitStrategy] - Which member's numeric limits a combo advertises.
+ * @param {"union"|"intersection"} [options.comboEffortStrategy] - Which member thinking levels a combo advertises as capabilities.effort_tiers.
  */
 export async function buildModelsList(kindFilter, options = {}) {
   // When this header is present, the /v1/models request came from another
@@ -336,6 +347,7 @@ export async function buildModelsList(kindFilter, options = {}) {
     modelAliases,
     comboByName,
     comboLimitStrategy: options.comboLimitStrategy,
+    comboEffortStrategy: options.comboEffortStrategy,
   };
 
   // Combos first (filtered by kind). Web combos expose `kind` so AI knows search vs fetch.
@@ -354,6 +366,10 @@ export async function buildModelsList(kindFilter, options = {}) {
       const caps = comboCapabilities(combo, capabilityContext);
       if (caps) {
         entry.capabilities = caps;
+        if (caps.reasoning) {
+          const effortTiers = comboEffortTiers(combo, capabilityContext);
+          if (effortTiers) caps.effort_tiers = effortTiers;
+        }
         if (Number.isFinite(caps.contextWindow)) {
           entry.context_length = caps.contextWindow;
           entry.max_input_tokens = caps.contextWindow;
@@ -666,7 +682,7 @@ async function resolveCatalogOptions(request) {
   }
   try {
     if (await hasValidCliToken(request)) {
-      return { exposure: "all", comboLimitStrategy: settings.comboLimitStrategy };
+      return { exposure: "all", comboLimitStrategy: settings.comboLimitStrategy, comboEffortStrategy: settings.comboEffortStrategy };
     }
   } catch {
     // Token check failed (no machine-id file yet) — fall through to the setting.
@@ -674,6 +690,7 @@ async function resolveCatalogOptions(request) {
   return {
     exposure: settings.modelsExposure,
     comboLimitStrategy: settings.comboLimitStrategy,
+    comboEffortStrategy: settings.comboEffortStrategy,
   };
 }
 
@@ -685,8 +702,8 @@ export async function GET(request) {
   try {
     // Detect cross-instance recursive /models fetch (another 9router fetching our /models)
     const skipDynamicFetch = request?.headers?.get(INTERNAL_MODELS_FETCH_HEADER) === "1";
-    const { exposure, comboLimitStrategy } = await resolveCatalogOptions(request);
-    const data = await buildModelsList([LLM_KIND], { skipDynamicFetch, exposure, comboLimitStrategy });
+    const { exposure, comboLimitStrategy, comboEffortStrategy } = await resolveCatalogOptions(request);
+    const data = await buildModelsList([LLM_KIND], { skipDynamicFetch, exposure, comboLimitStrategy, comboEffortStrategy });
     return Response.json({ object: "list", data }, {
       headers: { "Access-Control-Allow-Origin": "*" },
     });

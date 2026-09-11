@@ -119,6 +119,9 @@ LimitsRow.propTypes = {
 };
 
 function CapabilitiesGrid({ capabilities, thinkingLevels }) {
+  // Combos advertise member thinking levels inside capabilities.effort_tiers;
+  // direct models keep the legacy thinkingLevels prop. Prefer the former.
+  const levels = capabilities.effort_tiers?.length > 0 ? capabilities.effort_tiers : thinkingLevels;
   return (
     <div className="flex flex-col gap-3">
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -163,9 +166,9 @@ function CapabilitiesGrid({ capabilities, thinkingLevels }) {
           {capabilities.thinkingEffortSupported && (
             <span className="text-text-muted">Accepts reasoning effort</span>
           )}
-          {thinkingLevels?.length > 0 && (
+          {levels?.length > 0 && (
             <span className="text-text-muted">
-              Levels <span className="font-mono text-text-main">{thinkingLevels.join(", ")}</span>
+              Levels <span className="font-mono text-text-main">{levels.join(", ")}</span>
             </span>
           )}
         </div>

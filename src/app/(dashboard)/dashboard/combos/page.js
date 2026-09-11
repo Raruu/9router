@@ -22,6 +22,14 @@ const COMBO_LIMIT_OPTIONS = [
   { value: "min", label: "Smallest member (min)" },
 ];
 
+// Which member thinking levels a combo advertises as capabilities.effort_tiers.
+// Union offers everything any member supports (routing clamps each request to
+// what the serving member accepts); intersection offers only levels all do.
+const COMBO_EFFORT_OPTIONS = [
+  { value: "union", label: "Any member (union)" },
+  { value: "intersection", label: "Every member (intersection)" },
+];
+
 // Capacity adapter: global fallback pools of models per input-modality capability.
 // A request needing a capability the target model/combo lacks switches straight
 // to the first enabled model here instead of erroring or dropping the data.
@@ -62,6 +70,7 @@ export default function CombosPage() {
   const [comboStrategies, setComboStrategies] = useState({});
   const [comboNameInResponse, setComboNameInResponse] = useState(false);
   const [comboLimitStrategy, setComboLimitStrategy] = useState("max");
+  const [comboEffortStrategy, setComboEffortStrategy] = useState("union");
   const [capacityAdapter, setCapacityAdapter] = useState(EMPTY_CAPACITY_ADAPTER);
   const { getCaps } = useModelCaps();
   const [confirmState, setConfirmState] = useState(null);
@@ -109,6 +118,7 @@ export default function CombosPage() {
       setComboStrategies(settingsData.comboStrategies || {});
       setComboNameInResponse(!!settingsData.comboNameInResponse);
       setComboLimitStrategy(settingsData.comboLimitStrategy === "min" ? "min" : "max");
+      setComboEffortStrategy(settingsData.comboEffortStrategy === "intersection" ? "intersection" : "union");
       const rawAdapter = settingsData.capacityAdapter || {};
       const normalized = {};
       for (const cap of CAPACITY_ADAPTER_CAPS) {
@@ -150,6 +160,19 @@ export default function CombosPage() {
       });
     } catch (error) {
       console.log("Error updating combo limit strategy:", error);
+    }
+  };
+
+  const handleSetComboEffortStrategy = async (next) => {
+    setComboEffortStrategy(next);
+    try {
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comboEffortStrategy: next }),
+      });
+    } catch (error) {
+      console.log("Error updating combo effort strategy:", error);
     }
   };
 
@@ -293,6 +316,28 @@ export default function CombosPage() {
               onChange={(e) => handleSetComboLimitStrategy(e.target.value)}
               selectClassName="py-1.5 text-xs"
               aria-label="Combo advertised limits strategy"
+            />
+          </div>
+        </div>
+        <div className="mt-4 pt-4 border-t border-border flex items-start sm:items-center justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">Combo thinking levels</p>
+            <p className="text-xs text-text-muted mt-0.5">
+              Which member thinking levels a combo advertises as{" "}
+              <code className="font-mono">capabilities.effort_tiers</code> on{" "}
+              <code className="font-mono">/v1/models</code> and in model info. Union offers
+              everything any member supports and each request is clamped to what the
+              member that serves it accepts; intersection offers only levels every
+              member supports. Advertised only.
+            </p>
+          </div>
+          <div className="w-full sm:w-[220px] shrink-0">
+            <Select
+              options={COMBO_EFFORT_OPTIONS}
+              value={comboEffortStrategy}
+              onChange={(e) => handleSetComboEffortStrategy(e.target.value)}
+              selectClassName="py-1.5 text-xs"
+              aria-label="Combo thinking levels strategy"
             />
           </div>
         </div>

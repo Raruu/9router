@@ -5,7 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import { getProviderIconSrcForId, markProviderIconMissing } from "@/shared/utils/providerIcon";
-import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
+import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, XiaomiMimoAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
@@ -46,12 +46,22 @@ const TIMEOUT_MAX_SEC = 3600;
 const RETRY_MIN_TRIES = 1;
 const RETRY_MAX_TRIES = 10;
 const RETRY_DEFAULT_TRIES = 2;
+const RETRY_MIN_BACKOFF_SEC = 1;
+const RETRY_MAX_BACKOFF_SEC = 30;
+const RETRY_DEFAULT_BACKOFF_SEC = 16;
 
 function parseRetryTries(raw) {
   if (raw === "" || raw == null) return null;
   const n = Number(raw);
   if (!Number.isFinite(n)) return undefined;
   return Math.min(RETRY_MAX_TRIES, Math.max(RETRY_MIN_TRIES, Math.floor(n)));
+}
+
+function parseRetryBackoffSec(raw) {
+  if (raw === "" || raw == null) return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return undefined;
+  return Math.min(RETRY_MAX_BACKOFF_SEC, Math.max(RETRY_MIN_BACKOFF_SEC, Math.floor(n)));
 }
 
 function parseTimeoutSec(raw) {
@@ -75,6 +85,7 @@ export default function ProviderDetailPage() {
   const [providerNode, setProviderNode] = useState(null);
   const [proxyPools, setProxyPools] = useState([]);
   const [showOAuthModal, setShowOAuthModal] = useState(false);
+  const [showXiaomiMimoModal, setShowXiaomiMimoModal] = useState(false);
   const [showIFlowCookieModal, setShowIFlowCookieModal] = useState(false);
   const [showAddApiKeyModal, setShowAddApiKeyModal] = useState(false);
   const [addConnectionError, setAddConnectionError] = useState("");
@@ -101,7 +112,7 @@ export default function ProviderDetailPage() {
   const [providerStickyLimit, setProviderStickyLimit] = useState("");
   const [thinkingMode, setThinkingMode] = useState("auto");
   const [timeoutInputs, setTimeoutInputs] = useState({ connect: "", firstChunk: "", stall: "" });
-  const [retryCfg, setRetryCfg] = useState({ enabled: false, tries: "" });
+  const [retryCfg, setRetryCfg] = useState({ enabled: false, tries: "", maxBackoffSeconds: "" });
   const [autoPing, setAutoPing] = useState({ enabled: false, connections: {} });
   const [suggestedModels, setSuggestedModels] = useState([]);
   const [liveModels, setLiveModels] = useState([]);
@@ -116,6 +127,7 @@ export default function ProviderDetailPage() {
   const [oneByOneSummary, setOneByOneSummary] = useState(null);
   const stopOneByOneRef = useRef(false);
   const [importingQoderModels, setImportingQoderModels] = useState(false);
+  const [importingClineModels, setImportingClineModels] = useState(false);
   const { copied, copy } = useCopyToClipboard();
 
   const AG_RISK_STORAGE_KEY = "ag_risk_confirmed";
@@ -131,6 +143,11 @@ export default function ProviderDetailPage() {
         setShowAgRiskModal(true);
         return;
       }
+    }
+    // Xiaomi Desktop: auto-import local credentials first, OAuth as fallback
+    if (providerId === "xiaomi-mimo") {
+      setShowXiaomiMimoModal(true);
+      return;
     }
     if (isOAuth) {
       openOAuthConnection();
@@ -365,6 +382,7 @@ export default function ProviderDetailPage() {
       setRetryCfg({
         enabled: retryCfgRaw.enabled === true,
         tries: retryCfgRaw.tries != null ? String(retryCfgRaw.tries) : "",
+        maxBackoffSeconds: retryCfgRaw.maxBackoffSeconds != null ? String(retryCfgRaw.maxBackoffSeconds) : "",
       });
       const autoPingSettingsKey = AUTO_PING_SETTINGS_KEYS[providerId];
       const apCfg = autoPingSettingsKey ? settingsData[autoPingSettingsKey] || {} : {};
@@ -528,7 +546,11 @@ export default function ProviderDetailPage() {
       if (!next.enabled) {
         delete updated[providerId];
       } else {
-        updated[providerId] = { enabled: true, tries: next.tries };
+        updated[providerId] = {
+          enabled: true,
+          tries: next.tries,
+          maxBackoffSeconds: next.maxBackoffSeconds,
+        };
       }
       await fetch("/api/settings", {
         method: "PATCH",
@@ -542,9 +564,14 @@ export default function ProviderDetailPage() {
 
   const handleRetryToggle = (enabled) => {
     const tries = parseRetryTries(retryCfg.tries) ?? RETRY_DEFAULT_TRIES;
-    const next = { enabled, tries: enabled ? String(tries) : retryCfg.tries };
+    const maxBackoffSeconds = parseRetryBackoffSec(retryCfg.maxBackoffSeconds) ?? RETRY_DEFAULT_BACKOFF_SEC;
+    const next = {
+      enabled,
+      tries: enabled ? String(tries) : retryCfg.tries,
+      maxBackoffSeconds: enabled ? String(maxBackoffSeconds) : retryCfg.maxBackoffSeconds,
+    };
     setRetryCfg(next);
-    saveProviderRetries({ enabled, tries: enabled ? tries : 0 });
+    saveProviderRetries({ enabled, tries: enabled ? tries : 0, maxBackoffSeconds });
   };
 
   const handleRetryTriesChange = (raw) => {
@@ -552,7 +579,17 @@ export default function ProviderDetailPage() {
     if (!retryCfg.enabled) return;
     const tries = parseRetryTries(raw);
     if (tries === undefined || tries === null) return;
-    saveProviderRetries({ enabled: true, tries });
+    const maxBackoffSeconds = parseRetryBackoffSec(retryCfg.maxBackoffSeconds) ?? RETRY_DEFAULT_BACKOFF_SEC;
+    saveProviderRetries({ enabled: true, tries, maxBackoffSeconds });
+  };
+
+  const handleRetryBackoffChange = (raw) => {
+    setRetryCfg({ ...retryCfg, maxBackoffSeconds: raw });
+    if (!retryCfg.enabled) return;
+    const maxBackoffSeconds = parseRetryBackoffSec(raw);
+    if (maxBackoffSeconds === undefined || maxBackoffSeconds === null) return;
+    const tries = parseRetryTries(retryCfg.tries) ?? RETRY_DEFAULT_TRIES;
+    saveProviderRetries({ enabled: true, tries, maxBackoffSeconds });
   };
 
   const saveAutoPing = async (next) => {
@@ -942,6 +979,53 @@ export default function ProviderDetailPage() {
       alert(translate("Error fetching models") + ": " + error.message);
     } finally {
       setImportingQoderModels(false);
+    }
+  };
+  // Fetch the live Cline /models catalog and add every model not yet present.
+  // Cline and ClinePass share the same catalog endpoint (api.cline.bot/api/v1/models).
+  const handleImportClineModels = async () => {
+    if (importingClineModels) return;
+    const activeConnection = connections.find((conn) => conn.isActive !== false);
+    if (!activeConnection) {
+      alert(translate("Please add an active Cline connection first"));
+      return;
+    }
+    setImportingClineModels(true);
+    try {
+      const res = await fetch(`/api/providers/${activeConnection.id}/models`);
+      const data = await res.json();
+      if (!res.ok) {
+        alert(data.error || translate("Failed to fetch models"));
+        return;
+      }
+      const models = data.models || [];
+      if (models.length === 0) {
+        alert(translate("No models returned"));
+        return;
+      }
+      let importedCount = 0;
+      for (const model of models) {
+        const modelId = model.id || model.name;
+        if (!modelId) continue;
+        const alreadyExists = customModels.some(
+          (entry) => entry.providerAlias === providerStorageAlias && entry.id === modelId && (entry.kind || entry.type || "llm") === "llm"
+        ) || Object.values(modelAliases).includes(`${providerStorageAlias}/${modelId}`);
+        if (alreadyExists) {
+          continue;
+        }
+        await handleAddCustomModel(modelId, "llm", providerStorageAlias);
+        importedCount += 1;
+      }
+      if (importedCount === 0) {
+        alert(translate("All models already exist, no new models added"));
+      } else {
+        alert(translate("Successfully added") + ` ${importedCount} ` + translate("models"));
+      }
+    } catch (error) {
+      console.log("Error importing Cline models:", error);
+      alert(translate("Error fetching models") + ": " + error.message);
+    } finally {
+      setImportingClineModels(false);
     }
   };
 
@@ -1533,6 +1617,20 @@ export default function ProviderDetailPage() {
           </button>
         )}
 
+        {/* Import Cline /models catalog button — only show for cline and clinepass providers */}
+        {(providerId === "cline" || providerId === "clinepass") && connections.some((conn) => conn.isActive !== false) && (
+          <button
+            onClick={handleImportClineModels}
+            disabled={importingClineModels}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-blue-500/40 px-3 py-2 text-xs text-blue-600 dark:text-blue-400 transition-colors hover:border-blue-500 hover:bg-blue-500/5 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            <span className="material-symbols-outlined text-sm" style={importingClineModels ? { animation: "spin 1s linear infinite" } : undefined}>
+              {importingClineModels ? "progress_activity" : "download"}
+            </span>
+            {importingClineModels ? translate("Fetching...") : translate("Import from /models")}
+          </button>
+        )}
+
         {/* Suggested models from provider API — show only models not yet added */}
         {suggestedModels.length > 0 && (() => {
           const addedFullModels = new Set([
@@ -2024,8 +2122,8 @@ export default function ProviderDetailPage() {
           <h2 className="text-lg font-semibold">Combo Retries</h2>
           <p className="text-sm text-text-muted">
             When this provider fails inside a combo with a transient error (rate limit, overloaded, network),
-            retry the same member before moving to the next provider. Off by default. Waits out short lockouts
-            (up to 30s per retry); longer outages skip to the next member immediately.
+            retry the same member before moving to the next provider. Off by default. Local exponential backoff
+            is capped per retry; genuine provider reset times beyond the cap still skip to the next member.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-4">
@@ -2037,16 +2135,28 @@ export default function ProviderDetailPage() {
             />
           </div>
           {retryCfg.enabled && (
-            <Input
-              label="Extra tries"
-              type="number"
-              min={RETRY_MIN_TRIES}
-              max={RETRY_MAX_TRIES}
-              placeholder={`Default: ${RETRY_DEFAULT_TRIES}`}
-              value={retryCfg.tries}
-              onChange={(e) => handleRetryTriesChange(e.target.value)}
-              hint="Same-member attempts after the first failure (1–10)."
-            />
+            <>
+              <Input
+                label="Extra tries"
+                type="number"
+                min={RETRY_MIN_TRIES}
+                max={RETRY_MAX_TRIES}
+                placeholder={`Default: ${RETRY_DEFAULT_TRIES}`}
+                value={retryCfg.tries}
+                onChange={(e) => handleRetryTriesChange(e.target.value)}
+                hint="Same-member attempts after the first failure (1–10)."
+              />
+              <Input
+                label="Max backoff"
+                type="number"
+                min={RETRY_MIN_BACKOFF_SEC}
+                max={RETRY_MAX_BACKOFF_SEC}
+                placeholder={`Default: ${RETRY_DEFAULT_BACKOFF_SEC}s`}
+                value={retryCfg.maxBackoffSeconds}
+                onChange={(e) => handleRetryBackoffChange(e.target.value)}
+                hint="Maximum local wait per retry in seconds (1–30)."
+              />
+            </>
           )}
         </div>
       </Card>
@@ -2162,6 +2272,13 @@ export default function ProviderDetailPage() {
           onClose={() => setShowOAuthModal(false)}
         />
       )}
+
+      {/* Xiaomi Desktop: auto-import local credentials modal */}
+      <XiaomiMimoAuthModal
+        isOpen={showXiaomiMimoModal}
+        onSuccess={handleOAuthSuccess}
+        onClose={() => setShowXiaomiMimoModal(false)}
+      />
       {providerId === "iflow" && (
         <IFlowCookieModal
           isOpen={showIFlowCookieModal}

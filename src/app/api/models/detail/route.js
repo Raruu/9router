@@ -5,7 +5,7 @@ import { buildProviderIdByPrefix } from "@/lib/providerPrefixMap";
 import { PROVIDER_MODELS, getModelKind } from "@/shared/constants/models";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
-import { comboCapabilities, mergeMemberCapabilities, resolveComboMember } from "open-sse/providers/comboCapabilities.js";
+import { comboCapabilities, comboEffortTiers, mergeMemberCapabilities, resolveComboMember } from "open-sse/providers/comboCapabilities.js";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 
 const LLM_KIND = "llm";
@@ -186,6 +186,14 @@ async function comboDetail(combo, ctx) {
     members.map((m) => m.capabilities).filter(Boolean),
     ctx.comboLimitStrategy,
   );
+  // Advertise member thinking levels inside capabilities (union or intersection
+  // per settings.comboEffortStrategy) — the modal's Levels row reads this.
+  // Attached post-merge so a mixed-format combo keeps its levels even when the
+  // merged thinkingFormat falls back to the neutral default.
+  if (capabilities?.reasoning) {
+    const effortTiers = comboEffortTiers(combo, ctx);
+    if (effortTiers) capabilities.effort_tiers = effortTiers;
+  }
 
   const detail = {
     type: "combo",
@@ -238,6 +246,7 @@ async function buildContext() {
     comboByName,
     comboStrategies: settings?.comboStrategies || {},
     comboLimitStrategy: settings?.comboLimitStrategy,
+    comboEffortStrategy: settings?.comboEffortStrategy,
   };
 }
 
