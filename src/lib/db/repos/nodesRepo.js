@@ -167,6 +167,10 @@ export async function deleteProviderNode(id) {
     removed = rowToNode(row);
     db.run(`DELETE FROM providerNodes WHERE id = ?`, [id]);
   });
+  if (removed) {
+    const { deleteProviderIcon, isCompatibleProviderIconNode } = await import("@/lib/providerIcons.js");
+    if (isCompatibleProviderIconNode(removed)) await deleteProviderIcon(id);
+  }
   return removed;
 }
 
@@ -216,6 +220,7 @@ export async function convertProviderNodeType(id, { type, apiType, name, prefix,
       prefix: trimmedPrefix,
       ...(type === COMPATIBLE_CHAT_NODE_TYPE ? { apiType } : {}),
       baseUrl: sanitizedBaseUrl,
+      ...(node.iconVersion ? { iconVersion: node.iconVersion } : {}),
       createdAt: row.createdAt,
       updatedAt: now,
     };
@@ -345,6 +350,10 @@ export async function convertProviderNodeType(id, { type, apiType, name, prefix,
     import("./pricingRepo.js"),
   ]);
   invalidatePricingCache();
+  if (result?.iconVersion) {
+    const { moveProviderIcon } = await import("@/lib/providerIcons.js");
+    await moveProviderIcon(id, result.id);
+  }
   await refreshModelCatalogRuntime();
   return result;
 }

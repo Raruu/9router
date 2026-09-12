@@ -60,6 +60,13 @@ export function getProviderIconSrcForId(providerId, apiType) {
   return getProviderIconSrc(providerId);
 }
 
+/** User-uploaded custom provider icons live under DATA_DIR, not public assets. */
+export function getCustomProviderIconSrc(providerId, iconVersion) {
+  if (!iconVersion || typeof providerId !== "string") return null;
+  if (!providerId.startsWith(OPENAI_COMPATIBLE) && !providerId.startsWith(ANTHROPIC_COMPATIBLE)) return null;
+  return `/api/provider-nodes/${encodeURIComponent(providerId)}/icon?v=${encodeURIComponent(iconVersion)}`;
+}
+
 /** Call from img onError so later mounts skip the request. */
 export function markProviderIconMissing(providerId) {
   const id = normalizeId(providerId);

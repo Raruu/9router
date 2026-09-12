@@ -22,7 +22,8 @@ export default function ProviderIcon({
   fallbackColor,
 }) {
   const effectiveSrc = resolveSrc(src, providerId);
-  const [errored, setErrored] = useState(false);
+  const [errorSource, setErrorSource] = useState(null);
+  const errored = errorSource === effectiveSrc;
 
   if (!effectiveSrc || errored) {
     return (
@@ -53,7 +54,7 @@ export default function ProviderIcon({
         const m = effectiveSrc.match(/^\/providers\/([^/]+)\.png$/i);
         if (m) markProviderIconMissing(m[1]);
         if (providerId) markProviderIconMissing(providerId);
-        setErrored(true);
+        setErrorSource(effectiveSrc);
       }}
     />
   );

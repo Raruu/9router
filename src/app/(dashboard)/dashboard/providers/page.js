@@ -10,7 +10,7 @@ import {
   Toggle,
 } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
-import { getProviderIconSrcForId } from "@/shared/utils/providerIcon";
+import { getCustomProviderIconSrc, getProviderIconSrcForId } from "@/shared/utils/providerIcon";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS } from "@/shared/constants/config";
 import {
   FREE_PROVIDERS,
@@ -269,6 +269,7 @@ export default function ProvidersPage() {
       color: "#10A37F",
       textIcon: "OC",
       apiType: node.apiType,
+      iconVersion: node.iconVersion,
     }))
     .filter(
       (p) => matchSearch(p.name) && matchStatus(getProviderStats(p.id, "apikey")),
@@ -281,6 +282,7 @@ export default function ProvidersPage() {
       name: node.name || "Anthropic Compatible",
       color: "#D97757",
       textIcon: "AC",
+      iconVersion: node.iconVersion,
     }))
     .filter(
       (p) => matchSearch(p.name) && matchStatus(getProviderStats(p.id, "apikey")),
@@ -808,7 +810,7 @@ function ApiKeyProviderCard({
     compatible: "Compatible",
   };
 
-  const getIconPath = () => getProviderIconSrcForId(provider.id, provider.apiType);
+  const getIconPath = () => getCustomProviderIconSrc(provider.id, provider.iconVersion) || getProviderIconSrcForId(provider.id, provider.apiType);
 
   return (
     <Link href={`/dashboard/providers/${providerId}`} className="group min-w-0">

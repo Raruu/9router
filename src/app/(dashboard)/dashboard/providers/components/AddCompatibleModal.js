@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import { Badge, Button, Input, Modal, Select } from "@/shared/components";
 import { COMPATIBLE_NODE_TYPES } from "@/shared/constants/providers";
+import ProviderIconUpload from "@/shared/components/ProviderIconUpload";
 
 const VARIANT_CONFIG = {
   openai: {
@@ -51,6 +52,8 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
   const [checkModelId, setCheckModelId] = useState("");
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState(null);
+  const [iconFile, setIconFile] = useState(null);
+  const [iconError, setIconError] = useState("");
 
   // Reset everything when opened; baseUrl resets are handled in the
   // type/apiType change handlers below (no render-chasing effects).
@@ -61,6 +64,8 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
     setValidationResult(null);
     setCheckKey("");
     setCheckModelId("");
+    setIconFile(null);
+    setIconError("");
   }, [isOpen]);
 
   const handleTypeChange = (e) => {
@@ -93,10 +98,20 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
       });
       const data = await res.json();
       if (res.ok) {
-        onCreated(data.node);
+        let node = data.node;
+        if (iconFile) {
+          const iconForm = new FormData();
+          iconForm.set("icon", iconFile);
+          const iconRes = await fetch(`/api/provider-nodes/${node.id}/icon`, { method: "PUT", body: iconForm });
+          const icon = await iconRes.json();
+          if (iconRes.ok) node = { ...node, iconVersion: icon.iconVersion };
+          else setIconError(`Provider was created, but its icon was not uploaded: ${icon.error || "Unknown error"}`);
+        }
+        onCreated(node);
         setFormData(initialFormData());
         setCheckKey("");
         setValidationResult(null);
+        setIconFile(null);
       }
     } catch (error) {
       console.log(`Error creating ${config.errorLabel} node:`, error);
@@ -174,6 +189,8 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
       }
     >
       <div className="flex flex-col gap-4">
+        <ProviderIconUpload file={iconFile} onChange={(file) => { setIconFile(file); setIconError(""); }} onRemove={() => setIconFile(null)} />
+        {iconError && <p className="text-xs text-red-500">{iconError}</p>}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Input
             label="Name"

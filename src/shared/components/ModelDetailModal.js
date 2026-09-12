@@ -5,7 +5,7 @@ import PropTypes from "prop-types";
 import Modal from "./Modal";
 import CapacityBadges from "./CapacityBadges";
 import ProviderIcon from "./ProviderIcon";
-import { getProviderIconSrcForId } from "@/shared/utils/providerIcon";
+import { getCustomProviderIconSrc, getProviderIconSrcForId } from "@/shared/utils/providerIcon";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { CAPACITY_META } from "@/shared/constants/models";
 
@@ -373,7 +373,7 @@ export default function ModelDetailModal({ isOpen, onClose, modelId, comboName }
               </div>
             ) : (
               <ProviderIcon
-                src={getProviderIconSrcForId(detail.provider?.id)}
+                src={getCustomProviderIconSrc(detail.provider?.id, detail.provider?.iconVersion) || getProviderIconSrcForId(detail.provider?.id)}
                 alt={detail.provider?.name || ""}
                 size={36}
                 className="size-9 shrink-0 rounded-lg object-contain"
