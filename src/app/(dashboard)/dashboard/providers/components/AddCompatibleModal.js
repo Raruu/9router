@@ -81,6 +81,8 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
     setValidationResult(null);
   };
 
+  const clearValidation = () => setValidationResult(null);
+
   const handleSubmit = async () => {
     if (!formData.name.trim() || !formData.prefix.trim() || !formData.baseUrl.trim()) return;
     setSubmitting(true);
@@ -107,7 +109,10 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
           if (iconRes.ok) node = { ...node, iconVersion: icon.iconVersion };
           else setIconError(`Provider was created, but its icon was not uploaded: ${icon.error || "Unknown error"}`);
         }
-        onCreated(node);
+        await onCreated(node, {
+          apiKey: checkKey.trim() ? checkKey : "",
+          validated: validationResult?.valid === true,
+        });
         setFormData(initialFormData());
         setCheckKey("");
         setValidationResult(null);
@@ -219,14 +224,14 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
               label="API Type"
               options={API_TYPE_OPTIONS}
               value={formData.apiType}
-              onChange={(e) => setFormData({ ...formData, apiType: e.target.value, baseUrl: VARIANT_CONFIG.openai.defaultBaseUrl })}
+              onChange={(e) => { setFormData({ ...formData, apiType: e.target.value, baseUrl: VARIANT_CONFIG.openai.defaultBaseUrl }); clearValidation(); }}
             />
           )}
         </div>
         <Input
           label="Base URL"
           value={formData.baseUrl}
-          onChange={(e) => setFormData({ ...formData, baseUrl: e.target.value })}
+          onChange={(e) => { setFormData({ ...formData, baseUrl: e.target.value }); clearValidation(); }}
           placeholder={config.defaultBaseUrl}
           hint={config.baseUrlHint}
         />
@@ -240,7 +245,7 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
                 label="API Key (for Check)"
                 type="password"
                 value={checkKey}
-                onChange={(e) => setCheckKey(e.target.value)}
+                onChange={(e) => { setCheckKey(e.target.value); clearValidation(); }}
                 className="flex-1"
               />
               <div className="pt-6">
@@ -256,7 +261,7 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
             <Input
               label="Model ID (optional)"
               value={checkModelId}
-              onChange={(e) => setCheckModelId(e.target.value)}
+              onChange={(e) => { setCheckModelId(e.target.value); clearValidation(); }}
               placeholder={config.modelIdPlaceholder}
               hint="If provider lacks /models endpoint, enter a model ID to validate via chat/completions instead."
             />

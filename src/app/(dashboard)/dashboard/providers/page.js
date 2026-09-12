@@ -637,9 +637,35 @@ export default function ProvidersPage() {
       <AddCompatibleModal
         isOpen={showAddCompatibleModal}
         onClose={() => setShowAddCompatibleModal(false)}
-        onCreated={(node) => {
+        onCreated={async (node, { apiKey, validated }) => {
           setProviderNodes((prev) => [...prev, node]);
           setShowAddCompatibleModal(false);
+          if (!apiKey) {
+            notify.success("Custom provider created");
+            return;
+          }
+          try {
+            const response = await fetch("/api/providers", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                provider: node.id,
+                apiKey,
+                name: "test",
+                testStatus: validated ? "active" : "unknown",
+              }),
+            });
+            const data = await response.json();
+            if (!response.ok) {
+              notify.warning(`Provider created, but the test API key was not saved: ${data.error || "Unknown error"}`);
+              return;
+            }
+            setConnections((prev) => [...prev, data.connection]);
+            notify.success("Custom provider and test API key created");
+          } catch (error) {
+            console.log("Error saving custom provider test API key:", error);
+            notify.warning("Provider created, but the test API key was not saved");
+          }
         }}
       />
 
