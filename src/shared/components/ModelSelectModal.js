@@ -8,6 +8,7 @@ import CapacityBadges from "./CapacityBadges";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, AI_PROVIDERS, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, getProviderAlias } from "@/shared/constants/providers";
+import { getCustomProviderIconSrc, getProviderIconSrcForId } from "@/shared/utils/providerIcon";
 
 // Provider order: OAuth first, then Free Tier, then API Key (matches dashboard/providers)
 const PROVIDER_ORDER = [
@@ -295,6 +296,7 @@ export default function ModelSelectModal({
             name: displayName,
             alias: alias,
             color: providerInfo.color,
+            iconVersion: matchedNode?.iconVersion,
             models: combined,
           };
         }
@@ -343,6 +345,7 @@ export default function ModelSelectModal({
           name: displayName,
           alias: nodePrefix,
           color: providerInfo.color,
+          iconVersion: matchedNode?.iconVersion,
           models: modelsToShow,
           isCustom: true,
           hasModels: mergedModels.length > 0,
@@ -561,7 +564,7 @@ export default function ModelSelectModal({
             {/* Provider header */}
             <div className="flex items-center gap-1.5 mb-1.5 sticky top-0 bg-surface py-0.5">
               <ProviderIcon
-                src={`/providers/${providerId}.png`}
+                src={getCustomProviderIconSrc(providerId, group.iconVersion) || getProviderIconSrcForId(providerId)}
                 alt={group.name}
                 size={14}
                 fallbackText={(group.name || providerId).slice(0, 2).toUpperCase()}

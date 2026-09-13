@@ -38,7 +38,7 @@ async function setupTestContext(nodeData) {
   };
 }
 
-function makeRequest(provider, name = "Test Connection") {
+function makeRequest(provider, name = "Test Connection", overrides = {}) {
   return new Request("https://9router.local/api/providers", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -47,6 +47,7 @@ function makeRequest(provider, name = "Test Connection") {
       apiKey: "test-key",
       name,
       defaultModel: "test-model",
+      ...overrides,
     }),
   });
 }
@@ -165,5 +166,50 @@ describe("compatible provider connections API", () => {
     expect(storedConnections).toHaveLength(2);
     expectCompatibleConnection(storedConnections[0], ctx.node, { apiType: "chat" });
     expectCompatibleConnection(storedConnections[1], ctx.node, { apiType: "chat" });
+  });
+
+  it("persists a named test API key with the supplied health status", async () => {
+    const ctx = await setupTestContext({
+      id: "anthropic-compatible-test-key",
+      type: "anthropic-compatible",
+      name: "Test Key Node",
+      prefix: "test-key",
+      baseUrl: "https://test-key.example/v1",
+    });
+    cleanup = ctx.cleanup;
+
+    const response = await ctx.POST(makeRequest(ctx.node.id, "test", {
+      apiKey: "entered-test-key",
+      defaultModel: undefined,
+      testStatus: "active",
+    }));
+    const body = await response.json();
+    const stored = await ctx.getProviderConnections({ provider: ctx.node.id });
+
+    expect(response.status).toBe(201);
+    expect(body.connection).toMatchObject({ name: "test", testStatus: "active" });
+    expect(body.connection.apiKey).toBeUndefined();
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ name: "test", apiKey: "entered-test-key", testStatus: "active" });
+  });
+
+  it("updates the existing named test API key instead of duplicating it", async () => {
+    const ctx = await setupTestContext({
+      id: "openai-compatible-test-key-update",
+      type: "openai-compatible",
+      name: "Test Key Update Node",
+      prefix: "test-key-update",
+      apiType: "responses",
+      baseUrl: "https://test-key-update.example/v1",
+    });
+    cleanup = ctx.cleanup;
+
+    await ctx.POST(makeRequest(ctx.node.id, "test", { apiKey: "old-key", testStatus: "unknown" }));
+    const response = await ctx.POST(makeRequest(ctx.node.id, "test", { apiKey: "new-key", testStatus: "active" }));
+    const stored = await ctx.getProviderConnections({ provider: ctx.node.id });
+
+    expect(response.status).toBe(201);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ name: "test", apiKey: "new-key", testStatus: "active" });
   });
 });

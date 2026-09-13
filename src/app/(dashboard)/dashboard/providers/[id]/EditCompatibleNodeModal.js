@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import { Button, Badge, Input, Modal, Select } from "@/shared/components";
 import { COMPATIBLE_NODE_TYPES } from "@/shared/constants/providers";
+import ProviderIconUpload from "@/shared/components/ProviderIconUpload";
 
 export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose }) {
   const [formData, setFormData] = useState({
@@ -18,6 +19,9 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose 
   const [checkModelId, setCheckModelId] = useState("");
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState(null);
+  const [iconFile, setIconFile] = useState(null);
+  const [removeIcon, setRemoveIcon] = useState(false);
+  const [iconError, setIconError] = useState("");
 
   useEffect(() => {
     if (node) {
@@ -29,6 +33,9 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose 
         apiType: node.apiType || "chat",
         baseUrl: node.baseUrl || (nodeType === "anthropic-compatible" ? "https://api.anthropic.com/v1" : "https://api.openai.com/v1"),
       });
+      setIconFile(null);
+      setRemoveIcon(false);
+      setIconError("");
     }
   }, [node]);
 
@@ -53,7 +60,8 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose 
       if (!selectedIsAnthropic) {
         payload.apiType = formData.apiType;
       }
-      await onSave(payload);
+      const result = await onSave({ ...payload, iconFile, removeIcon });
+      if (result?.iconError) setIconError(result.iconError);
     } finally {
       setSaving(false);
     }
@@ -103,6 +111,14 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose 
       }
     >
       <div className="flex flex-col gap-4">
+        <ProviderIconUpload
+          file={iconFile}
+          providerId={node.id}
+          iconVersion={removeIcon ? null : node.iconVersion}
+          onChange={(file) => { setIconFile(file); setRemoveIcon(false); setIconError(""); }}
+          onRemove={() => { setIconFile(null); setRemoveIcon(true); }}
+        />
+        {iconError && <p className="text-xs text-red-500">{iconError}</p>}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Input
             label="Name"
@@ -196,6 +212,7 @@ EditCompatibleNodeModal.propTypes = {
     type: PropTypes.string,
     apiType: PropTypes.string,
     baseUrl: PropTypes.string,
+    iconVersion: PropTypes.number,
   }),
   onSave: PropTypes.func.isRequired,
   onClose: PropTypes.func.isRequired,

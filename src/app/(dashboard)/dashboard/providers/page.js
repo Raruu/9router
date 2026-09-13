@@ -10,7 +10,7 @@ import {
   Toggle,
 } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
-import { getProviderIconSrcForId } from "@/shared/utils/providerIcon";
+import { getCustomProviderIconSrc, getProviderIconSrcForId } from "@/shared/utils/providerIcon";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS } from "@/shared/constants/config";
 import {
   FREE_PROVIDERS,
@@ -269,6 +269,7 @@ export default function ProvidersPage() {
       color: "#10A37F",
       textIcon: "OC",
       apiType: node.apiType,
+      iconVersion: node.iconVersion,
     }))
     .filter(
       (p) => matchSearch(p.name) && matchStatus(getProviderStats(p.id, "apikey")),
@@ -281,6 +282,7 @@ export default function ProvidersPage() {
       name: node.name || "Anthropic Compatible",
       color: "#D97757",
       textIcon: "AC",
+      iconVersion: node.iconVersion,
     }))
     .filter(
       (p) => matchSearch(p.name) && matchStatus(getProviderStats(p.id, "apikey")),
@@ -635,9 +637,35 @@ export default function ProvidersPage() {
       <AddCompatibleModal
         isOpen={showAddCompatibleModal}
         onClose={() => setShowAddCompatibleModal(false)}
-        onCreated={(node) => {
+        onCreated={async (node, { apiKey, validated }) => {
           setProviderNodes((prev) => [...prev, node]);
           setShowAddCompatibleModal(false);
+          if (!apiKey) {
+            notify.success("Custom provider created");
+            return;
+          }
+          try {
+            const response = await fetch("/api/providers", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                provider: node.id,
+                apiKey,
+                name: "test",
+                testStatus: validated ? "active" : "unknown",
+              }),
+            });
+            const data = await response.json();
+            if (!response.ok) {
+              notify.warning(`Provider created, but the test API key was not saved: ${data.error || "Unknown error"}`);
+              return;
+            }
+            setConnections((prev) => [...prev, data.connection]);
+            notify.success("Custom provider and test API key created");
+          } catch (error) {
+            console.log("Error saving custom provider test API key:", error);
+            notify.warning("Provider created, but the test API key was not saved");
+          }
         }}
       />
 
@@ -808,7 +836,7 @@ function ApiKeyProviderCard({
     compatible: "Compatible",
   };
 
-  const getIconPath = () => getProviderIconSrcForId(provider.id, provider.apiType);
+  const getIconPath = () => getCustomProviderIconSrc(provider.id, provider.iconVersion) || getProviderIconSrcForId(provider.id, provider.apiType);
 
   return (
     <Link href={`/dashboard/providers/${providerId}`} className="group min-w-0">

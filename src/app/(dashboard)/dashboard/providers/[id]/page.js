@@ -3,9 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import Image from "next/image";
-import { getProviderIconSrcForId, markProviderIconMissing } from "@/shared/utils/providerIcon";
-import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, XiaomiMimoAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal } from "@/shared/components";
+import { getCustomProviderIconSrc, getProviderIconSrcForId } from "@/shared/utils/providerIcon";
+import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, XiaomiMimoAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal, ProviderIcon } from "@/shared/components";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
@@ -97,7 +96,6 @@ export default function ProviderDetailPage() {
   const [selectedConnection, setSelectedConnection] = useState(null);
   const [modelAliases, setModelAliases] = useState({});
   const [customModels, setCustomModels] = useState([]);
-  const [headerImgError, setHeaderImgError] = useState(false);
   const [modelTestResults, setModelTestResults] = useState({});
   const [modelsTestError, setModelsTestError] = useState("");
   const [testingModelIds, setTestingModelIds] = useState(() => new Set());
@@ -191,6 +189,7 @@ export default function ProviderDetailPage() {
         apiType: providerNode.apiType,
         baseUrl: providerNode.baseUrl,
         type: providerNode.type,
+        iconVersion: providerNode.iconVersion,
       }
     : (OAUTH_PROVIDERS[providerId] || APIKEY_PROVIDERS[providerId] || FREE_PROVIDERS[providerId] || FREE_TIER_PROVIDERS[providerId] || WEB_COOKIE_PROVIDERS[providerId]);
   const authModes = providerInfo?.authModes || [];
@@ -412,7 +411,7 @@ export default function ProviderDetailPage() {
     }
   }, [providerId, isCompatible]);
 
-  const handleUpdateNode = async (formData) => {
+  const handleUpdateNode = async ({ iconFile, removeIcon, ...formData }) => {
     try {
       const res = await fetch(`/api/provider-nodes/${providerId}`, {
         method: "PUT",
@@ -421,6 +420,19 @@ export default function ProviderDetailPage() {
       });
       const data = await res.json();
       if (res.ok) {
+        const nodeId = data.node?.id || providerId;
+        if (removeIcon) {
+          const iconRes = await fetch(`/api/provider-nodes/${nodeId}/icon`, { method: "DELETE" });
+          if (!iconRes.ok) return { iconError: (await iconRes.json()).error || "Failed to remove icon" };
+          data.node.iconVersion = null;
+        }
+        if (iconFile) {
+          const iconForm = new FormData();
+          iconForm.set("icon", iconFile);
+          const iconRes = await fetch(`/api/provider-nodes/${nodeId}/icon`, { method: "PUT", body: iconForm });
+          if (!iconRes.ok) return { iconError: (await iconRes.json()).error || "Failed to upload icon" };
+          data.node.iconVersion = (await iconRes.json()).iconVersion;
+        }
         // Switching provider type moves the node to a new id — follow it.
         if (data.converted && data.node?.id && data.node.id !== providerId) {
           router.push(`/dashboard/providers/${data.node.id}`);
@@ -432,6 +444,7 @@ export default function ProviderDetailPage() {
       }
     } catch (error) {
       console.log("Error updating provider node:", error);
+      return { iconError: error?.message || "Failed to update provider" };
     }
   };
 
@@ -1708,7 +1721,7 @@ export default function ProviderDetailPage() {
   }
 
   // Determine icon path: OpenAI Compatible providers use specialized icons
-  const getHeaderIconPath = () => getProviderIconSrcForId(providerInfo.id, providerInfo.apiType);
+  const getHeaderIconPath = () => getCustomProviderIconSrc(providerInfo.id, providerInfo.iconVersion) || getProviderIconSrcForId(providerInfo.id, providerInfo.apiType);
 
   return (
     <div className="flex min-w-0 flex-col gap-6 px-1 sm:gap-8 sm:px-0">
@@ -1726,26 +1739,14 @@ export default function ProviderDetailPage() {
             className="flex size-12 shrink-0 items-center justify-center rounded-lg"
             style={{ backgroundColor: `${providerInfo.color}15` }}
           >
-            {headerImgError || !getHeaderIconPath() ? (
-              <span className="text-sm font-bold" style={{ color: providerInfo.color }}>
-                {providerInfo.textIcon || providerInfo.id.slice(0, 2).toUpperCase()}
-              </span>
-            ) : (
-              <Image
-                src={getHeaderIconPath()}
-                alt={providerInfo.name}
-                width={48}
-                height={48}
-                className="max-h-12 max-w-12 rounded-lg object-contain"
-                sizes="48px"
-                onError={() => {
-                  markProviderIconMissing(providerInfo.id);
-                  setHeaderImgError(true);
-                }}
-              loading="lazy"
-              decoding="async"
-              />
-            )}
+            <ProviderIcon
+              src={getHeaderIconPath()}
+              alt={providerInfo.name}
+              size={48}
+              className="max-h-12 max-w-12 rounded-lg object-contain"
+              fallbackText={providerInfo.textIcon || providerInfo.id.slice(0, 2).toUpperCase()}
+              fallbackColor={providerInfo.color}
+            />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-3 flex-wrap">

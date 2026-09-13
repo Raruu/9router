@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   getProviderIconSrc,
   getProviderIconSrcForId,
+  getCustomProviderIconSrc,
   markProviderIconMissing,
 } from "@/shared/utils/providerIcon.js";
 
@@ -51,6 +52,15 @@ describe("getProviderIconSrcForId — compatible provider nodes", () => {
 
   it("explicit apiType alone cannot force a mapping for a non-compatible id", () => {
     expect(getProviderIconSrcForId("openai", "responses")).toBe(getProviderIconSrc("openai"));
+  });
+});
+
+describe("getCustomProviderIconSrc", () => {
+  it("uses the icon endpoint only for versioned compatible nodes", () => {
+    expect(getCustomProviderIconSrc("openai-compatible-chat-abc", 123)).toBe("/api/provider-nodes/openai-compatible-chat-abc/icon?v=123");
+    expect(getCustomProviderIconSrc("anthropic-compatible-abc", 1)).toBe("/api/provider-nodes/anthropic-compatible-abc/icon?v=1");
+    expect(getCustomProviderIconSrc("openai", 1)).toBeNull();
+    expect(getCustomProviderIconSrc("openai-compatible-chat-abc", null)).toBeNull();
   });
 });
 
