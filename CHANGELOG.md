@@ -1,3 +1,11 @@
+# v0.5.75-2 (2026-09-14)
+
+## Features
+- **Providers**: custom OpenAI/Anthropic-compatible providers now support uploadable custom icons, shown at the top of the Add/Edit dialogs with centered `40x40` preview and immediate local preview of the just-picked file. PNG, JPEG, WebP, and SVG uploads are auto-converted to bounded WebP and stored under `DATA_DIR/provider-icons/` — never in SQLite or `public/`. Icons move across OpenAI ↔ Anthropic type switches and are removed with their provider.
+- **Providers**: Add Custom Provider now saves the optional test API key instead of discarding it. Any non-empty key creates an API-key connection named `test` via `POST /api/providers`; currently validated keys are marked `active`, otherwise `unknown`.
+- **Console Log**: add `All | Requests | Token refresh | Errors` tabs using the shared `SegmentedControl` style, with per-tab counts. Tabs overlap, so one line can appear under both `Requests` and `Errors`. Filtering is client-side and applies to buffered and live SSE logs.
+- **Console Log**: add active-tab `.txt` download exporting only the selected tab's visible logs as `console-log-<tab>-YYYYMMDD-HHMMSS.txt` in local time.
+
 # v0.5.75-1 (2026-09-11)
 
 Merged upstream v0.5.75 plus the latest post-release changes. This section
