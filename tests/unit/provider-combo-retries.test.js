@@ -128,6 +128,17 @@ describe("combo retry account lock backoff", () => {
 
 const silentLog = { info: () => {}, warn: () => {} };
 
+function captureLog() {
+  const lines = [];
+  return {
+    lines,
+    log: {
+      info: (tag, message) => lines.push(`info [${tag}] ${message}`),
+      warn: (tag, message) => lines.push(`warn [${tag}] ${message}`),
+    },
+  };
+}
+
 function failResponse({ status = 503, signal = null, message = "boom" } = {}) {
   const res = new Response(JSON.stringify({ error: { message } }), {
     status,
@@ -257,8 +268,7 @@ describe("handleComboChat same-member retries", () => {
     expect(calls).toEqual(["p1/a", "p2/b"]);
   });
 
-  it("advances immediately when the wait exceeds the cap", async () => {
-    const calls = [];
+  it("advances immediately when the wait exceeds the cap", async () => {    const calls = [];
     const res = await handleComboChat({
       body: {},
       models: ["p1/a", "p2/b"],
@@ -332,6 +342,80 @@ describe("handleComboChat same-member retries", () => {
     });
     expect(res.ok).toBe(true);
     expect(calls).toEqual(["p1/a", "p2/b"]);
+  });
+});
+
+describe("handleComboChat same-member wait lines", () => {
+  it("marks the retry line with the attempt count and a humanized wait", async () => {
+    const { lines, log } = captureLog();
+    const calls = [];
+    const res = await handleComboChat({
+      body: {},
+      models: ["p1/a", "p2/b"],
+      handleSingleModel: async (b, m) => {
+        calls.push(m);
+        if (m === "p2/b" || calls.filter((c) => c === "p1/a").length > 1) return okResponse();
+        return failResponse({ signal: transientSignal({ retryAfterMs: 2000 }) });
+      },
+      log,
+      comboName: "retry-line",
+      resolveMemberRetries: () => ({ enabled: true, tries: 3, maxBackoffMs: 16_000 }),
+    });
+    expect(res.ok).toBe(true);
+    expect(lines).toContain("info [COMBO] ↻ Model p1/a transient 429, retry 1/3 after 2s");
+  });
+
+  it("keeps sub-second waits in milliseconds", async () => {
+    const { lines, log } = captureLog();
+    const calls = [];
+    const res = await handleComboChat({
+      body: {},
+      models: ["p1/a", "p2/b"],
+      handleSingleModel: async (b, m) => {
+        calls.push(m);
+        if (m === "p2/b" || calls.filter((c) => c === "p1/a").length > 1) return okResponse();
+        return failResponse({ signal: transientSignal({ retryAfterMs: 250 }) });
+      },
+      log,
+      comboName: "retry-line-ms",
+      resolveMemberRetries: () => ({ enabled: true, tries: 1, maxBackoffMs: 1000 }),
+    });
+    expect(res.ok).toBe(true);
+    expect(lines).toContain("info [COMBO] ↻ Model p1/a transient 429, retry 1/1 after 250ms");
+  });
+
+  it("marks the cooldown-before-next line", async () => {
+    vi.useFakeTimers();
+    try {
+      const { lines, log } = captureLog();
+      const calls = [];
+      const resultPromise = handleComboChat({
+        body: {},
+        models: ["p1/a", "p2/b"],
+        handleSingleModel: async (b, m) => {
+          calls.push(m);
+          // 503 + wait over the per-provider cap: no retry, but the short
+          // transient cooldown still fires before advancing.
+          return m === "p2/b"
+            ? okResponse()
+            : failResponse({
+                status: 503,
+                message: "request not allowed",
+                signal: transientSignal({ status: 503, retryAfterMs: 60_000 }),
+              });
+        },
+        log,
+        comboName: "retry-line-cooldown",
+        resolveMemberRetries: () => ({ enabled: true, tries: 2, maxBackoffMs: 1000 }),
+      });
+      await vi.runAllTimersAsync();
+      const res = await resultPromise;
+      expect(res.ok).toBe(true);
+      expect(calls).toEqual(["p1/a", "p2/b"]);
+      expect(lines).toContain("info [COMBO] ↻ Model p1/a transient 503, waiting 5s before next");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

@@ -280,6 +280,21 @@ function getRetryWaitMs(result) {
   }
 }
 
+// Humanize a same-member wait for the console log ("60s", "3s", "250ms"),
+// matching the AUTH lock line style.
+function formatWaitMs(waitMs) {
+  if (!Number.isFinite(waitMs) || waitMs < 1000) return `${Math.max(0, Math.round(waitMs || 0))}ms`;
+  const totalSec = Math.ceil(waitMs / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const parts = [];
+  if (h > 0) parts.push(`${h}h`);
+  if (m > 0) parts.push(`${m}m`);
+  if (s > 0 || parts.length === 0) parts.push(`${s}s`);
+  return parts.join(" ");
+}
+
 /**
  * Get combo models from combos data
  * @param {string} modelStr - Model string to check
@@ -393,7 +408,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
         if (waitMs <= retryConfig.maxBackoffMs) {
           attempt += 1;
           const signal = result.retrySignal || {};
-          log.info("COMBO", `Model ${modelStr} transient ${signal.status}, retry ${attempt} after ${waitMs}ms`);
+          log.info("COMBO", `↻ Model ${modelStr} transient ${signal.status}, retry ${attempt}/${retryConfig.tries} after ${formatWaitMs(waitMs)}`);
           if (waitMs > 0) await new Promise(r => setTimeout(r, waitMs));
           continue;
         }
@@ -404,7 +419,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       // skipped immediately (fixes: combo falls through on transient 503)
       if (cooldownMs && cooldownMs > 0 && cooldownMs <= 5000 &&
           (result.status === 503 || result.status === 502 || result.status === 504)) {
-        log.info("COMBO", `Model ${modelStr} transient ${result.status}, waiting ${cooldownMs}ms before next`);
+        log.info("COMBO", `↻ Model ${modelStr} transient ${result.status}, waiting ${formatWaitMs(cooldownMs)} before next`);
         await new Promise(r => setTimeout(r, cooldownMs));
       }
 
