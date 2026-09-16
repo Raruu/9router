@@ -6,6 +6,8 @@ import { useNotificationStore } from "@/store/notificationStore";
 import CatalogSection from "./components/CatalogSection";
 import UserCatalogDialog from "./components/UserCatalogDialog";
 import { matchesCatalogRow } from "./components/CatalogTable";
+import { partitionCatalogRules } from "@/shared/utils/catalogUsage";
+import { buildCatalogProviderLabel } from "@/shared/utils/catalogDisplay";
 
 const PRIORITY_OPTIONS = [
   { value: "user-openrouter-hardcoded", label: "user > openrouter > hardcoded" },
@@ -60,6 +62,7 @@ function invalidateModelCapabilities() {
 
 export default function ModelCatalogPage() {
   const [catalog, setCatalog] = useState(null);
+  const [providerNodes, setProviderNodes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState("");
   const [capability, setCapability] = useState("all");
@@ -68,12 +71,22 @@ export default function ModelCatalogPage() {
   const [deleting, setDeleting] = useState(null);
   const [deletingOpenRouter, setDeletingOpenRouter] = useState(null);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [clearUnusedRules, setClearUnusedRules] = useState(null);
   const notify = useNotificationStore();
+
+  // Display label for rule provider scopes: custom node ids render as their
+  // user-chosen prefix (openai-compatible-chat-<uuid> → myprovider).
+  const providerLabel = useMemo(() => buildCatalogProviderLabel(providerNodes), [providerNodes]);
 
   const load = useCallback(async (showLoader = false) => {
     if (showLoader) setLoading(true);
     try {
-      setCatalog(await requestJson("/api/models/catalog"));
+      const [data, nodes] = await Promise.all([
+        requestJson("/api/models/catalog"),
+        requestJson("/api/provider-nodes").then((res) => res.nodes || []).catch(() => []),
+      ]);
+      setCatalog(data);
+      setProviderNodes(nodes);
     } catch (error) {
       notify.error(error.message || "Failed to load model catalog");
     } finally {
@@ -87,13 +100,13 @@ export default function ModelCatalogPage() {
   }, [load]);
 
   const filtered = useMemo(() => {
-    const apply = (rows) => rowsFrom(rows).filter((row) => matchesCatalogRow(row, "", capability));
+    const apply = (rows) => rowsFrom(rows).filter((row) => matchesCatalogRow(row, "", capability, providerLabel));
     return {
       user: apply(catalog?.userDefined ?? catalog?.user),
       openrouter: apply(catalog?.openrouter),
       hardcoded: apply(catalog?.hardcoded),
     };
-  }, [capability, catalog]);
+  }, [capability, catalog, providerLabel]);
 
   const openrouterRows = rowsFrom(catalog?.openrouter);
   const openrouterStatus = openRouterStatus(catalog, openrouterRows);
@@ -213,6 +226,51 @@ export default function ModelCatalogPage() {
     setDialogOpen(true);
   };
 
+  // Fetch the usage snapshot, partition the user rules, and open a
+  // confirmation listing the unused entries before deleting them.
+  const openClearUnusedConfirm = async () => {
+    setBusy("clear-unused");
+    try {
+      const usage = await requestJson("/api/models/catalog/user");
+      const rules = rowsFrom(catalog?.userDefined ?? catalog?.user);
+      const { unused } = partitionCatalogRules(rules, usage);
+      if (unused.length === 0) {
+        notify.success("Every user-defined model is in use — nothing to clear.");
+        return;
+      }
+      setClearUnusedRules(unused);
+    } catch (error) {
+      notify.error(error.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const clearUnused = async () => {
+    if (!clearUnusedRules?.length) return;
+    setBusy("delete-unused");
+    let deleted = 0;
+    let failed = 0;
+    for (const rule of clearUnusedRules) {
+      try {
+        await requestJson("/api/models/catalog/user", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ provider: rule.provider, pattern: rule.pattern }),
+        });
+        deleted += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    setClearUnusedRules(null);
+    await load();
+    invalidateModelCapabilities();
+    if (failed > 0) notify.error(`Cleared ${deleted} unused model${deleted === 1 ? "" : "s"}, ${failed} failed`);
+    else notify.success(`Cleared ${deleted} unused model${deleted === 1 ? "" : "s"}`);
+    setBusy("");
+  };
+
   if (loading || !catalog) {
     return <div className="space-y-4"><CardSkeleton /><CardSkeleton /><CardSkeleton /></div>;
   }
@@ -239,7 +297,21 @@ export default function ModelCatalogPage() {
         emptyText={capability !== "all" ? "No user entries match the capability filter." : "No user-defined models yet."}
         onEdit={(entry) => { setEditing(entry); setDialogOpen(true); }}
         onDelete={setDeleting}
-        actions={<Button icon="add" onClick={() => { setEditing(null); setDialogOpen(true); }}>Add model</Button>}
+        providerLabel={providerLabel}
+        actions={
+          <>
+            <Button icon="add" onClick={() => { setEditing(null); setDialogOpen(true); }}>Add model</Button>
+            <Button
+              variant="danger"
+              icon="delete_sweep"
+              loading={busy === "clear-unused"}
+              disabled={!filtered.user.length || busy === "delete-unused"}
+              onClick={openClearUnusedConfirm}
+            >
+              Clear Unused
+            </Button>
+          </>
+        }
       />
 
       <CatalogSection
@@ -250,6 +322,7 @@ export default function ModelCatalogPage() {
         emptyText={capability !== "all" ? "No OpenRouter models match the capability filter." : "Fetch the OpenRouter catalog to populate this source."}
         onEdit={editAsUserOverride}
         onDelete={setDeletingOpenRouter}
+        providerLabel={providerLabel}
         actions={
           <>
             <Button variant="secondary" icon="download" loading={busy === "fetch"} onClick={fetchOpenRouter}>Fetch Models</Button>
@@ -265,12 +338,37 @@ export default function ModelCatalogPage() {
         rows={filtered.hardcoded}
         emptyText="No hardcoded entries match the filters."
         onEdit={editAsUserOverride}
+        providerLabel={providerLabel}
       />
 
       <UserCatalogDialog key={editing ? `${editing.provider}:${editing.pattern}` : "new"} isOpen={dialogOpen} entry={editing} saving={busy === "user"} onClose={() => { setDialogOpen(false); setEditing(null); }} onSave={saveUser} />
       <ConfirmModal isOpen={Boolean(deleting)} onClose={() => setDeleting(null)} onConfirm={deleteUser} loading={busy === "delete"} title="Delete user model" message={`Delete ${deleting?.pattern || deleting?.model || "this entry"}?`} confirmText="Delete" />
       <ConfirmModal isOpen={Boolean(deletingOpenRouter)} onClose={() => setDeletingOpenRouter(null)} onConfirm={deleteOpenRouter} loading={busy === "delete-openrouter"} title="Delete OpenRouter model" message={`Delete ${deletingOpenRouter?.pattern || "this cached entry"}? Fetching OpenRouter again may restore it.`} confirmText="Delete" />
       <ConfirmModal isOpen={confirmClear} onClose={() => setConfirmClear(false)} onConfirm={clearOpenRouter} loading={busy === "clear"} title="Clear OpenRouter catalog" message="Remove all fetched OpenRouter models? User-defined and hardcoded entries will not be changed." confirmText="Clear All" />
+
+      <ConfirmModal
+        isOpen={Boolean(clearUnusedRules)}
+        onClose={() => setClearUnusedRules(null)}
+        onConfirm={clearUnused}
+        loading={busy === "delete-unused"}
+        title="Clear Unused Models"
+        message={`Remove ${clearUnusedRules?.length || 0} user-defined model${clearUnusedRules?.length === 1 ? "" : "s"} not pinned or referenced by any combo, alias, mitm target, pricing override, capacity list or disabled entry? Used models are kept. This cannot be undone.`}
+        confirmText="Clear Unused"
+      >
+        {clearUnusedRules && (
+          <div className="mt-3 max-h-56 overflow-y-auto rounded-lg border border-border bg-bg-subtle p-2 custom-scrollbar">
+            {clearUnusedRules.slice(0, 50).map((rule) => (
+              <div key={`${rule.provider}|${rule.pattern}`} className="flex items-baseline justify-between gap-2 px-1 py-0.5 text-xs">
+                <code className="truncate font-mono text-text-main" title={rule.pattern}>{rule.pattern}</code>
+                <span className="shrink-0 text-text-muted" title={rule.provider}>{providerLabel(rule.provider)}</span>
+              </div>
+            ))}
+            {clearUnusedRules.length > 50 && (
+              <p className="px-1 pt-1 text-xs italic text-text-muted">+{clearUnusedRules.length - 50} more</p>
+            )}
+          </div>
+        )}
+      </ConfirmModal>
     </div>
   );
 }
