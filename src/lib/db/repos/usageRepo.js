@@ -102,6 +102,7 @@ function aggregateEntryToDay(day, entry) {
   day.requests = (day.requests || 0) + 1;
   day.promptTokens = (day.promptTokens || 0) + promptTokens;
   day.completionTokens = (day.completionTokens || 0) + completionTokens;
+  day.cachedTokens = (day.cachedTokens || 0) + cachedTokens;
   day.cost = (day.cost || 0) + cost;
 
   day.ttftSum = (day.ttftSum || 0) + (entry.ttft || 0);
@@ -326,7 +327,7 @@ export async function saveRequestUsage(entry) {
       const dateKey = getLocalDateKey(entry.timestamp);
       const row = db.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [dateKey]);
       const day = row ? parseJson(row.data, {}) : {
-        requests: 0, promptTokens: 0, completionTokens: 0, cost: 0,
+        requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0, cost: 0,
         byProvider: {}, byModel: {}, byAccount: {}, byApiKey: {}, byEndpoint: {},
       };
       aggregateEntryToDay(day, entry);
@@ -490,9 +491,15 @@ export async function getUsageStats(period = "all") {
     for (const dr of dayRows) {
       const dateKey = dr.dateKey;
       const day = parseJson(dr.data, {});
+      // Back-compat: rows written before the day-level cachedTokens total
+      // existed carry cached counts only inside byProvider — sum those so
+      // legacy days don't read 0 on the 7d/30d/60d overview card.
+      const dayCachedTokens = typeof day.cachedTokens === "number"
+        ? day.cachedTokens
+        : Object.values(day.byProvider || {}).reduce((s, p) => s + (p.cachedTokens || 0), 0);
       stats.totalPromptTokens += day.promptTokens || 0;
       stats.totalCompletionTokens += day.completionTokens || 0;
-      stats.totalCachedTokens += day.cachedTokens || 0;
+      stats.totalCachedTokens += dayCachedTokens;
       stats.totalCost += day.cost || 0;
 
       for (const [prov, p] of Object.entries(day.byProvider || {})) {

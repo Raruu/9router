@@ -7,8 +7,20 @@ export const DEFAULT_MODEL_CATALOG_PRIORITY = MODEL_CATALOG_PRIORITIES[0];
 
 export const CAPABILITY_KEYS = [
   "vision", "pdf", "audioInput", "videoInput", "imageOutput", "audioOutput",
-  "tools", "reasoning", "contextWindow", "maxOutput",
+  "tools", "reasoning", "thinkingCanDisable", "contextWindow", "maxOutput",
 ];
+
+// Thinking wire formats a user rule may force. Mirrors the formats understood
+// by the translator (thinkingUnified.applyFormat / thinkingLevels.FORMAT_LEVELS);
+// an unlisted value would be silently ignored downstream, so it is rejected here.
+export const THINKING_FORMATS = [
+  "openai", "claude-adaptive", "claude-budget", "gemini-level", "gemini-budget",
+  "zai", "qwen", "kimi", "deepseek", "minimax", "hunyuan", "step",
+];
+
+// Upper bound on an explicit level list so a bad rule cannot bloat every
+// capabilities payload (the picker shows at most a handful anyway).
+export const MAX_THINKING_LEVELS = 16;
 
 export const PRICING_KEYS = ["input", "output", "cached", "reasoning", "cache_creation"];
 
@@ -39,7 +51,24 @@ export function sanitizeCapabilities(input) {
       out[key] = value;
     }
   }
+  // Thinking overrides are stored under the same capabilities object but carry
+  // explicit names so the resolved caps can tell a user override apart from the
+  // registry/table values (see thinkingUnified.resolveFormat).
+  const format = input.thinkingFormatOverride;
+  if (typeof format === "string" && THINKING_FORMATS.includes(format)) {
+    out.thinkingFormatOverride = format;
+  }
+  const levels = sanitizeThinkingLevels(input.thinkingLevels);
+  if (levels.length) out.thinkingLevels = levels;
   return out;
+}
+
+export function sanitizeThinkingLevels(input) {
+  if (!Array.isArray(input)) return [];
+  const clean = input
+    .map((level) => (typeof level === "string" ? level.trim() : ""))
+    .filter(Boolean);
+  return [...new Set(clean)].slice(0, MAX_THINKING_LEVELS);
 }
 
 export function sanitizePricing(input) {

@@ -79,7 +79,8 @@ export function createStreamController({ onDisconnect, onError, log, provider, m
         return;
       }
 
-      logStream("✗", `ERROR: ${error.message}${error.stack ? `\n    ${error.stack}` : ""}`, true);
+      logStream("✗", `ERROR: ${error.message}`, true);
+      if (error?.stack) log?.debug?.("ERROR", `${reqTag} ${provider}/${model} stream stack`, error.stack);
       onError?.(error);
     },
 

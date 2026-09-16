@@ -144,17 +144,19 @@ Actions.propTypes = {
   onDelete: PropTypes.func,
 };
 
-export function matchesCatalogRow(row, search, capability) {
+export function matchesCatalogRow(row, search, capability, providerLabel) {
   if (capability !== "all" && rowCapabilities(row)[capability] !== true) return false;
   const query = search.trim().toLowerCase();
   if (!query) return true;
   const { pattern, provider } = rowIdentity(row);
-  return [pattern, provider, row.name, row.type, row.recordType, row.record_type, row.matchType, row.sourceId]
+  const label = providerLabel ? providerLabel(provider) : provider;
+  return [pattern, provider, label !== provider ? label : null, row.name, row.type, row.recordType, row.record_type, row.matchType, row.sourceId]
     .filter(Boolean)
     .some((value) => String(value).toLowerCase().includes(query));
 }
 
-export default function CatalogTable({ rows, emptyText, onEdit, onDelete }) {
+export default function CatalogTable({ rows, emptyText, onEdit, onDelete, providerLabel }) {
+  const labelProvider = (provider) => (providerLabel ? providerLabel(provider) : provider);
   if (!rows.length) {
     return (
       <div className="flex min-h-24 items-center justify-center rounded-xl border border-dashed border-border text-sm text-text-muted">
@@ -186,7 +188,9 @@ export default function CatalogTable({ rows, emptyText, onEdit, onDelete }) {
                       <code className="truncate text-xs font-semibold text-text-main" title={pattern}>{pattern}</code>
                       <TypeBadge row={row} />
                     </div>
-                    <p className="mt-0.5 truncate text-[11px] text-text-muted">{row.name || provider}</p>
+                    <p className="mt-0.5 truncate text-[11px] text-text-muted" title={provider !== labelProvider(provider) ? provider : undefined}>
+                      {row.name || labelProvider(provider)}
+                    </p>
                   </td>
                   <td className="px-3 py-2.5 align-top"><CapabilityBadges row={row} /></td>
                   <td className="px-3 py-2.5 align-top"><Limits row={row} /></td>
@@ -210,7 +214,9 @@ export default function CatalogTable({ rows, emptyText, onEdit, onDelete }) {
                     <code className="truncate text-xs font-semibold" title={pattern}>{pattern}</code>
                     <TypeBadge row={row} />
                   </div>
-                  <p className="mt-0.5 truncate text-[11px] text-text-muted">{row.name || provider}</p>
+                  <p className="mt-0.5 truncate text-[11px] text-text-muted" title={provider !== labelProvider(provider) ? provider : undefined}>
+                    {row.name || labelProvider(provider)}
+                  </p>
                 </div>
                 <Actions row={row} onEdit={onEdit} onDelete={onDelete} />
               </div>

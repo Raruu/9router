@@ -55,14 +55,36 @@ const PATTERN_THINKING = [
 ];
 
 // Returns valid thinking levels for a model, or null when the model has no reasoning.
-export function getThinkingLevels(provider, model) {
+// `capsOverride` lets a caller that already resolved capabilities (e.g. the
+// /api/models route) avoid a second lookup.
+//
+// Precedence for the level set: an explicit user-catalog list wins, then a
+// user-catalog format override, then the hardcoded provider/pattern table,
+// then the capability format, then the format default.
+export function getThinkingLevels(provider, model, capsOverride = null) {
   if (provider === "kiro" && resolveKiroEffortPath(model) === null) return null;
-  const caps = getCapabilitiesForModel(provider, model);
+  const caps = capsOverride || getCapabilitiesForModel(provider, model);
   if (!caps.reasoning) return null;
-  const hit = PATTERN_THINKING.find((entry) =>
-    (!entry.provider || entry.provider === provider) && matchPattern(entry.pattern, model)
-  );
-  let levels = hit?.levels || FORMAT_LEVELS[caps.thinkingFormat] || L.base;
+
+  const explicitLevels = Array.isArray(caps.thinkingLevels) && caps.thinkingLevels.length
+    ? caps.thinkingLevels
+    : null;
+  const overrideFormat = caps.thinkingFormatOverride && FORMAT_LEVELS[caps.thinkingFormatOverride]
+    ? caps.thinkingFormatOverride
+    : null;
+
+  let levels;
+  if (explicitLevels) {
+    levels = [...explicitLevels];
+  } else if (overrideFormat) {
+    levels = FORMAT_LEVELS[overrideFormat];
+  } else {
+    const hit = PATTERN_THINKING.find((entry) =>
+      (!entry.provider || entry.provider === provider) && matchPattern(entry.pattern, model)
+    );
+    levels = hit?.levels || FORMAT_LEVELS[caps.thinkingFormat] || L.base;
+  }
+
   if (caps.thinkingCanDisable === false) levels = levels.filter((l) => l !== "none");
   return levels;
 }

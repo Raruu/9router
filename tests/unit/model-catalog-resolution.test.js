@@ -76,7 +76,10 @@ describe("model catalog precedence", () => {
 
     expect(selected.getCapabilities("acme", "opaque", { vision: true })).toEqual({ reasoning: true });
     expect(selected.getPricing("acme", "opaque", { output: 8 })).toEqual({ input: 4 });
-    expect(missing.getCapabilities("acme", "opaque", { vision: true })).toEqual({});
+    // A dangling ref must degrade to the normal chain, never erase it: the
+    // previous behavior returned {} here, which wiped the model's capabilities
+    // (no vision/reasoning/context) whenever a pinned rule disappeared.
+    expect(missing.getCapabilities("acme", "opaque", { vision: true })).toEqual({ vision: true });
   });
 
   it("matches a custom catalog reference through equivalent provider aliases", () => {
@@ -101,5 +104,54 @@ describe("model catalog precedence", () => {
       tools: true,
       reasoning: true,
     });
+  });
+});
+
+describe("catalog reference robustness", () => {
+  it("does not let a dangling pin suppress the lower-priority chain", () => {
+    const resolver = createCatalogResolver({
+      openRouterRules: [{ provider: "*", pattern: "*glm*", data: { capabilities: { vision: true, reasoning: true } } }],
+      customModels: [{ providerAlias: "acme", id: "glm-5.3-flash", catalogRef: { source: "user", provider: "acme", pattern: "deleted-rule" } }],
+    });
+
+    // The third arg is the hand-written table result (see capabilities.refine).
+    // Falls through to table + OpenRouter instead of collapsing to {}.
+    expect(resolver.getCapabilities("acme", "glm-5.3-flash", { tools: true, contextWindow: 1000000 })).toEqual({
+      tools: true, contextWindow: 1000000, vision: true, reasoning: true,
+    });
+  });
+
+  it("keeps capabilities when the pinned rule only carries pricing", () => {
+    const resolver = createCatalogResolver({
+      userRules: [{ provider: "acme", pattern: "glm-5.3-flash", data: { pricing: { input: 3 } } }],
+      customModels: [{ providerAlias: "acme", id: "glm-5.3-flash", catalogRef: { source: "user", provider: "acme", pattern: "glm-5.3-flash" } }],
+    });
+
+    const caps = resolver.getCapabilities("acme", "glm-5.3-flash", { tools: true, vision: true });
+    expect(caps.vision).toBe(true);
+    expect(resolver.getPricing("acme", "glm-5.3-flash").input).toBe(3);
+  });
+
+  it("matches a catalog reference case-insensitively", () => {
+    const resolver = createCatalogResolver({
+      userRules: [{ provider: "acme", pattern: "GLM-5.3-Flash", data: { capabilities: { vision: true } } }],
+      customModels: [{ providerAlias: "acme", id: "glm-5.3-flash", catalogRef: { source: "user", provider: "ACME", pattern: "glm-5.3-flash" } }],
+    });
+
+    const caps = resolver.getCapabilities("acme", "glm-5.3-flash", {});
+    expect(caps.vision).toBe(true);
+  });
+
+  it("keeps a resolving pin authoritative over the hand-written chain", () => {
+    const resolver = createCatalogResolver({
+      userRules: [{ provider: "acme", pattern: "glm-5.3-flash", data: { capabilities: { vision: false, tools: false } } }],
+      customModels: [{ providerAlias: "acme", id: "glm-5.3-flash", catalogRef: { source: "user", provider: "acme", pattern: "glm-5.3-flash" } }],
+    });
+
+    const caps = resolver.getCapabilities("acme", "glm-5.3-flash", { vision: true, pdf: true, tools: true, reasoning: true });
+    expect(caps.vision).toBe(false);
+    expect(caps.pdf).toBeUndefined();
+    expect(caps.tools).toBe(false);
+    expect(caps.reasoning).toBeUndefined();
   });
 });

@@ -471,6 +471,10 @@ const PROVIDER_MODELS_CONFIG = {
 /**
  * GET /api/providers/[id]/models - Get models list from provider
  */
+export function supportsProviderModelsListing(providerId) {
+  return Boolean(providerId && PROVIDER_MODELS_CONFIG[providerId]);
+}
+
 export async function GET(request, { params }) {
   try {
     const { id } = await params;

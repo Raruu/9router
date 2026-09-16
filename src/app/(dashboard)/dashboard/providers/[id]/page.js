@@ -14,6 +14,8 @@ import { translate } from "@/i18n/runtime";
 import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
 import { filterCombosUsingModel, stripModelsFromComboMembers } from "@/shared/utils/comboMembers";
+import { buildUsedFormSet, flattenReferenceMap, pricingTableForms, capacityAdapterForms, partitionRowsByUsage } from "@/shared/utils/modelUsage";
+import { buildCatalogRuleBody, saveCatalogRule } from "@/shared/utils/importCatalogSnapshot";
 import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
@@ -21,6 +23,7 @@ import ConnectionRow from "./ConnectionRow";
 import AddApiKeyModal from "./AddApiKeyModal";
 import EditCompatibleNodeModal from "./EditCompatibleNodeModal";
 import AddCustomModelModal from "./AddCustomModelModal";
+import ImportModelsDialog from "./ImportModelsDialog";
 import BulkImportCodexModal from "./BulkImportCodexModal";
 import BulkImportGrokCliModal from "./BulkImportGrokCliModal";
 
@@ -78,7 +81,7 @@ export default function ProviderDetailPage() {
   const params = useParams();
   const router = useRouter();
   const providerId = params.id;
-  const { getCaps } = useModelCaps();
+  const { getCaps, getLevels } = useModelCaps();
   const [connections, setConnections] = useState([]);
   const [loading, setLoading] = useState(true);
   const [providerNode, setProviderNode] = useState(null);
@@ -102,7 +105,15 @@ export default function ProviderDetailPage() {
   const [showAddCustomModel, setShowAddCustomModel] = useState(false);
   const [editingCustomModel, setEditingCustomModel] = useState(null);
   const [importingCompatModels, setImportingCompatModels] = useState(false);
+  const [showImportDialog, setShowImportDialog] = useState(false);
+  const [importCandidates, setImportCandidates] = useState([]);
+  const [importExistingIds, setImportExistingIds] = useState([]);
+  const [modelsListingSupported, setModelsListingSupported] = useState(false);
   const [clearingModels, setClearingModels] = useState(false);
+  const [clearScope, setClearScope] = useState("all");
+  const [clearInfo, setClearInfo] = useState(null);
+  const clearScopeRef = useRef("all");
+  const clearInfoRef = useRef(null);
   const [selectedConnectionIds, setSelectedConnectionIds] = useState([]);
   const [bulkProxyPoolId, setBulkProxyPoolId] = useState("__none__");
   const [bulkUpdatingProxy, setBulkUpdatingProxy] = useState(false);
@@ -124,8 +135,6 @@ export default function ProviderDetailPage() {
   const [oneByOneResults, setOneByOneResults] = useState({});
   const [oneByOneSummary, setOneByOneSummary] = useState(null);
   const stopOneByOneRef = useRef(false);
-  const [importingQoderModels, setImportingQoderModels] = useState(false);
-  const [importingClineModels, setImportingClineModels] = useState(false);
   const { copied, copy } = useCopyToClipboard();
 
   const AG_RISK_STORAGE_KEY = "ag_risk_confirmed";
@@ -216,10 +225,14 @@ export default function ProviderDetailPage() {
     : providerId === "kimi" ? "Kimi API Key"
     : providerId === "qoder" ? "PAT"
     : "API Key";
+  // Thinking levels resolved server-side (which can see the model catalog);
+  // the local getThinkingLevels runs in the browser where a user pattern is
+  // invisible, so prefer the server value for compatible nodes and custom models.
+  const serverThinkingLevels = (modelId) => getLevels(`${providerStorageAlias}/${modelId}`);
   // Resolve suffix "(level)" for a model when a thinking level is picked and the model supports it.
   const resolveThinkingSuffix = (modelId) => {
     if (!thinkingMode || thinkingMode === "auto") return null;
-    const levels = getThinkingLevels(providerId, modelId);
+    const levels = serverThinkingLevels(modelId) || getThinkingLevels(providerId, modelId);
     return levels && levels.includes(thinkingMode) ? thinkingMode : null;
   };
   const providerStorageAlias = isCompatible ? providerId : providerAlias;
@@ -231,7 +244,7 @@ export default function ProviderDetailPage() {
     const addLevels = (modelId) => {
       if (!modelId || seen.has(modelId)) return;
       seen.add(modelId);
-      const lv = getThinkingLevels(providerId, modelId);
+      const lv = serverThinkingLevels(modelId) || getThinkingLevels(providerId, modelId);
       if (lv) lv.forEach((l) => { if (l !== "none") set.add(l); });
     };
     for (const m of models) addLevels(m.id);
@@ -667,6 +680,16 @@ export default function ProviderDetailPage() {
     fetchSuggestedModels(fetcher).then(setSuggestedModels);
   }, [providerId]);
 
+  // Whether this built-in provider has a live /models listing backend.
+  // Compatible nodes use the generic baseUrl+/models path instead.
+  useEffect(() => {
+    if (isCompatible) return;
+    fetch(`/api/providers/models-support?provider=${encodeURIComponent(providerId)}`, { cache: "no-store" })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => setModelsListingSupported(!!data?.supported))
+      .catch(() => {});
+  }, [providerId, isCompatible]);
+
   const handleSetAlias = async (modelId, alias, providerAliasOverride = providerAlias) => {
     const fullModel = `${providerAliasOverride}/${modelId}`;
     try {
@@ -698,7 +721,7 @@ export default function ProviderDetailPage() {
     }
   };
 
-  const handleAddCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias, catalogRef, name) => {
+  const handleAddCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias, catalogRef, name, quiet = false) => {
     try {
       const res = await fetch("/api/models/custom", {
         method: "POST",
@@ -708,12 +731,14 @@ export default function ProviderDetailPage() {
       if (res.ok) {
         await fetchCustomModels();
         if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
-      } else {
-        const data = await res.json();
-        alert(data.error || "Failed to add custom model");
+        return true;
       }
+      const data = await res.json();
+      if (!quiet) alert(data.error || "Failed to add custom model");
+      return false;
     } catch (error) {
       console.log("Error adding custom model:", error);
+      return false;
     }
   };
 
@@ -845,22 +870,158 @@ export default function ProviderDetailPage() {
     return [...forms];
   };
 
-  const openClearModelsConfirm = async () => {
-    const customs = compatModelRows.filter((m) => m.source === "custom");
-    const aliasCount = compatModelRows.length - customs.length;
-    const lockedCount = customs.filter((m) => m.locked).length;
-    if (compatModelRows.length === 0) return;
-    const users = filterCombosUsingModel(await fetchCombos(), clearFormsForRows(compatModelRows));
-    setConfirmState({
-      title: "Clear Models",
-      message: `Remove ${customs.length} custom model${customs.length === 1 ? "" : "s"}${lockedCount ? ` (${lockedCount} locked kept)` : ""} and ${aliasCount} alias${aliasCount === 1 ? "" : "es"}${users.length ? `, and remove them from ${users.length} combo${users.length === 1 ? "" : "s"} (${users.map((c) => c.name).join(", ")})` : ""}? This cannot be undone.`,
+  // Non-combo references for the "clear only unused" scope: mitmAlias
+  // targets, user pricing overrides and capacity-adapter lists. Usage history
+  // deliberately does not count — it would mark everything as used.
+  const fetchModelReferences = async () => {
+    const [mitmRes, pricingRes, settingsRes] = await Promise.all([
+      fetch("/api/cli-tools/antigravity-mitm/alias", { cache: "no-store" }).catch(() => null),
+      fetch("/api/pricing?userOnly=1", { cache: "no-store" }).catch(() => null),
+      fetch("/api/settings", { cache: "no-store" }).catch(() => null),
+    ]);
+    let mitmTargets = [];
+    let pricingForms = [];
+    let capacityForms = [];
+    try {
+      const data = mitmRes && mitmRes.ok ? await mitmRes.json() : null;
+      mitmTargets = flattenReferenceMap(data?.aliases);
+    } catch {}
+    try {
+      const data = pricingRes && pricingRes.ok ? await pricingRes.json() : null;
+      pricingForms = pricingTableForms(data);
+    } catch {}
+    try {
+      const data = settingsRes && settingsRes.ok ? await settingsRes.json() : null;
+      capacityForms = capacityAdapterForms(data?.capacityAdapter);
+    } catch {}
+    return { mitmTargets, pricingForms, capacityForms };
+  };
+
+  const clearDialogText = (scope, info) => {
+    const comboNote = info.users.length
+      ? `, and remove them from ${info.users.length} combo${info.users.length === 1 ? "" : "s"} (${info.users.map((c) => c.name).join(", ")})`
+      : "";
+    if (scope === "unused") {
+      return {
+        message: `Remove ${info.unusedCount} unused model${info.unusedCount === 1 ? "" : "s"} (keeps ${info.lockedCount} locked and ${info.usedCount} used)${comboNote}? This cannot be undone.`,
+        confirmText: "Clear Unused",
+      };
+    }
+    if (!info.allViaBulk) {
+      return {
+        message: `Remove ${info.deletableCount} custom model${info.deletableCount === 1 ? "" : "s"}${info.lockedCount ? ` (${info.lockedCount} locked kept)` : ""}${comboNote}? Registry models are never deleted. This cannot be undone.`,
+        confirmText: "Clear Custom",
+      };
+    }
+    return {
+      message: `Remove ${info.customsCount} custom model${info.customsCount === 1 ? "" : "s"}${info.lockedCount ? ` (${info.lockedCount} locked kept)` : ""} and ${info.aliasCount} alias${info.aliasCount === 1 ? "" : "es"}${comboNote}? This cannot be undone.`,
       confirmText: "Clear All",
+    };
+  };
+
+  const setClearScopeAndRefresh = (scope) => {
+    clearScopeRef.current = scope;
+    setClearScope(scope);
+    const info = clearInfoRef.current;
+    if (info) {
+      setConfirmState((prev) => (prev ? { ...prev, ...clearDialogText(scope, info) } : prev));
+    }
+  };
+
+  // rows: candidate model rows. options.allViaBulk (default true) uses the
+  // bulk DELETE route for the "all" scope (also removes legacy aliases);
+  // built-in providers pass false so "all" deletes custom overrides per id
+  // and never touches registry models or user aliases.
+  const openClearModelsConfirm = async (rows = compatModelRows, options = {}) => {
+    // Guard: React passes the click event when a handler is wired directly as
+    // onClick={openClearModelsConfirm} — fall back to this provider's rows.
+    if (!Array.isArray(rows)) rows = compatModelRows;
+    const { allViaBulk = true, title = "Clear Models" } = options;
+    const customs = rows.filter((m) => m.source === "custom");
+    const aliasRows = allViaBulk ? rows.filter((m) => m.source !== "custom") : [];
+    const lockedCount = customs.filter((m) => m.locked).length;
+    if (rows.length === 0) return;
+    const [combos, refs] = await Promise.all([fetchCombos(), fetchModelReferences()]);
+    const users = filterCombosUsingModel(combos, clearFormsForRows(rows));
+    // A candidate alias must not protect itself: exclude candidate rows' own
+    // alias mappings so an otherwise-unreferenced alias reads as unused.
+    const candidateAliasNames = new Set(rows.filter((r) => r.alias).map((r) => r.alias));
+    const aliasTargets = Object.entries(modelAliases)
+      .filter(([name]) => !candidateAliasNames.has(name))
+      .map(([, target]) => target);
+    const usedSet = buildUsedFormSet({
+      combos,
+      aliasTargets,
+      mitmTargets: refs.mitmTargets,
+      pricingForms: refs.pricingForms,
+      capacityForms: refs.capacityForms,
+      disabledForms: disabledModelIds.flatMap((id) => modelIdForms(id)),
+    });
+    const deletable = [...customs.filter((m) => !m.locked), ...aliasRows];
+    const { used, unused } = partitionRowsByUsage(deletable, (row) => clearFormsForRows([row]), usedSet);
+    const info = {
+      rows,
+      allViaBulk,
+      customsCount: customs.length,
+      aliasCount: aliasRows.length,
+      lockedCount,
+      deletableCount: deletable.length,
+      users,
+      usedCount: used.length,
+      unusedCount: unused.length,
+      unusedRows: unused,
+      unlockedRows: deletable,
+    };
+    clearInfoRef.current = info;
+    setClearInfo(info);
+    clearScopeRef.current = "all";
+    setClearScope("all");
+    setConfirmState({
+      title,
+      ...clearDialogText("all", info),
+      scopeSelect: true,
       onConfirm: handleClearModels,
     });
   };
 
+  const handleClearRowsPerId = async (rows, info, noun) => {
+    setClearingModels(true);
+    try {
+      let deletedModels = 0;
+      let deletedAliases = 0;
+      for (const row of rows) {
+        if (row.source === "custom") {
+          if (await handleDeleteCustomModel(row.id, row.type || "llm", providerStorageAlias)) deletedModels += 1;
+        } else if (row.alias) {
+          if (await handleDeleteAlias(row.alias)) deletedAliases += 1;
+        }
+      }
+      const forms = clearFormsForRows(rows);
+      const users = filterCombosUsingModel(await fetchCombos(), forms);
+      const stripped = await stripFormsFromCombos(users, forms);
+      await refreshModelLists();
+      alert(`Cleared ${deletedModels} ${noun}${deletedModels === 1 ? "" : "s"}${deletedAliases ? ` and ${deletedAliases} alias${deletedAliases === 1 ? "" : "es"}` : ""}${info.lockedCount ? `, kept ${info.lockedCount} locked` : ""}${info.usedCount ? `, kept ${info.usedCount} used` : ""}${stripped ? `, updated ${stripped} combo${stripped === 1 ? "" : "s"}` : ""}.`);
+    } catch (error) {
+      console.log("Error clearing models:", error);
+    } finally {
+      setClearingModels(false);
+    }
+  };
+
   const handleClearModels = async () => {
+    const info = clearInfoRef.current;
+    const scope = clearScopeRef.current;
     setConfirmState(null);
+    setClearInfo(null);
+    if (!info) return;
+    if (scope === "unused") {
+      await handleClearRowsPerId(info.unusedRows, info, "unused model");
+      return;
+    }
+    if (!info.allViaBulk) {
+      await handleClearRowsPerId(info.unlockedRows, info, "custom model");
+      return;
+    }
     setClearingModels(true);
     try {
       const params = new URLSearchParams({ providerAlias: providerStorageAlias });
@@ -890,6 +1051,15 @@ export default function ProviderDetailPage() {
   });
   const canImportCompatModels = connections.some((conn) => conn.isActive !== false);
 
+  // Custom overrides on built-in providers (registry models are never deleted).
+  const builtinCustomRows = getProviderCustomModelRows({
+    customModels,
+    modelAliases,
+    providerAlias: providerStorageAlias,
+    builtInModels: models,
+    type: "llm",
+  }).filter((row) => row.source === "custom");
+
   const openCompatModelModal = (existing = null) => {
     setEditingCustomModel(existing);
     setShowAddCustomModel(true);
@@ -905,10 +1075,10 @@ export default function ProviderDetailPage() {
     setEditingCustomModel(null);
   };
 
-  const handleImportCompatModels = async () => {
-    if (importingCompatModels) return;
+  const fetchImportCandidates = async () => {
+    if (importingCompatModels) return null;
     const activeConnection = connections.find((conn) => conn.isActive !== false);
-    if (!activeConnection) return;
+    if (!activeConnection) return null;
 
     setImportingCompatModels(true);
     try {
@@ -916,129 +1086,108 @@ export default function ProviderDetailPage() {
       const data = await res.json();
       if (!res.ok) {
         alert(data.error || "Failed to import models");
-        return;
+        return null;
       }
-      const models = data.models || [];
-      if (models.length === 0) {
+      const fetched = data.models || [];
+      if (fetched.length === 0) {
         alert("No models returned from /models.");
-        return;
+        return null;
       }
-      let importedCount = 0;
-      for (const model of models) {
+      const ids = [];
+      for (const model of fetched) {
         const modelId = model.id || model.name || model.model;
-        if (!modelId) continue;
-        if (compatModelRows.some((entry) => entry.id === modelId)) continue;
-        await handleAddCustomModel(modelId, "llm", providerStorageAlias);
-        importedCount += 1;
+        if (modelId && !ids.includes(modelId)) ids.push(modelId);
       }
-      if (importedCount === 0) {
-        alert("No new models were added.");
+      if (ids.length === 0) {
+        alert("No models returned from /models.");
+        return null;
       }
+      return ids;
     } catch (error) {
       console.log("Error importing models:", error);
+      return null;
     } finally {
       setImportingCompatModels(false);
     }
   };
 
-  // Fetch Qoder model list and automatically add to available models
-  const handleImportQoderModels = async () => {
-    if (importingQoderModels) return;
-    const activeConnection = connections.find((conn) => conn.isActive !== false);
-    if (!activeConnection) {
-      alert(translate("Please add an active Qoder connection first"));
-      return;
-    }
+  const handleImportCompatModels = async () => {
+    const ids = await fetchImportCandidates();
+    if (!ids) return;
+    setImportCandidates(ids);
+    setImportExistingIds(compatModelRows.map((row) => row.id));
+    setShowImportDialog(true);
+  };
 
-    setImportingQoderModels(true);
+  // Built-ins import into custom overrides, so registry models also count as
+  // "already added" alongside existing overrides.
+  const handleImportBuiltinModels = async () => {
+    const ids = await fetchImportCandidates();
+    if (!ids) return;
+    const existing = new Set([
+      ...builtinCustomRows.map((row) => row.id),
+      ...models.filter((m) => { const k = getModelKind(m); return !k || k === "llm"; }).map((m) => m.id),
+    ]);
+    setImportCandidates(ids);
+    setImportExistingIds([...existing]);
+    setShowImportDialog(true);
+  };
+
+  const handleClearBuiltinOverrides = () => {
+    openClearModelsConfirm(builtinCustomRows, { allViaBulk: false, title: "Clear Custom Models" });
+  };
+
+  // Snapshot one model's resolved detail into a provider-scoped user catalog
+  // rule, then pin the imported row to it. Best-effort: false on any failure.
+  const snapshotModelToCatalog = async (modelId) => {
     try {
-      const res = await fetch(`/api/providers/${activeConnection.id}/models`);
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || translate("Failed to fetch models"));
-        return;
-      }
-      const models = data.models || [];
-      if (models.length === 0) {
-        alert(translate("No models returned"));
-        return;
-      }
-
-      let importedCount = 0;
-      for (const model of models) {
-        const modelId = model.id || model.name;
-        if (!modelId) continue;
-        
-        // Qoder model ID format may be "qoder/auto" or "auto", need to remove prefix
-        const cleanModelId = modelId.replace(/^qoder\//, "");
-        const alreadyExists = customModels.some(
-          (entry) => entry.providerAlias === providerStorageAlias && entry.id === cleanModelId && (entry.kind || entry.type || "llm") === "llm"
-        ) || Object.values(modelAliases).includes(`${providerStorageAlias}/${cleanModelId}`);
-        if (alreadyExists) {
-          continue;
+      const prefixes = [providerStorageAlias];
+      if (providerDisplayAlias && providerDisplayAlias !== providerStorageAlias) prefixes.push(providerDisplayAlias);
+      let detail = null;
+      for (const prefix of prefixes) {
+        const res = await fetch(`/api/models/detail?id=${encodeURIComponent(`${prefix}/${modelId}`)}`);
+        const data = await res.json().catch(() => ({}));
+        if (res.ok && data?.capabilities) {
+          detail = data;
+          break;
         }
-
-        await handleAddCustomModel(cleanModelId, "llm", providerStorageAlias);
-        importedCount += 1;
       }
-      
-      if (importedCount === 0) {
-        alert(translate("All models already exist, no new models added"));
-      } else {
-        alert(translate("Successfully added") + ` ${importedCount} ` + translate("models"));
-      }
+      if (!detail) return false;
+      const provider = providerStorageAlias.toLowerCase();
+      const body = buildCatalogRuleBody({ provider, pattern: modelId, detail });
+      if (!body) return false;
+      if (!(await saveCatalogRule(body))) return false;
+      await handleAddCustomModel(modelId, "llm", providerStorageAlias, { source: "user", provider, pattern: modelId }, undefined, true);
+      return true;
     } catch (error) {
-      console.log("Error importing Qoder models:", error);
-      alert(translate("Error fetching models") + ": " + error.message);
-    } finally {
-      setImportingQoderModels(false);
+      console.log("Error saving model capabilities to catalog:", error);
+      return false;
     }
   };
-  // Fetch the live Cline /models catalog and add every model not yet present.
-  // Cline and ClinePass share the same catalog endpoint (api.cline.bot/api/v1/models).
-  const handleImportClineModels = async () => {
-    if (importingClineModels) return;
-    const activeConnection = connections.find((conn) => conn.isActive !== false);
-    if (!activeConnection) {
-      alert(translate("Please add an active Cline connection first"));
-      return;
-    }
-    setImportingClineModels(true);
+
+  const handleConfirmImport = async ({ ids, fetchCapabilities }) => {
+    setShowImportDialog(false);
+    if (!ids.length) return;
+    setImportingCompatModels(true);
     try {
-      const res = await fetch(`/api/providers/${activeConnection.id}/models`);
-      const data = await res.json();
-      if (!res.ok) {
-        alert(data.error || translate("Failed to fetch models"));
-        return;
-      }
-      const models = data.models || [];
-      if (models.length === 0) {
-        alert(translate("No models returned"));
-        return;
-      }
       let importedCount = 0;
-      for (const model of models) {
-        const modelId = model.id || model.name;
-        if (!modelId) continue;
-        const alreadyExists = customModels.some(
-          (entry) => entry.providerAlias === providerStorageAlias && entry.id === modelId && (entry.kind || entry.type || "llm") === "llm"
-        ) || Object.values(modelAliases).includes(`${providerStorageAlias}/${modelId}`);
-        if (alreadyExists) {
-          continue;
-        }
-        await handleAddCustomModel(modelId, "llm", providerStorageAlias);
+      let catalogCount = 0;
+      for (const modelId of ids) {
+        const added = await handleAddCustomModel(modelId, "llm", providerStorageAlias, null, undefined, true);
+        if (!added) continue;
         importedCount += 1;
+        if (fetchCapabilities && await snapshotModelToCatalog(modelId)) catalogCount += 1;
       }
+      await refreshModelLists();
       if (importedCount === 0) {
-        alert(translate("All models already exist, no new models added"));
-      } else {
-        alert(translate("Successfully added") + ` ${importedCount} ` + translate("models"));
+        alert("No new models were added.");
+      } else if (fetchCapabilities) {
+        alert(`Imported ${importedCount} model${importedCount === 1 ? "" : "s"}, saved ${catalogCount} to the model catalog.`);
       }
     } catch (error) {
-      console.log("Error importing Cline models:", error);
-      alert(translate("Error fetching models") + ": " + error.message);
+      console.log("Error importing models:", error);
     } finally {
-      setImportingClineModels(false);
+      setImportingCompatModels(false);
     }
   };
 
@@ -1604,46 +1753,6 @@ export default function ProviderDetailPage() {
           );
         })}
 
-        {/* Add model button — inline, same style as model chips */}
-        <button
-          onClick={() => {
-            setEditingCustomModel(null);
-            setShowAddCustomModel(true);
-          }}
-          className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-primary/40 px-3 py-2 text-xs text-primary transition-colors hover:border-primary hover:bg-primary/5 sm:w-auto"
-        >
-          <span className="material-symbols-outlined text-sm">add</span>
-          Add Model
-        </button>
-
-        {/* Import Qoder models button — only show for qoder provider */}
-        {providerId === "qoder" && connections.some((conn) => conn.isActive !== false) && (
-          <button
-            onClick={handleImportQoderModels}
-            disabled={importingQoderModels}
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-blue-500/40 px-3 py-2 text-xs text-blue-600 dark:text-blue-400 transition-colors hover:border-blue-500 hover:bg-blue-500/5 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <span className="material-symbols-outlined text-sm" style={importingQoderModels ? { animation: "spin 1s linear infinite" } : undefined}>
-              {importingQoderModels ? "progress_activity" : "download"}
-            </span>
-            {importingQoderModels ? translate("Fetching...") : translate("Fetch Qoder Models")}
-          </button>
-        )}
-
-        {/* Import Cline /models catalog button — only show for cline and clinepass providers */}
-        {(providerId === "cline" || providerId === "clinepass") && connections.some((conn) => conn.isActive !== false) && (
-          <button
-            onClick={handleImportClineModels}
-            disabled={importingClineModels}
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-blue-500/40 px-3 py-2 text-xs text-blue-600 dark:text-blue-400 transition-colors hover:border-blue-500 hover:bg-blue-500/5 sm:w-auto disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            <span className="material-symbols-outlined text-sm" style={importingClineModels ? { animation: "spin 1s linear infinite" } : undefined}>
-              {importingClineModels ? "progress_activity" : "download"}
-            </span>
-            {importingClineModels ? translate("Fetching...") : translate("Import from /models")}
-          </button>
-        )}
-
         {/* Suggested models from provider API — show only models not yet added */}
         {suggestedModels.length > 0 && (() => {
           const addedFullModels = new Set([
@@ -2206,7 +2315,7 @@ export default function ProviderDetailPage() {
                 size="sm"
                 variant="danger"
                 icon="delete_sweep"
-                onClick={openClearModelsConfirm}
+                onClick={() => openClearModelsConfirm()}
                 disabled={compatModelRows.length === 0 || clearingModels}
                 className="w-full sm:w-auto"
               >
@@ -2221,6 +2330,36 @@ export default function ProviderDetailPage() {
             const activeIds = allIds.filter((id) => !disabledModelIds.includes(id));
             return (
               <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  icon="add"
+                  onClick={() => openCompatModelModal()}
+                  className="w-full sm:w-auto"
+                >
+                  Add Model
+                </Button>
+                {modelsListingSupported && (
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    icon="download"
+                    onClick={handleImportBuiltinModels}
+                    disabled={!canImportCompatModels || importingCompatModels}
+                    className="w-full sm:w-auto"
+                  >
+                    {importingCompatModels ? "Importing..." : "Import from /models"}
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="danger"
+                  icon="delete_sweep"
+                  onClick={handleClearBuiltinOverrides}
+                  disabled={builtinCustomRows.length === 0 || clearingModels}
+                  className="w-full sm:w-auto"
+                >
+                  {clearingModels ? "Clearing..." : "Clear Custom"}
+                </Button>
                 {disabledModelIds.length > 0 && (
                   <Button size="sm" variant="secondary" icon="restart_alt" onClick={handleEnableAll}>
                     Active All
@@ -2340,6 +2479,17 @@ export default function ProviderDetailPage() {
           setEditingCustomModel(null);
         }}
       />
+      <ImportModelsDialog
+        isOpen={showImportDialog}
+        models={importCandidates}
+        existingIds={importExistingIds}
+        importing={importingCompatModels}
+        onConfirm={handleConfirmImport}
+        onClose={() => {
+          if (importingCompatModels) return;
+          setShowImportDialog(false);
+        }}
+      />
 
       {providerId === "codex" && (
         <BulkImportCodexModal
@@ -2378,7 +2528,32 @@ export default function ProviderDetailPage() {
         message={confirmState?.message}
         confirmText={confirmState?.confirmText || "Confirm"}
         variant="danger"
-      />
+      >
+        {confirmState?.scopeSelect && clearInfo && (
+          <div className="mt-3 flex flex-col gap-2 rounded-lg border border-border bg-bg-subtle p-3">
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="clear-scope"
+                checked={clearScope === "all"}
+                onChange={() => setClearScopeAndRefresh("all")}
+                className="size-3.5 shrink-0"
+              />
+              <span>All models ({clearInfo.deletableCount})</span>
+            </label>
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <input
+                type="radio"
+                name="clear-scope"
+                checked={clearScope === "unused"}
+                onChange={() => setClearScopeAndRefresh("unused")}
+                className="size-3.5 shrink-0"
+              />
+              <span>Only unused ({clearInfo.unusedCount} unused, {clearInfo.usedCount + clearInfo.lockedCount} kept)</span>
+            </label>
+          </div>
+        )}
+      </ConfirmModal>
     </div>
   );
 }

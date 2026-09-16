@@ -99,4 +99,38 @@ describe("cached-token end-to-end (persist + aggregate + cost)", () => {
     expect(after.totalPromptTokens - before.totalPromptTokens).toBe(77);
     expect(after.totalCompletionTokens - before.totalCompletionTokens).toBe(23);
   });
+
+  it("7d daily-summary path includes cached tokens in the overview total", async () => {
+    const before = await db.getUsageStats("7d");
+
+    await db.saveRequestUsage({
+      provider: "openai",
+      model: "gpt-7d-probe",
+      connectionId: "c-7d",
+      tokens: { prompt_tokens: 1000, completion_tokens: 100, cached_tokens: 321 },
+      endpoint: "/v1/chat/completions",
+      status: "ok",
+    });
+
+    const after = await db.getUsageStats("7d");
+    expect(after.totalCachedTokens - before.totalCachedTokens).toBe(321);
+    expect((after.byProvider.openai?.cachedTokens || 0) - (before.byProvider.openai?.cachedTokens || 0)).toBe(321);
+  });
+
+  it("7d reader falls back to byProvider sums when day.cachedTokens is missing (legacy rows)", async () => {
+    const { getAdapter } = await import("@/lib/db/driver.js");
+    const adapter = await getAdapter();
+    const d = new Date();
+    const todayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const row = adapter.get(`SELECT data FROM usageDaily WHERE dateKey = ?`, [todayKey]);
+    expect(row).toBeTruthy();
+    const day = JSON.parse(row.data);
+    const expectedFallback = Object.values(day.byProvider || {}).reduce((s, p) => s + (p.cachedTokens || 0), 0);
+    expect(expectedFallback).toBeGreaterThan(0);
+    delete day.cachedTokens;
+    adapter.run(`UPDATE usageDaily SET data = ? WHERE dateKey = ?`, [JSON.stringify(day), todayKey]);
+
+    const stats = await db.getUsageStats("7d");
+    expect(stats.totalCachedTokens).toBeGreaterThanOrEqual(expectedFallback);
+  });
 });

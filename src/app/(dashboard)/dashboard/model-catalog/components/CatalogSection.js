@@ -8,11 +8,11 @@ import CatalogTable, { matchesCatalogRow } from "./CatalogTable";
 
 const PAGE_SIZE_OPTIONS = [5, 10, 20];
 
-export default function CatalogSection({ title, description, icon, actions, rows, emptyText, onEdit, onDelete }) {
+export default function CatalogSection({ title, description, icon, actions, rows, emptyText, onEdit, onDelete, providerLabel }) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(5);
-  const filteredRows = useMemo(() => rows.filter((row) => matchesCatalogRow(row, search, "all")), [rows, search]);
+  const filteredRows = useMemo(() => rows.filter((row) => matchesCatalogRow(row, search, "all", providerLabel)), [rows, search, providerLabel]);
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const pageRows = filteredRows.slice((currentPage - 1) * pageSize, currentPage * pageSize);
