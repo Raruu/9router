@@ -9,6 +9,7 @@ import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, AI_PROVIDERS, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, getProviderAlias } from "@/shared/constants/providers";
 import { getCustomProviderIconSrc, getProviderIconSrcForId } from "@/shared/utils/providerIcon";
+import { filterModelSelectGroups } from "@/shared/utils/modelSelectFilter";
 
 // Provider order: OAuth first, then Free Tier, then API Key (matches dashboard/providers)
 const PROVIDER_ORDER = [
@@ -433,42 +434,22 @@ export default function ModelSelectModal({
     return combos.filter(c => c.name.toLowerCase().includes(query));
   }, [combos, searchQuery, kindFilter]);
 
-  // Sort models alphabetically, with added models floated to top
-  const sortModels = (models) => {
-    const added = models.filter(m => addedModelValues.includes(m.value)).sort((a, b) => a.name.localeCompare(b.name));
-    const rest = models.filter(m => !addedModelValues.includes(m.value)).sort((a, b) => a.name.localeCompare(b.name));
-    return [...added, ...rest];
-  };
-
-  // Filter models by search query
+  // Filter models by capability, then by search query. Search matches the
+  // provider name or prefix too: a provider hit keeps its whole model list so
+  // searching "agnes" is a shortcut to that provider's models.
   const filteredGroups = useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
-
-    const filtered = {};
+    const capFiltered = {};
     Object.entries(groupedModels).forEach(([providerId, group]) => {
       let models = group.models;
-      // Filter by input-modality capability (vision/pdf/audioInput/videoInput).
       if (capFilter) {
         models = models.filter((m) => getCaps(m.value)?.[capFilter] === true);
         if (models.length === 0) return;
       }
-      if (query) {
-        const providerNameMatches = group.name.toLowerCase().includes(query);
-        models = models.filter(
-          (m) =>
-            m.name.toLowerCase().includes(query) ||
-            m.id.toLowerCase().includes(query)
-        );
-        if (models.length === 0 && !providerNameMatches) return;
-      }
-      filtered[providerId] = {
-        ...group,
-        models: sortModels(models),
-      };
+      capFiltered[providerId] = { ...group, models };
     });
 
-    return filtered;
-  }, [groupedModels, searchQuery, addedModelValues]);
+    return filterModelSelectGroups(capFiltered, { query: searchQuery, addedModelValues });
+  }, [groupedModels, searchQuery, addedModelValues, capFilter, getCaps]);
 
   const handleSelect = (model) => {
     const value = model?.value || model?.name || model;
