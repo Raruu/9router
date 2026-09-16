@@ -118,6 +118,7 @@ export function ConfirmModal({
   onConfirm,
   title = "Confirm",
   message,
+  children,
   confirmText = "Confirm",
   cancelText = "Cancel",
   variant = "danger",
@@ -140,7 +141,8 @@ export function ConfirmModal({
         </>
       }
     >
-      <p className="text-text-muted">{message}</p>
+      {message && <p className="text-text-muted">{message}</p>}
+      {children}
     </Modal>
   );
 }

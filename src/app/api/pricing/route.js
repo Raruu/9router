@@ -1,13 +1,19 @@
 import { NextResponse } from "next/server";
 import { getPricing, updatePricing, resetPricing, resetAllPricing } from "@/lib/localDb.js";
+import { getUserPricingTables } from "@/lib/db/repos/pricingRepo.js";
 import { getDefaultPricing } from "open-sse/providers/pricing.js";
 
 /**
  * GET /api/pricing
- * Get current pricing configuration (merged user + defaults)
+ * Get current pricing configuration (merged user + defaults).
+ * With ?userOnly=1: only user overrides, keyed by provider then model id.
  */
-export async function GET() {
+export async function GET(request) {
   try {
+    const { searchParams } = new URL(request.url);
+    if (searchParams.get("userOnly") === "1") {
+      return NextResponse.json(await getUserPricingTables());
+    }
     const pricing = await getPricing();
     return NextResponse.json(pricing);
   } catch (error) {
