@@ -13,7 +13,11 @@ import {
 import { ModelCatalogConflictError, ModelCatalogNotFoundError } from "@/lib/modelCatalog/repository.js";
 import { getHardcodedCatalogEntries } from "@/lib/modelCatalog/catalog.js";
 import { normalizeOpenRouterModels } from "@/lib/modelCatalog/normalize.js";
-import { sanitizeCatalogData } from "@/lib/modelCatalog/validation.js";
+import {
+  THINKING_FORMATS,
+  sanitizeCatalogData,
+  sanitizeThinkingLevels,
+} from "@/lib/modelCatalog/validation.js";
 
 export const PRIORITIES = [
   "user-openrouter-hardcoded",
@@ -29,6 +33,7 @@ const BOOLEAN_CAPABILITIES = [
   "audioOutput",
   "tools",
   "reasoning",
+  "thinkingCanDisable",
 ];
 
 const PRICING_FIELDS = [
@@ -113,6 +118,25 @@ export function validateUserEntry(value) {
       throw new CatalogBackendError(`${field} must be inherit, yes, or no`, 400);
     }
     if (setting !== null && setting !== undefined) capabilities[field] = setting;
+  }
+
+  // Thinking overrides: the wire format and, optionally, the explicit level set
+  // the picker offers. Both are opt-in and validated against the same list the
+  // translator understands, so a typo cannot silently do nothing.
+  const thinkingFormat = value.capabilities?.thinkingFormatOverride;
+  if (thinkingFormat !== null && thinkingFormat !== undefined) {
+    if (!THINKING_FORMATS.includes(thinkingFormat)) {
+      throw new CatalogBackendError("thinkingFormatOverride must be a known thinking format", 400);
+    }
+    capabilities.thinkingFormatOverride = thinkingFormat;
+  }
+  const rawLevels = value.capabilities?.thinkingLevels;
+  if (rawLevels !== null && rawLevels !== undefined) {
+    if (!Array.isArray(rawLevels) || rawLevels.some((level) => typeof level !== "string" || !level.trim())) {
+      throw new CatalogBackendError("thinkingLevels must be a list of level names", 400);
+    }
+    const levels = sanitizeThinkingLevels(rawLevels);
+    if (levels.length) capabilities.thinkingLevels = levels;
   }
 
   const pricing = {};

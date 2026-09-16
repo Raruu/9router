@@ -3,6 +3,7 @@
 import { useState } from "react";
 import PropTypes from "prop-types";
 import { Button, Input, Modal, Select } from "@/shared/components";
+import { THINKING_FORMATS } from "@/lib/modelCatalog/validation.js";
 
 const BOOLEAN_FIELDS = [
   ["vision", "Vision"],
@@ -29,6 +30,14 @@ const TRI_STATE_OPTIONS = [
   { value: "no", label: "No" },
 ];
 
+// Thinking override: forces the translator's wire format for matching models
+// and the level list the picker offers. "Inherit" (empty value) leaves both to
+// the provider registry / built-in tables.
+const THINKING_FORMAT_OPTIONS = [
+  { value: "", label: "Inherit" },
+  ...THINKING_FORMATS.map((format) => ({ value: format, label: format })),
+];
+
 function emptyForm() {
   return {
     id: null,
@@ -40,6 +49,9 @@ function emptyForm() {
     contextWindow: "",
     maxOutput: "",
     pricing: Object.fromEntries(PRICE_FIELDS.map(([key]) => [key, ""])),
+    thinkingFormatOverride: "",
+    thinkingLevels: "",
+    thinkingCanDisable: "inherit",
   };
 }
 
@@ -61,6 +73,9 @@ function editForm(entry) {
     contextWindow: entry.contextWindow ?? entry.data?.contextWindow ?? capabilities.contextWindow ?? "",
     maxOutput: entry.maxOutput ?? entry.data?.maxOutput ?? capabilities.maxOutput ?? "",
     pricing: Object.fromEntries(PRICE_FIELDS.map(([key]) => [key, pricing[key] ?? ""])),
+    thinkingFormatOverride: capabilities.thinkingFormatOverride ?? "",
+    thinkingLevels: Array.isArray(capabilities.thinkingLevels) ? capabilities.thinkingLevels.join(", ") : "",
+    thinkingCanDisable: capabilities.thinkingCanDisable === true ? "yes" : capabilities.thinkingCanDisable === false ? "no" : "inherit",
   };
 }
 
@@ -100,16 +115,25 @@ export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSa
       return;
     }
     setError("");
+    const levels = form.thinkingLevels
+      .split(",")
+      .map((level) => level.trim())
+      .filter(Boolean);
     await onSave({
       id: form.id,
       provider,
       pattern,
       matchType: form.matchType,
       name: editing ? (form.name.trim() || null) : null,
-      capabilities: Object.fromEntries(Object.entries(form.capabilities).map(([key, value]) => [
-        key,
-        value === "inherit" ? null : value === "yes",
-      ])),
+      capabilities: {
+        ...Object.fromEntries(Object.entries(form.capabilities).map(([key, value]) => [
+          key,
+          value === "inherit" ? null : value === "yes",
+        ])),
+        thinkingFormatOverride: form.thinkingFormatOverride || null,
+        thinkingCanDisable: form.thinkingCanDisable === "inherit" ? null : form.thinkingCanDisable === "yes",
+        ...(levels.length ? { thinkingLevels: levels } : {}),
+      },
       contextWindow: toNumber(form.contextWindow),
       maxOutput: toNumber(form.maxOutput),
       pricing: Object.fromEntries(Object.entries(form.pricing).map(([key, value]) => [key, toNumber(value)])),
@@ -141,6 +165,18 @@ export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSa
             {BOOLEAN_FIELDS.map(([key, label]) => (
               <Select key={key} label={label} value={form.capabilities[key]} onChange={(event) => updateCapability(key, event.target.value)} options={TRI_STATE_OPTIONS} />
             ))}
+          </div>
+        </fieldset>
+
+        <fieldset>
+          <legend className="mb-1 text-sm font-semibold">Thinking</legend>
+          <p className="mb-3 text-xs text-text-muted">
+            Overrides the provider&apos;s default thinking wire format and the levels the model picker offers. Applies to models matching this pattern.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <Select label="Format" value={form.thinkingFormatOverride} onChange={(event) => update("thinkingFormatOverride", event.target.value)} options={THINKING_FORMAT_OPTIONS} />
+            <Select label="Can be disabled" value={form.thinkingCanDisable} onChange={(event) => update("thinkingCanDisable", event.target.value)} options={TRI_STATE_OPTIONS} />
+            <Input label="Levels" value={form.thinkingLevels} onChange={(event) => update("thinkingLevels", event.target.value)} placeholder="low, medium, high" />
           </div>
         </fieldset>
 

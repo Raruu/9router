@@ -108,9 +108,15 @@ export const captureThinking = extractThinking;
 const NATIVE_ONLY_FORMATS = new Set(["gemini-level", "gemini-budget", "claude-budget", "claude-adaptive", "kiro"]);
 
 function resolveFormat(targetFormat, model, provider) {
+  const caps = getCapabilitiesForModel(provider, model);
+  // An explicit user-catalog override (Model Catalog → thinking format) is an
+  // assertion about this endpoint's wire, so it beats both the registry
+  // transport contract and the native-only guard. Distinct from
+  // caps.thinkingFormat, which tables also use for display and which must keep
+  // losing to the registry (gateways intentionally declare "openai" there).
+  if (caps.thinkingFormatOverride) return caps.thinkingFormatOverride;
   const providerFmt = provider ? PROVIDERS[provider]?.thinkingFormat : null;
   if (providerFmt) return providerFmt;
-  const caps = getCapabilitiesForModel(provider, model);
   const isOpenAIWire = targetFormat === "openai" || targetFormat === "openai-responses";
   if (caps.thinkingFormat && !(isOpenAIWire && NATIVE_ONLY_FORMATS.has(caps.thinkingFormat))) {
     return caps.thinkingFormat;

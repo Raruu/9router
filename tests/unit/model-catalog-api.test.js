@@ -51,6 +51,37 @@ describe("model catalog API backend", () => {
     expect(catalog.hardcoded.some((row) => row.type === "Pattern")).toBe(true);
   });
 
+  it("round-trips thinking overrides and rejects unknown formats", async () => {
+    const backend = await import("../../src/app/api/models/catalog/_backend.js");
+    const entry = backend.validateUserEntry({
+      provider: "acme",
+      pattern: "glm-*",
+      matchType: "glob",
+      capabilities: {
+        reasoning: true,
+        thinkingCanDisable: false,
+        thinkingFormatOverride: "zai",
+        thinkingLevels: ["low", "high", "low"],
+      },
+    });
+
+    await backend.saveUserEntry(entry);
+    const catalog = await backend.getCatalog();
+    expect(catalog.userDefined[0].capabilities).toMatchObject({
+      reasoning: true,
+      thinkingCanDisable: false,
+      thinkingFormatOverride: "zai",
+      thinkingLevels: ["low", "high"],
+    });
+
+    expect(() => backend.validateUserEntry({
+      provider: "acme",
+      pattern: "glm-*",
+      matchType: "glob",
+      capabilities: { thinkingFormatOverride: "not-a-format" },
+    })).toThrow(/thinking format/i);
+  });
+
   it("normalizes and atomically stores OpenRouter models", async () => {
     const backend = await import("../../src/app/api/models/catalog/_backend.js");
     const result = await backend.replaceOpenRouter([

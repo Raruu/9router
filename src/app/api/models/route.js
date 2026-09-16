@@ -1,15 +1,37 @@
 import { NextResponse } from "next/server";
-import { getModelAliases, setModelAlias, getCustomModels } from "@/models";
+import { getModelAliases, setModelAlias, getCustomModels, getProviderConnections, getProviderNodes } from "@/models";
 import { getDisabledModels } from "@/lib/disabledModelsDb";
 import { AI_MODELS } from "@/shared/constants/config";
 import { getProviderAlias } from "@/shared/constants/providers";
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 
 // GET /api/models - Get models with aliases
 export async function GET() {
   try {
     const modelAliases = await getModelAliases();
     const disabled = await getDisabledModels();
+    // Compatible nodes are picked and stored under their display prefix
+    // ("qwen-3.8/glm-5.3-flash") while capabilities are keyed by the raw node
+    // id ("openai-compatible-chat-<uuid>"). Without the prefix form the client
+    // lookup misses and combo badges fall back to a global id map that can
+    // serve another provider's capabilities.
+    const [providerNodes, connections] = await Promise.all([
+      getProviderNodes().catch(() => []),
+      getProviderConnections().catch(() => []),
+    ]);
+    const prefixByProvider = new Map();
+    for (const node of providerNodes) {
+      if (node?.id && typeof node.prefix === "string" && node.prefix.trim()) {
+        prefixByProvider.set(node.id, node.prefix.trim());
+      }
+    }
+    for (const conn of connections) {
+      const prefix = conn?.providerSpecificData?.prefix;
+      if (conn?.provider && typeof prefix === "string" && prefix.trim()) {
+        prefixByProvider.set(conn.provider, prefix.trim());
+      }
+    }
 
     const models = AI_MODELS
       .filter((m) => {
@@ -22,12 +44,14 @@ export async function GET() {
         const providerAlias = getProviderAlias(m.provider) || m.provider;
         const routedModel = `${providerAlias}/${m.model}`;
         const c = getCapabilitiesForModel(m.provider, m.model);
+        const levels = getThinkingLevels(m.provider, m.model, c);
         return {
           ...m,
           fullModel,
           routedModel,
           alias: modelAliases[fullModel] || m.model,
           caps: c,
+          ...(levels ? { thinkingLevels: levels } : {}),
         };
       });
 
@@ -40,14 +64,19 @@ export async function GET() {
     for (const m of customModels) {
       const fullModel = `${m.providerAlias}/${m.id}`;
       const c = getCapabilitiesForModel(m.providerAlias, m.id);
+      const levels = getThinkingLevels(m.providerAlias, m.id, c);
+      const prefix = prefixByProvider.get(m.providerAlias);
+      const prefixModel = prefix ? `${prefix}/${m.id}` : null;
       models.push({
         provider: m.providerAlias,
         model: m.id,
         name: m.name || m.id,
         fullModel,
         routedModel: fullModel,
+        ...(prefixModel && prefixModel !== fullModel ? { prefixModel } : {}),
         alias: modelAliases[fullModel] || m.id,
         caps: c,
+        ...(levels ? { thinkingLevels: levels } : {}),
       });
     }
 

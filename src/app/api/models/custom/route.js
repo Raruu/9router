@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getCustomModels, addCustomModel, deleteCustomModel, setCustomModelLocked, clearProviderModels } from "@/models";
 import { CAPACITY_META } from "@/shared/constants/models";
+import { THINKING_FORMATS, sanitizeThinkingLevels } from "@/lib/modelCatalog/validation.js";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +12,13 @@ function sanitizeCaps(caps) {
   for (const key of Object.keys(CAPACITY_META)) {
     if (typeof caps[key] === "boolean") clean[key] = caps[key];
   }
+  // Thinking overrides are opt-in and validated against the translator's list.
+  if (typeof caps.thinkingCanDisable === "boolean") clean.thinkingCanDisable = caps.thinkingCanDisable;
+  if (typeof caps.thinkingFormatOverride === "string" && THINKING_FORMATS.includes(caps.thinkingFormatOverride)) {
+    clean.thinkingFormatOverride = caps.thinkingFormatOverride;
+  }
+  const levels = sanitizeThinkingLevels(caps.thinkingLevels);
+  if (levels.length) clean.thinkingLevels = levels;
   return Object.keys(clean).length ? clean : null;
 }
 

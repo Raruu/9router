@@ -45,22 +45,39 @@ function matchingCustomModels(customModels, provider, model, normalizeProviderId
       && (String(entry.id) === String(model) || String(entry.id) === terminal));
 }
 
+// Resolve the source rule a catalog ref points at. Both halves compare
+// case-insensitively, matching findUserRuleCaseInsensitive and
+// matchCatalogPattern — a case-only difference must not silently unpin a model.
+function findReferencedRule(sources, ref) {
+  const provider = String(ref.provider || "*").toLowerCase();
+  const pattern = String(ref.pattern || "").toLowerCase();
+  return sources[ref.source]?.find(
+    (candidate) =>
+      String(candidate.provider || "*").toLowerCase() === provider
+      && String(candidate.pattern || "").toLowerCase() === pattern,
+  );
+}
+
 function referencedData(customModels, sources, field) {
   return customModels.reduce((out, entry) => {
     const ref = entry.catalogRef;
     if (!ref) return { ...out, ...(field === "capabilities" ? (entry.capabilities || entry.caps || {}) : {}) };
-    const rule = sources[ref.source]?.find((candidate) =>
-      candidate.provider === String(ref.provider || "*").toLowerCase()
-        && candidate.pattern === ref.pattern);
-    return { ...out, ...(rule?.data?.[field] || {}) };
+    return { ...out, ...(findReferencedRule(sources, ref)?.data?.[field] || {}) };
   }, {});
 }
 
 function customMetadata(customModels, sources, provider, model, field, normalizeProviderId) {
   const matched = matchingCustomModels(customModels, provider, model, normalizeProviderId);
+  const data = referencedData(matched, sources, field);
+  // Suppress the lower-priority chain only when a PIN resolved to real data.
+  // A dangling ref (rule deleted, OpenRouter catalog refetched/cleared) or a
+  // rule that carries nothing for this field used to set hasReference with an
+  // empty payload, which replaced the entire chain — including the hand-written
+  // tables — with DEFAULT_CAPABILITIES, erasing vision/reasoning/context.
+  const pinned = referencedData(matched.filter((entry) => entry.catalogRef), sources, field);
   return {
-    hasReference: matched.some((entry) => Boolean(entry.catalogRef)),
-    data: referencedData(matched, sources, field),
+    hasReference: Object.keys(pinned).length > 0,
+    data,
   };
 }
 

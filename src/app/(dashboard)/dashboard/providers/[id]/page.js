@@ -81,7 +81,7 @@ export default function ProviderDetailPage() {
   const params = useParams();
   const router = useRouter();
   const providerId = params.id;
-  const { getCaps } = useModelCaps();
+  const { getCaps, getLevels } = useModelCaps();
   const [connections, setConnections] = useState([]);
   const [loading, setLoading] = useState(true);
   const [providerNode, setProviderNode] = useState(null);
@@ -227,10 +227,14 @@ export default function ProviderDetailPage() {
     : providerId === "kimi" ? "Kimi API Key"
     : providerId === "qoder" ? "PAT"
     : "API Key";
+  // Thinking levels resolved server-side (which can see the model catalog);
+  // the local getThinkingLevels runs in the browser where a user pattern is
+  // invisible, so prefer the server value for compatible nodes and custom models.
+  const serverThinkingLevels = (modelId) => getLevels(`${providerStorageAlias}/${modelId}`);
   // Resolve suffix "(level)" for a model when a thinking level is picked and the model supports it.
   const resolveThinkingSuffix = (modelId) => {
     if (!thinkingMode || thinkingMode === "auto") return null;
-    const levels = getThinkingLevels(providerId, modelId);
+    const levels = serverThinkingLevels(modelId) || getThinkingLevels(providerId, modelId);
     return levels && levels.includes(thinkingMode) ? thinkingMode : null;
   };
   const providerStorageAlias = isCompatible ? providerId : providerAlias;
@@ -242,7 +246,7 @@ export default function ProviderDetailPage() {
     const addLevels = (modelId) => {
       if (!modelId || seen.has(modelId)) return;
       seen.add(modelId);
-      const lv = getThinkingLevels(providerId, modelId);
+      const lv = serverThinkingLevels(modelId) || getThinkingLevels(providerId, modelId);
       if (lv) lv.forEach((l) => { if (l !== "none") set.add(l); });
     };
     for (const m of models) addLevels(m.id);
