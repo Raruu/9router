@@ -1,3 +1,41 @@
+# v0.5.75-3 (2026-09-16)
+
+## Features
+- **Providers**: model import now opens a selection dialog with an optional
+  provider-scoped capability snapshot into the Model Catalog (pinned via
+  `catalogRef`), instead of auto-adding every returned model
+- **Providers**: Clear Models offers All / Only-unused — unused means not
+  referenced by any combo, alias, mitm target, pricing override, capacity list
+  or disabled entry, with locked rows always kept. Non-custom providers gain
+  Add / Import (config-gated) / Clear Custom like compatible nodes, and the
+  duplicate inline Add Model and provider import chips were removed from the
+  model list since the card header already carries them
+- **Model Catalog**: User Defined rules can now override thinking — the wire
+  format, whether thinking can be disabled, and an explicit level list — and
+  the translator honours the format override ahead of the provider registry.
+  Entries scoped to a custom node display its prefix instead of the generated
+  id, and Clear Unused removes rules that are no longer pinned or referenced,
+  previewing the exact entries first
+- **Console Log**: combo same-member retry and cooldown waits are marked with
+  ↻ plus the attempt count and a humanized wait
+
+## Fixes
+- **Usage**: Cached Tokens no longer reads 0 on 7D/30D/60D — the daily rollup
+  never accumulated the day-level total, and rows written before the fix now
+  fall back to their per-provider sum
+- **Providers**: a dangling or data-less Model Catalog pin no longer wipes a
+  model's capabilities (vision/reasoning badges and thinking levels
+  disappeared); resolution falls back to the normal chain instead. Capabilities
+  for compatible nodes also resolve under the display prefix, and the client no
+  longer lets a bare model id serve another provider's capabilities
+- **Logging**: provider error lines are a single 502/status summary again; full
+  stack traces moved to `LOG_LEVEL=debug`
+
+## Improvements
+- **Logging**: per-request console lines — request, errors, stream status, token
+  refresh, proxy and the auth model lock — show the custom provider prefix when
+  available; stored keys keep the raw provider id
+
 # v0.5.75-2 (2026-09-14)
 
 ## Features
