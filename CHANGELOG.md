@@ -1,3 +1,32 @@
+# v0.5.75-4 (2026-09-17)
+
+## Features
+- **Providers**: Import Models from /models can now map non-standard payloads
+  (context_window, vision, reasoning, input_idr_per_1m, …) into
+  provider-scoped catalog rules — fields are auto-detected from the response,
+  editable before importing, with per-1K scaling and an editable IDR→USD rate.
+  The "Save capabilities to Model Catalog" option is now opt-in (off by
+  default). On wide screens the dialog expands sideways with the mapping panel
+  beside the model list, and its fields scroll independently instead of the
+  whole dialog body
+
+## Fixes
+- **Translator**: Claude → OpenAI no longer emits literal `<think>` / `</think>`
+  content deltas around reasoning — clients that render `reasoning_content`
+  printed the tags as visible text, and adaptive thinking could wrap nothing and
+  prepend a bare `<think></think>` pair to every reply at `reasoning_effort >=
+  low`. Based on #4063 by @loup-peluso
+- **Translator**: OpenAI Responses conversions preserve images returned inside
+  tool results — they were JSON-stringified into the `function_call_output`
+  instead of entering the visual input path; each image now travels as an
+  `input_image` part in a user-role message after its tool output. Based on
+  #3867 by @Jordannst
+- **Model picker**: searching a provider name (or a compatible node's prefix)
+  keeps that provider's full model list instead of showing the provider header
+  with no models to pick
+- **Model Catalog**: user-defined rows scoped to a compatible node display the
+  node's prefix rather than the raw `openai-compatible-chat-<uuid>`
+
 # v0.5.75-3 (2026-09-16)
 
 ## Features
