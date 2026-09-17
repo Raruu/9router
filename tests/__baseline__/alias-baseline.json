@@ -116,7 +116,9 @@
     "devin": "devin",
     "devin-cli": "devin-cli",
     "morph": "morph",
-    "morphllm": "morph"
+    "morphllm": "morph",
+    "fb": "freebuff",
+    "freebuff": "freebuff"
   },
   "idToAlias": {
     "alicode": "alicode",
@@ -149,6 +151,7 @@
     "deepseek": "deepseek",
     "featherless": "featherless",
     "fireworks": "fireworks",
+    "freebuff": "fb",
     "gemini": "gemini",
     "gemini-cli": "gc",
     "github": "gh",
@@ -232,6 +235,7 @@
     "edge-tts",
     "elevenlabs-tts-models",
     "fal-ai",
+    "fb",
     "featherless",
     "fireworks",
     "gc",

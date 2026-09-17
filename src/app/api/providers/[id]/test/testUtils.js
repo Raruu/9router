@@ -17,6 +17,7 @@ import {
   CLINE_CONFIG,
   KILOCODE_CONFIG,
   KIMCHI_CONFIG,
+  FREEBUFF_CONFIG,
 } from "@/lib/oauth/constants/oauth";
 import { buildClineHeaders } from "@/shared/utils/clineAuth";
 
@@ -92,6 +93,23 @@ const OAUTH_TEST_CONFIG = {
     authPrefix: "Bearer ",
   },
   "codebuddy-cn": { tokenExists: true },
+  freebuff: {
+    // Session lease probe: 200 (active/queued) and 409 (already leased) both
+    // prove the token; 401/403 are hard failures. Tokens never refresh.
+    url: FREEBUFF_CONFIG.sessionUrl,
+    method: "POST",
+    authHeader: "Authorization",
+    authPrefix: "Bearer ",
+    extraHeaders: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      "User-Agent": "codebuff/0.1.0 (darwin-arm64)",
+      "x-freebuff-model": "deepseek/deepseek-v4-flash",
+    },
+    body: "{}",
+    acceptStatuses: [409],
+    refreshable: false,
+  },
   kimchi: {
     url: KIMCHI_CONFIG.validationUrl || "https://api.cast.ai/v1/llm/openai/supported-providers",
     method: "GET",

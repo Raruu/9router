@@ -22,6 +22,7 @@ import clinepass from "./clinepass.js";
 import gitlab from "./gitlab.js";
 import codebuddyCn from "./codebuddy-cn.js";
 import codebuddyIntl from "./codebuddy-intl.js";
+import freebuff from "./freebuff.js";
 import kimchi from "./kimchi.js";
 import trae from "./trae.js";
 import windsurf from "./windsurf.js";
@@ -47,6 +48,7 @@ const PROVIDERS = {
   gitlab,
   "codebuddy-cn": codebuddyCn,
   "codebuddy-intl": codebuddyIntl,
+  freebuff,
   kimchi,
   trae,
   windsurf,

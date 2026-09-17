@@ -45,6 +45,8 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
   const [polling, setPolling] = useState(false);
   // trae/windsurf: choose between browser OAuth (proxy) and paste-token (import)
   const [authMode, setAuthMode] = useState("browser"); // "browser" | "paste-token"
+  // freebuff: free tier (freebuff.com) vs paid Codebuff (codebuff.com)
+  const [freebuffMode, setFreebuffMode] = useState("freebuff"); // "freebuff" | "codebuff"
   const [pasteToken, setPasteToken] = useState("");
   const [ideStatus, setIdeStatus] = useState(null);
   const popupRef = useRef(null);
@@ -211,8 +213,13 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
   }, []);
 
   // Start OAuth flow
-  const startOAuthFlow = useCallback(async () => {
+  const startOAuthFlow = useCallback(async (freebuffModeOverride) => {
     if (!provider) return;
+    // Freebuff picks the tier first; Continue re-enters with an explicit mode.
+    if (provider === "freebuff" && !freebuffModeOverride) {
+      setStep("select_mode");
+      return;
+    }
     try {
       setError(null);
 
@@ -234,6 +241,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
         "codebuddy-intl",
         "qoder",
         "grok-cli",
+        "freebuff",
       ];
       if (deviceCodeProviders.includes(provider)) {
         setIsDeviceCode(true);
@@ -246,6 +254,8 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
             deviceCodeUrl.searchParams.set("region", idcConfig.region);
           }
           deviceCodeUrl.searchParams.set("auth_method", "idc");
+        } else if (provider === "freebuff") {
+          deviceCodeUrl.searchParams.set("auth_method", freebuffModeOverride || freebuffMode);
         }
         const res = await fetch(deviceCodeUrl.toString());
         const data = await res.json();
@@ -396,7 +406,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
       setError(err.message);
       setStep("error");
     }
-  }, [provider, isLocalhost, startPolling, oauthMeta, idcConfig, authMode, startProxyFlow]);
+  }, [provider, isLocalhost, startPolling, oauthMeta, idcConfig, authMode, startProxyFlow, freebuffMode]);
 
   // Reset state and start OAuth when modal opens
   useEffect(() => {
@@ -413,6 +423,7 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
       setAuthMode("browser");
       setPasteToken("");
       setIdeStatus(null);
+      setFreebuffMode("freebuff");
       pollingAbortRef.current = false;
       // Best-effort IDE detection for paste-token providers (Trae/Windsurf)
       if (PASTE_TOKEN_PROVIDERS[provider]) {
@@ -682,6 +693,62 @@ export default function OAuthModal({ isOpen, provider, providerInfo, onSuccess, 
   return (
     <Modal isOpen={isOpen} title={modalTitle} onClose={handleClose} size="lg">
       <div className="flex flex-col gap-4">
+        {/* Freebuff: pick free tier vs paid Codebuff before starting the device flow */}
+        {provider === "freebuff" && step === "select_mode" && (
+          <div className="flex flex-col gap-6 py-2">
+            <p className="text-center text-sm text-text-muted">
+              Choose the ad-supported free tier or your paid Codebuff subscription.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {[
+                {
+                  id: "freebuff",
+                  icon: "bolt",
+                  title: "Freebuff (Free)",
+                  description:
+                    "Ad-supported public free tier. DeepSeek V4 Flash everywhere; the full open-model set in full-access regions. Consider using the official Freebuff CLI too — ads support the creator.",
+                },
+                {
+                  id: "codebuff",
+                  icon: "workspace_premium",
+                  title: "Codebuff (Paid/Pro)",
+                  description:
+                    "Priority access through your personal Codebuff subscription; the login token is bound to your Codebuff account.",
+                },
+              ].map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => setFreebuffMode(option.id)}
+                  className={`rounded-xl border p-5 text-center transition-colors ${
+                    freebuffMode === option.id
+                      ? "border-primary bg-primary/10"
+                      : "border-border bg-sidebar/50 hover:border-primary/60"
+                  }`}
+                >
+                  <span
+                    className={`material-symbols-outlined text-2xl ${
+                      freebuffMode === option.id ? "text-primary" : "text-text-muted"
+                    }`}
+                  >
+                    {option.icon}
+                  </span>
+                  <h4 className="mt-2 text-base font-semibold">{option.title}</h4>
+                  <p className="mt-1 text-xs leading-relaxed text-text-muted">{option.description}</p>
+                </button>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <Button onClick={() => startOAuthFlow(freebuffMode)} fullWidth>
+                Continue
+              </Button>
+              <Button onClick={handleClose} variant="ghost" fullWidth>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Trae/Windsurf: browser OAuth (proxy) + paste-token fallback */}
         {PROXY_OAUTH_PROVIDERS.has(provider) && (step === "waiting" || step === "input" || step === "error") && (
           <>

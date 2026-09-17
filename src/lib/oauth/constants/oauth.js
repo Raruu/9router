@@ -117,6 +117,18 @@ export const CODEBUDDY_CONFIG = { ...PROVIDER_OAUTH["codebuddy-cn"] };
 // CodeBuddy International — same shape as CN, .ai domain (mirror of codebuddy-cn).
 export const CODEBUDDY_INTL_CONFIG = { ...PROVIDER_OAUTH["codebuddy-intl"] };
 
+// Freebuff / Codebuff CLI device-auth (unofficial). The free tier logs in at
+// freebuff.com; paid Codebuff subscriptions log in at codebuff.com — the token
+// from either is a Codebuff auth token. Consumed by
+// src/lib/oauth/providers/freebuff.js (see also open-sse/executors/freebuff.js).
+export const FREEBUFF_CONFIG = {
+  freeCodeUrl: "https://freebuff.com/api/auth/cli/code",
+  freeStatusUrl: "https://freebuff.com/api/auth/cli/status",
+  paidCodeUrl: "https://www.codebuff.com/api/auth/cli/code",
+  paidStatusUrl: "https://www.codebuff.com/api/auth/cli/status",
+  sessionUrl: "https://www.codebuff.com/api/v1/freebuff/session",
+};
+
 // Kimchi OAuth Configuration (Browser token callback flow)
 export const KIMCHI_CONFIG = { ...PROVIDER_OAUTH["kimchi"] };
 
@@ -233,6 +245,7 @@ export const PROVIDERS = {
   GITLAB: "gitlab",
   CODEBUDDY: "codebuddy-cn",
   CODEBUDDY_INTL: "codebuddy-intl",
+  FREEBUFF: "freebuff",
   KIMCHI: "kimchi",
   GROK_CLI: "grok-cli",
   TRAE: "trae",
