@@ -1,3 +1,75 @@
+# v0.5.81-1 (2026-09-18)
+
+Merged upstream v0.5.81 (plus the post-release changelog header fix) into the
+fork. This section includes the full upstream release notes and the fork-side
+merge work. The fork's OpenCode Free fingerprint implementation (merged
+earlier as #4132) is superseded by upstream's evolved version of the same fix
+by the same author — upstream's file wins wholesale.
+
+## Features
+- **Xiaomi MiMo**: merge MiMo Desktop support into `xiaomi-mimo` with dual auth
+  (API key + Desktop/OAuth session), Preview models support, and
+  encrypted-callback OAuth flow
+- **Claude Code**: add 1M-context toggle (`[1m]` marker) and drive
+  `CLAUDE_CODE_AUTO_COMPACT_WINDOW` directly from the dashboard
+- **Models**: add DeepSeek-V4.1-Flash to DeepSeek provider, CodeBuddy-Intl, and
+  Ollama (`deepseek-v4.1-flash:cloud`); enable `low`..`max` reasoning effort
+  levels and vision capability for DeepSeek-V4.*
+- **i18n**: integrate Persian (fa) translation
+
+## Fixes
+- **OpenCode / OpenCode Go**: resolve 403 `FreeTierError` and 429 rate limits
+  with canonical session format, valid User-Agent, and stable upstream session
+  reuse (one long-lived session per downstream identity, evicted by
+  `sessionTtlMs`); force stream and declare `forceStream` for free-tier SSE
+  aggregation; cloak decoy `bash`/`read` tools, normalize Muse Free tool choice,
+  and strip prior reasoning items on Responses models; route Union Alpha via
+  Messages API; route every responses-only model (incl. thinking variants) to
+  `/responses`
+- **Kiro**: preserve underscores in tool names (`mcp__server__tool`) and
+  restore client tool names in responses; use neutral placeholder for
+  tool-result-only turns; forward tool-result images to OpenAI and Kiro
+  upstreams via following user messages
+- **Stream**: report aborts after HTTP 200 in-band (per-format error frames:
+  OpenAI `data: {"error":…}` + `[DONE]`, Anthropic `event: error`) instead of
+  closing silently — merged alongside the fork's first-chunk timeout and
+  per-provider timeout overrides
+- **Command Code**: preserve images and `reasoning_effort` on `/alpha/generate`;
+  retry transient stream errors and avoid fake stop chunks (mid-stream errors
+  throw instead of emitting fake content + `finish_reason: "stop"`); add Quota
+  Tracker support
+- **Zed**: harden OAuth lifecycle (preserve `systemId`, renew proxy timeout),
+  support live model resolution, and lower display priority in OAuth list
+- **Antigravity**: scope cached thought signatures to model family; strip
+  Claude Code billing headers from system prompts; sanitize Hermes system
+  identity
+- **Codex**: route bare `codex-auto-review` requests to the Codex provider
+  (#4135)
+- **Auth**: do not cool down an account for request-scoped 4xx errors
+- **Usage**: improve DeepSeek credit balance display as currency credit instead
+  of 0/total quota bar
+- **Model Catalog**: scope synced catalog to gateways (modality keys are now
+  `provider:model`, upgrade to catalog format v2 with automatic rebuild of
+  older schemas) and declare vision capabilities for DeepSeek V4.1-Flash IDs
+
+## Fork merge notes
+- Conflict resolutions kept both sides where features coexist:
+  `streamingHandler.js` (first-chunk timeout + per-provider overrides + in-band
+  abort frames), `capabilities.js` (resolver `getCapabilities` source used by
+  the fork's catalog dashboard + upstream's globalThis catalog source),
+  `thinkingUnified.js` (user-catalog `thinkingFormatOverride` + level clamping
+  + upstream's commandcode format and `display` preservation), and
+  `sync.js` (upstream's v2 build/version gating + fork's
+  `getHardcodedCapabilitiesForModel` snapshot so the resolver source is not
+  detached during sync)
+- `src/lib/modelCatalog/runtime.js` updated for the provider-scoped
+  `getCatalogModalities(provider, model)` signature
+- Fixed a latent fork bug in `getSyncState()` that referenced an undefined
+  `OPENROUTER_CATALOG_URL` (threw on `/api/models/catalog-sync`)
+- Test markers whose bugs this merge fixed were flipped from `it.fails` to
+  regular tests (tool-result images), and stale upstream expectations aligned
+  (`mediaType` on CommandCode image blocks, CommandCode error events now throw)
+
 # v0.5.75-5 (2026-09-18)
 
 ## Features
