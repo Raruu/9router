@@ -38,6 +38,15 @@ cd tests && npm install                 # then tests' own deps (vitest) → test
 npx vitest run                          # all tests; auto-discovers tests/vitest.config.js
 npx vitest run unit/capabilities.test.js   # single file (path relative to tests/)
 ```
+> **Always run the full suite with an isolated DB:**
+> `DATA_DIR=$(mktemp -d) npx vitest run unit/` — several suites seed **real
+> connections** through `createProviderConnection` and write into whatever
+> `DATA_DIR` points at. Without the override they pollute the live
+> `~/.9router/db/data.sqlite` (this happened once: 19 junk zed/kimchi-nope rows
+> from `unit/zed-live-models.test.js` and `unit/zed-native-auth.test.js`).
+> `db-concurrent`, `db-benchmark`, `db-sqlite-vs-lowdb`, `provider-combo-retries`,
+> and `provider-node-type-switch` isolate themselves; the zed tests do not.
+>
 > The committed `tests/package.json` `test` script hardcodes Unix paths (`NODE_PATH=/tmp/node_modules …`) — a shared-install workaround from upstream. On Windows (or anywhere), ignore it and use the `npx vitest` form above; `vitest.config.js` resolves the `open-sse`/`@/` aliases from the repo root regardless of where vitest lives.
 >
 > **The suite is NOT expected to be all-green on a plain checkout.** ~938 pass, ~64 fail. Judge regressions with `tests/__baseline__/verify-no-regression.mjs`, not a raw run. Expected red:
