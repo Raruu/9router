@@ -21,7 +21,7 @@ function loadCustomModels(db) {
 }
 
 function modelsDevCapabilities(provider, model) {
-  return { ...(getCatalogModalities(model) || {}), ...(getCatalogLimits(provider, model) || {}) };
+  return { ...(getCatalogModalities(provider, model) || {}), ...(getCatalogLimits(provider, model) || {}) };
 }
 
 export async function refreshModelCatalogRuntime() {
