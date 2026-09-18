@@ -8,7 +8,7 @@ import CapacityBadges from "./CapacityBadges";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, AI_PROVIDERS, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, getProviderAlias } from "@/shared/constants/providers";
-import { getCustomProviderIconSrc, getProviderIconSrcForId } from "@/shared/utils/providerIcon";
+import { getProviderIconSrcForNode } from "@/shared/utils/providerIcon";
 import { filterModelSelectGroups } from "@/shared/utils/modelSelectFilter";
 
 // Provider order: OAuth first, then Free Tier, then API Key (matches dashboard/providers)
@@ -545,7 +545,7 @@ export default function ModelSelectModal({
             {/* Provider header */}
             <div className="flex items-center gap-1.5 mb-1.5 sticky top-0 bg-surface py-0.5">
               <ProviderIcon
-                src={getCustomProviderIconSrc(providerId, group.iconVersion) || getProviderIconSrcForId(providerId)}
+                src={getProviderIconSrcForNode(providerId, group.iconVersion, group.apiType)}
                 alt={group.name}
                 size={14}
                 fallbackText={(group.name || providerId).slice(0, 2).toUpperCase()}

@@ -67,6 +67,11 @@ export function getCustomProviderIconSrc(providerId, iconVersion) {
   return `/api/provider-nodes/${encodeURIComponent(providerId)}/icon?v=${encodeURIComponent(iconVersion)}`;
 }
 
+/** Uploaded icon → generic compatible-node asset → registry asset. */
+export function getProviderIconSrcForNode(providerId, iconVersion, apiType) {
+  return getCustomProviderIconSrc(providerId, iconVersion) || getProviderIconSrcForId(providerId, apiType);
+}
+
 /** Call from img onError so later mounts skip the request. */
 export function markProviderIconMissing(providerId) {
   const id = normalizeId(providerId);
