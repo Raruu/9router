@@ -1,3 +1,24 @@
+# v0.5.75-5 (2026-09-18)
+
+## Features
+- **Providers**: Import Models from /models gains a search field above the model
+  list — filters by id as you type, and All / None apply to the filtered rows,
+  so "search then All" selects the matches without touching hidden models
+
+## Fixes
+- **Provider Icons**: custom uploaded icons and the generic compatible-node
+  icons now render in the usage topology graph, the quota cards, and the model
+  picker and detail modals — every surface resolves through one helper
+  (uploaded → generic compatible → registry asset) instead of hand-rolled
+  pairs, and the graph no longer drops the node's icon version on the way in
+- **OpenCode Free**: requests no longer 403 with `FreeTierError` — the upstream
+  gate fingerprints the official client on streaming plus the
+  {bash, glob, grep, read} tool quartet, so missing tools are appended as no-op
+  declarations and non-stream callers ride the forced-SSE path. Sessions now use
+  the canonical `ses_` shape with a versioned User-Agent, and prior reasoning
+  items are stripped on Muse Spark so `encrypted_content` survives account-pool
+  rotation. Based on #4132 by @anojndr (carries the closed #4105 and #4061)
+
 # v0.5.75-4 (2026-09-17)
 
 ## Features
