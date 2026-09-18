@@ -95,6 +95,7 @@ function collectSourceKeys(entriesById, models) {
 
 export default function ImportModelsDialog({ isOpen, models = [], entriesById = {}, existingIds = [], importing = false, onConfirm, onClose }) {
   const [selected, setSelected] = useState(() => new Set());
+  const [search, setSearch] = useState("");
   const [fetchCapabilities, setFetchCapabilities] = useState(false);
   const [mapping, setMapping] = useState({});
   const [currencyRate, setCurrencyRate] = useState(DEFAULT_IDR_RATE);
@@ -106,6 +107,7 @@ export default function ImportModelsDialog({ isOpen, models = [], entriesById = 
   if (signature !== initializedFor) {
     setInitializedFor(signature);
     setSelected(isOpen ? new Set(models.filter((id) => !existingIds.includes(id))) : new Set());
+    setSearch("");
     setFetchCapabilities(false);
     setMapping(isOpen ? detectImportMapping(models.map((id) => entriesById?.[id])) : {});
     setCurrencyRate(DEFAULT_IDR_RATE);
@@ -120,11 +122,16 @@ export default function ImportModelsDialog({ isOpen, models = [], entriesById = 
     });
   };
 
-  const setAll = (on) => {
-    setSelected(on ? new Set(models.filter((id) => !existingIds.includes(id))) : new Set());
-  };
-
   const available = models.filter((id) => !existingIds.includes(id));
+  const query = search.trim().toLowerCase();
+  const visibleModels = query ? models.filter((id) => id.toLowerCase().includes(query)) : models;
+  // All/None only touch rows the filter is showing, so "search then All" selects
+  // the matches instead of silently re-adding every hidden model.
+  const selectableVisible = visibleModels.filter((id) => !existingIds.includes(id));
+
+  const setAll = (on) => {
+    setSelected(on ? new Set(selectableVisible) : new Set());
+  };
 
   const sourceKeys = collectSourceKeys(entriesById, models);
   const sourceOptions = [
@@ -184,8 +191,16 @@ export default function ImportModelsDialog({ isOpen, models = [], entriesById = 
               </div>
             </div>
 
+            <Input
+              icon="search"
+              placeholder="Search models…"
+              value={search}
+              disabled={importing}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+
             <div className={`max-h-64 overflow-y-auto rounded-lg border border-border p-1 custom-scrollbar${fetchCapabilities ? " lg:max-h-none lg:min-h-0 lg:flex-1" : ""}`}>
-              {models.map((id) => {
+              {visibleModels.map((id) => {
                 const alreadyAdded = existingIds.includes(id);
                 return (
                   <label
@@ -204,8 +219,10 @@ export default function ImportModelsDialog({ isOpen, models = [], entriesById = 
                   </label>
                 );
               })}
-              {models.length === 0 && (
-                <p className="px-2 py-3 text-center text-xs text-text-muted">No models returned.</p>
+              {visibleModels.length === 0 && (
+                <p className="px-2 py-3 text-center text-xs text-text-muted">
+                  {models.length === 0 ? "No models returned." : `No models match “${search.trim()}”.`}
+                </p>
               )}
             </div>
           </div>
