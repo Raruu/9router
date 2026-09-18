@@ -1,3 +1,53 @@
+# v0.5.75-5 (2026-09-18)
+
+## Features
+- **Providers**: Import Models from /models gains a search field above the model
+  list — filters by id as you type, and All / None apply to the filtered rows,
+  so "search then All" selects the matches without touching hidden models
+
+## Fixes
+- **Provider Icons**: custom uploaded icons and the generic compatible-node
+  icons now render in the usage topology graph, the quota cards, and the model
+  picker and detail modals — every surface resolves through one helper
+  (uploaded → generic compatible → registry asset) instead of hand-rolled
+  pairs, and the graph no longer drops the node's icon version on the way in
+- **OpenCode Free**: requests no longer 403 with `FreeTierError` — the upstream
+  gate fingerprints the official client on streaming plus the
+  {bash, glob, grep, read} tool quartet, so missing tools are appended as no-op
+  declarations and non-stream callers ride the forced-SSE path. Sessions now use
+  the canonical `ses_` shape with a versioned User-Agent, and prior reasoning
+  items are stripped on Muse Spark so `encrypted_content` survives account-pool
+  rotation. Based on #4132 by @anojndr (carries the closed #4105 and #4061)
+
+# v0.5.75-4 (2026-09-17)
+
+## Features
+- **Providers**: Import Models from /models can now map non-standard payloads
+  (context_window, vision, reasoning, input_idr_per_1m, …) into
+  provider-scoped catalog rules — fields are auto-detected from the response,
+  editable before importing, with per-1K scaling and an editable IDR→USD rate.
+  The "Save capabilities to Model Catalog" option is now opt-in (off by
+  default). On wide screens the dialog expands sideways with the mapping panel
+  beside the model list, and its fields scroll independently instead of the
+  whole dialog body
+
+## Fixes
+- **Translator**: Claude → OpenAI no longer emits literal `<think>` / `</think>`
+  content deltas around reasoning — clients that render `reasoning_content`
+  printed the tags as visible text, and adaptive thinking could wrap nothing and
+  prepend a bare `<think></think>` pair to every reply at `reasoning_effort >=
+  low`. Based on #4063 by @loup-peluso
+- **Translator**: OpenAI Responses conversions preserve images returned inside
+  tool results — they were JSON-stringified into the `function_call_output`
+  instead of entering the visual input path; each image now travels as an
+  `input_image` part in a user-role message after its tool output. Based on
+  #3867 by @Jordannst
+- **Model picker**: searching a provider name (or a compatible node's prefix)
+  keeps that provider's full model list instead of showing the provider header
+  with no models to pick
+- **Model Catalog**: user-defined rows scoped to a compatible node display the
+  node's prefix rather than the raw `openai-compatible-chat-<uuid>`
+
 # v0.5.75-3 (2026-09-16)
 
 ## Features

@@ -10,7 +10,7 @@ import {
   Toggle,
 } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
-import { getCustomProviderIconSrc, getProviderIconSrcForId } from "@/shared/utils/providerIcon";
+import { getProviderIconSrcForNode } from "@/shared/utils/providerIcon";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS } from "@/shared/constants/config";
 import {
   FREE_PROVIDERS,
@@ -836,7 +836,7 @@ function ApiKeyProviderCard({
     compatible: "Compatible",
   };
 
-  const getIconPath = () => getCustomProviderIconSrc(provider.id, provider.iconVersion) || getProviderIconSrcForId(provider.id, provider.apiType);
+  const getIconPath = () => getProviderIconSrcForNode(provider.id, provider.iconVersion, provider.apiType);
 
   return (
     <Link href={`/dashboard/providers/${providerId}`} className="group min-w-0">

@@ -46,7 +46,7 @@ export default function CatalogSection({ title, description, icon, actions, rows
             />
           </label>
         </div>
-        <CatalogTable rows={pageRows} emptyText={search ? `No ${title.toLowerCase()} entries match the search.` : emptyText} onEdit={onEdit} onDelete={onDelete} />
+        <CatalogTable rows={pageRows} emptyText={search ? `No ${title.toLowerCase()} entries match the search.` : emptyText} onEdit={onEdit} onDelete={onDelete} providerLabel={providerLabel} />
         <Pagination currentPage={currentPage} pageSize={pageSize} totalItems={filteredRows.length} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }} pageSizeOptions={PAGE_SIZE_OPTIONS} className="pb-0" />
       </Card>
     </section>

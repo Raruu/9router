@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { getCustomProviderIconSrc, getProviderIconSrcForId } from "@/shared/utils/providerIcon";
+import { getProviderIconSrcForNode } from "@/shared/utils/providerIcon";
 import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, XiaomiMimoAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal, ProviderIcon } from "@/shared/components";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
@@ -15,7 +15,7 @@ import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
 import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
 import { filterCombosUsingModel, stripModelsFromComboMembers } from "@/shared/utils/comboMembers";
 import { buildUsedFormSet, flattenReferenceMap, pricingTableForms, capacityAdapterForms, partitionRowsByUsage } from "@/shared/utils/modelUsage";
-import { buildCatalogRuleBody, saveCatalogRule } from "@/shared/utils/importCatalogSnapshot";
+import { buildCatalogRuleBody, buildCatalogRuleBodyFromRaw, saveCatalogRule } from "@/shared/utils/importCatalogSnapshot";
 import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
@@ -107,6 +107,7 @@ export default function ProviderDetailPage() {
   const [importingCompatModels, setImportingCompatModels] = useState(false);
   const [showImportDialog, setShowImportDialog] = useState(false);
   const [importCandidates, setImportCandidates] = useState([]);
+  const [importEntriesById, setImportEntriesById] = useState({});
   const [importExistingIds, setImportExistingIds] = useState([]);
   const [modelsListingSupported, setModelsListingSupported] = useState(false);
   const [clearingModels, setClearingModels] = useState(false);
@@ -1094,15 +1095,18 @@ export default function ProviderDetailPage() {
         return null;
       }
       const ids = [];
+      const entriesById = {};
       for (const model of fetched) {
         const modelId = model.id || model.name || model.model;
-        if (modelId && !ids.includes(modelId)) ids.push(modelId);
+        if (!modelId || ids.includes(modelId)) continue;
+        ids.push(modelId);
+        if (model && typeof model === "object") entriesById[modelId] = model;
       }
       if (ids.length === 0) {
         alert("No models returned from /models.");
         return null;
       }
-      return ids;
+      return { ids, entriesById };
     } catch (error) {
       console.log("Error importing models:", error);
       return null;
@@ -1112,9 +1116,10 @@ export default function ProviderDetailPage() {
   };
 
   const handleImportCompatModels = async () => {
-    const ids = await fetchImportCandidates();
-    if (!ids) return;
-    setImportCandidates(ids);
+    const result = await fetchImportCandidates();
+    if (!result) return;
+    setImportCandidates(result.ids);
+    setImportEntriesById(result.entriesById);
     setImportExistingIds(compatModelRows.map((row) => row.id));
     setShowImportDialog(true);
   };
@@ -1122,13 +1127,14 @@ export default function ProviderDetailPage() {
   // Built-ins import into custom overrides, so registry models also count as
   // "already added" alongside existing overrides.
   const handleImportBuiltinModels = async () => {
-    const ids = await fetchImportCandidates();
-    if (!ids) return;
+    const result = await fetchImportCandidates();
+    if (!result) return;
     const existing = new Set([
       ...builtinCustomRows.map((row) => row.id),
       ...models.filter((m) => { const k = getModelKind(m); return !k || k === "llm"; }).map((m) => m.id),
     ]);
-    setImportCandidates(ids);
+    setImportCandidates(result.ids);
+    setImportEntriesById(result.entriesById);
     setImportExistingIds([...existing]);
     setShowImportDialog(true);
   };
@@ -1138,9 +1144,27 @@ export default function ProviderDetailPage() {
   };
 
   // Snapshot one model's resolved detail into a provider-scoped user catalog
-  // rule, then pin the imported row to it. Best-effort: false on any failure.
-  const snapshotModelToCatalog = async (modelId) => {
+  // rule, then pin the imported row to it. When the import dialog supplied a
+  // field mapping for the raw /models entry, that mapping wins; unmapped models
+  // fall back to the resolved /api/models/detail path. Best-effort: false on
+  // any failure.
+  const snapshotModelToCatalog = async (modelId, rawMapping = null) => {
     try {
+      const provider = providerStorageAlias.toLowerCase();
+      if (rawMapping?.raw) {
+        const body = buildCatalogRuleBodyFromRaw({
+          provider,
+          pattern: modelId,
+          raw: rawMapping.raw,
+          mapping: rawMapping.mapping,
+          currencyRate: rawMapping.currencyRate,
+        });
+        if (body && await saveCatalogRule(body)) {
+          await handleAddCustomModel(modelId, "llm", providerStorageAlias, { source: "user", provider, pattern: modelId }, undefined, true);
+          return true;
+        }
+      }
+
       const prefixes = [providerStorageAlias];
       if (providerDisplayAlias && providerDisplayAlias !== providerStorageAlias) prefixes.push(providerDisplayAlias);
       let detail = null;
@@ -1153,7 +1177,6 @@ export default function ProviderDetailPage() {
         }
       }
       if (!detail) return false;
-      const provider = providerStorageAlias.toLowerCase();
       const body = buildCatalogRuleBody({ provider, pattern: modelId, detail });
       if (!body) return false;
       if (!(await saveCatalogRule(body))) return false;
@@ -1165,7 +1188,7 @@ export default function ProviderDetailPage() {
     }
   };
 
-  const handleConfirmImport = async ({ ids, fetchCapabilities }) => {
+  const handleConfirmImport = async ({ ids, fetchCapabilities, mapping, currencyRate }) => {
     setShowImportDialog(false);
     if (!ids.length) return;
     setImportingCompatModels(true);
@@ -1176,7 +1199,7 @@ export default function ProviderDetailPage() {
         const added = await handleAddCustomModel(modelId, "llm", providerStorageAlias, null, undefined, true);
         if (!added) continue;
         importedCount += 1;
-        if (fetchCapabilities && await snapshotModelToCatalog(modelId)) catalogCount += 1;
+        if (fetchCapabilities && await snapshotModelToCatalog(modelId, { raw: importEntriesById[modelId], mapping, currencyRate })) catalogCount += 1;
       }
       await refreshModelLists();
       if (importedCount === 0) {
@@ -1830,7 +1853,7 @@ export default function ProviderDetailPage() {
   }
 
   // Determine icon path: OpenAI Compatible providers use specialized icons
-  const getHeaderIconPath = () => getCustomProviderIconSrc(providerInfo.id, providerInfo.iconVersion) || getProviderIconSrcForId(providerInfo.id, providerInfo.apiType);
+  const getHeaderIconPath = () => getProviderIconSrcForNode(providerInfo.id, providerInfo.iconVersion, providerInfo.apiType);
 
   return (
     <div className="flex min-w-0 flex-col gap-6 px-1 sm:gap-8 sm:px-0">
@@ -2482,6 +2505,7 @@ export default function ProviderDetailPage() {
       <ImportModelsDialog
         isOpen={showImportDialog}
         models={importCandidates}
+        entriesById={importEntriesById}
         existingIds={importExistingIds}
         importing={importingCompatModels}
         onConfirm={handleConfirmImport}

@@ -6,6 +6,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   getProviderIconSrc,
   getProviderIconSrcForId,
+  getProviderIconSrcForNode,
   getCustomProviderIconSrc,
   markProviderIconMissing,
 } from "@/shared/utils/providerIcon.js";
@@ -61,6 +62,29 @@ describe("getCustomProviderIconSrc", () => {
     expect(getCustomProviderIconSrc("anthropic-compatible-abc", 1)).toBe("/api/provider-nodes/anthropic-compatible-abc/icon?v=1");
     expect(getCustomProviderIconSrc("openai", 1)).toBeNull();
     expect(getCustomProviderIconSrc("openai-compatible-chat-abc", null)).toBeNull();
+  });
+});
+
+describe("getProviderIconSrcForNode — uploaded > generic node > registry", () => {
+  it("prefers the uploaded icon for versioned compatible nodes", () => {
+    expect(getProviderIconSrcForNode("openai-compatible-chat-abc", 123, "chat")).toBe("/api/provider-nodes/openai-compatible-chat-abc/icon?v=123");
+    expect(getProviderIconSrcForNode("anthropic-compatible-abc", 1)).toBe("/api/provider-nodes/anthropic-compatible-abc/icon?v=1");
+  });
+
+  it("falls back to the generic compatible-node icon without an upload", () => {
+    expect(getProviderIconSrcForNode("openai-compatible-chat-abc", null, "chat")).toBe("/providers/oai-cc.png");
+    expect(getProviderIconSrcForNode("openai-compatible-responses-abc")).toBe("/providers/oai-r.png");
+    expect(getProviderIconSrcForNode("anthropic-compatible-abc")).toBe("/providers/anthropic-m.png");
+  });
+
+  it("ignores the upload endpoint for non-compatible ids", () => {
+    expect(getProviderIconSrcForNode("openai", 123)).toBe(getProviderIconSrc("openai"));
+    expect(getProviderIconSrcForNode("kiro")).toBe("/providers/kiro.png");
+  });
+
+  it("handles null/undefined ids", () => {
+    expect(getProviderIconSrcForNode(null)).toBeNull();
+    expect(getProviderIconSrcForNode(undefined)).toBeNull();
   });
 });
 

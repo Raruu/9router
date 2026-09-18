@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import ProviderIcon from "@/shared/components/ProviderIcon";
+import { getProviderIconSrcForNode } from "@/shared/utils/providerIcon";
 import QuotaTable from "./QuotaTable";
 import Toggle from "@/shared/components/Toggle";
 import Tooltip from "@/shared/components/Tooltip";
@@ -837,7 +838,7 @@ export default function ProviderLimits() {
                   </span>
                 ) : (
                   <ProviderIcon
-                    src={`/providers/${providerFilter}.png`}
+                    src={getProviderIconSrcForNode(providerFilter)}
                     alt={providerFilter}
                     size={18}
                     className="size-[18px] rounded object-contain"
@@ -899,7 +900,7 @@ export default function ProviderLimits() {
                         className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm transition-colors ${providerFilter === provider ? "bg-primary/10 text-primary" : "text-text-primary hover:bg-black/5 dark:hover:bg-white/10"}`}
                       >
                         <ProviderIcon
-                          src={`/providers/${provider}.png`}
+                          src={getProviderIconSrcForNode(provider)}
                           alt={provider}
                           size={24}
                           className="size-6 rounded-md object-contain"
@@ -1069,7 +1070,7 @@ export default function ProviderLimits() {
                   <div className="flex items-center gap-2 min-w-0">
                     <div className="w-8 h-8 shrink-0 rounded-md flex items-center justify-center overflow-hidden">
                       <ProviderIcon
-                        src={`/providers/${conn.provider}.png`}
+                        src={getProviderIconSrcForNode(conn.provider)}
                         alt={conn.provider}
                         size={32}
                         className="object-contain"
