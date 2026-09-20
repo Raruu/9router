@@ -2,7 +2,9 @@ import { describe, it, expect, vi } from "vitest";
 import {
   buildCatalogRuleBody,
   buildCatalogRuleBodyFromRaw,
+  collectLeafPaths,
   detectImportMapping,
+  resolvePath,
   saveCatalogRule,
 } from "../../src/shared/utils/importCatalogSnapshot.js";
 
@@ -183,5 +185,91 @@ describe("buildCatalogRuleBodyFromRaw", () => {
     expect(buildCatalogRuleBodyFromRaw({ provider: "a", pattern: "m", raw: {}, mapping })).toBeNull();
     expect(buildCatalogRuleBodyFromRaw({ provider: "a", pattern: "m", raw: agnes, mapping: null })).toBeNull();
     expect(buildCatalogRuleBodyFromRaw({ provider: "a", pattern: "m", raw: null, mapping })).toBeNull();
+  });
+});
+
+// Payload shape some providers use: capability flags and limits are nested
+// rather than flat, so the mapping dropdowns have to reach into them.
+const nested = {
+  id: "nested-1",
+  object: "model",
+  owned_by: "acme",
+  capabilities: { vision: true, audio_input: true, tools: "yes", pdf: false },
+  limits: { context_window: 128000, max_output: 8192 },
+  pricing: { input_usd_per_1m: 0.25, output_usd_per_1m: 1.5, cached_usd_per_1m: 0.05 },
+};
+
+describe("resolvePath", () => {
+  it("walks dotted paths and fails soft on missing or non-object hops", () => {
+    expect(resolvePath({ a: { b: { c: 5 } } }, "a.b.c")).toBe(5);
+    expect(resolvePath({ a: 1 }, "a.b")).toBeUndefined();
+    expect(resolvePath({ a: null }, "a.b")).toBeUndefined();
+    expect(resolvePath({ a: true }, "a")).toBe(true);
+    expect(resolvePath(null, "a")).toBeUndefined();
+    expect(resolvePath({ a: 1 }, "")).toBeUndefined();
+    expect(resolvePath({ a: 1 }, null)).toBeUndefined();
+  });
+});
+
+describe("collectLeafPaths", () => {
+  it("flattens nested scalars to dot-paths in first-seen order", () => {
+    expect(collectLeafPaths([nested])).toEqual([
+      "id", "object", "owned_by",
+      "capabilities.vision", "capabilities.audio_input", "capabilities.tools", "capabilities.pdf",
+      "limits.context_window", "limits.max_output",
+      "pricing.input_usd_per_1m", "pricing.output_usd_per_1m", "pricing.cached_usd_per_1m",
+    ]);
+  });
+
+  it("skips arrays, empty objects and non-object entries", () => {
+    expect(collectLeafPaths([{ a: [1, 2], b: {}, c: true }])).toEqual(["c"]);
+    expect(collectLeafPaths([null, "nope", 5, { a: true }])).toEqual(["a"]);
+  });
+
+  it("unions paths across entries without duplicates", () => {
+    expect(collectLeafPaths([{ a: 1 }, { a: 2, b: 3 }])).toEqual(["a", "b"]);
+    expect(collectLeafPaths([{ vision: true }, { capabilities: { vision: true } }])).toEqual(["vision", "capabilities.vision"]);
+  });
+
+  it("caps nesting depth", () => {
+    expect(collectLeafPaths([{ a: { b: { c: true } } }])).toEqual(["a.b.c"]);
+    expect(collectLeafPaths([{ a: { b: { c: { d: { e: 1 } } } } }])).toEqual([]);
+    expect(collectLeafPaths([{ a: { b: { c: { d: { e: 1 } } } } }], { maxDepth: 5 })).toEqual(["a.b.c.d.e"]);
+  });
+});
+
+describe("nested /models payloads", () => {
+  it("auto-detects capabilities, limits and prices inside containers", () => {
+    const mapping = detectImportMapping([nested]);
+    expect(mapping.caps.vision).toBe("capabilities.vision");
+    expect(mapping.caps.audioInput).toBe("capabilities.audio_input");
+    expect(mapping.caps.tools).toBe("capabilities.tools");
+    expect(mapping.caps.pdf).toBe("capabilities.pdf");
+    expect(mapping.caps.reasoning).toBeNull();
+    expect(mapping.contextWindow).toBe("limits.context_window");
+    expect(mapping.maxOutput).toBe("limits.max_output");
+    expect(mapping.pricing).toEqual({
+      input: "pricing.input_usd_per_1m",
+      output: "pricing.output_usd_per_1m",
+      cached: "pricing.cached_usd_per_1m",
+    });
+    expect(mapping.currency).toBe("USD");
+  });
+
+  it("prefers an exact top-level match over a nested alias match", () => {
+    expect(detectImportMapping([{ capabilities: { vision: true }, vision: false }]).caps.vision).toBe("vision");
+  });
+
+  it("resolves nested values when building the rule body", () => {
+    const mapping = detectImportMapping([nested]);
+    expect(buildCatalogRuleBodyFromRaw({ provider: "acme", pattern: nested.id, raw: nested, mapping })).toEqual({
+      provider: "acme",
+      pattern: "nested-1",
+      matchType: "exact",
+      capabilities: { vision: true, pdf: false, audioInput: true, tools: true },
+      contextWindow: 128000,
+      maxOutput: 8192,
+      pricing: { input: 0.25, output: 1.5, cached: 0.05 },
+    });
   });
 });
