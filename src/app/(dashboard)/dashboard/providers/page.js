@@ -842,7 +842,7 @@ function ApiKeyProviderCard({
     <Link href={`/dashboard/providers/${providerId}`} className="group min-w-0">
       <Card
         padding="xs"
-        className={`h-full hover:bg-black/[0.01] dark:hover:bg-white/[0.01] transition-colors cursor-pointer ${allDisabled ? "opacity-50" : ""}`}
+        className={`relative h-full hover:bg-black/[0.01] dark:hover:bg-white/[0.01] transition-colors cursor-pointer ${allDisabled ? "opacity-50" : ""}`}
       >
         <div className="flex min-w-0 items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
@@ -864,7 +864,7 @@ function ApiKeyProviderCard({
               />
             </div>
             <div className="min-w-0">
-              <h3 className="truncate font-semibold">{provider.name}</h3>
+              <h3 className="truncate pr-16 font-semibold">{provider.name}</h3>
               <div className="flex min-w-0 items-center gap-1.5 text-xs flex-wrap">
                 {allDisabled ? (
                   <Badge variant="default" size="sm">
@@ -898,7 +898,7 @@ function ApiKeyProviderCard({
               </div>
             </div>
           </div>
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 flex-col items-end justify-end gap-2 self-stretch">
             {stats.total > 0 && (
               <div
                 className="opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100"
@@ -918,6 +918,15 @@ function ApiKeyProviderCard({
             )}
           </div>
         </div>
+        {isAnthropicCompatible ? (
+          <Badge variant="anthropic" size="sm" className="absolute right-3 top-3">
+            Anthropic
+          </Badge>
+        ) : (
+          <Badge variant="openai" size="sm" className="absolute right-3 top-3">
+            OpenAI
+          </Badge>
+        )}
       </Card>
     </Link>
   );

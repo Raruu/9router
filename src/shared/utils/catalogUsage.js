@@ -1,64 +1,43 @@
-// Decides whether a user-defined model catalog rule is still referenced.
-// A rule is USED when a custom model pins it via catalogRef, or when its
-// provider scope + pattern matches any "provider/model" form referenced by
-// combos, aliases, mitm targets, pricing overrides, capacity lists or
-// disabled entries. Forms stored under a custom node's display prefix are
-// canonicalized to the node id first, since rule providers are node ids.
-import { matchCatalogPattern } from "@/lib/modelCatalog/resolution.js";
-import { flattenReferenceMap, pricingTableForms, capacityAdapterForms } from "./modelUsage.js";
+// Shapes the user catalog rules for the dashboard Clear dialog. A rule is
+// "bound" when a custom model is pinned to it via catalogRef (source "user") —
+// the model's catalog selection, shown as its pattern rather than Automatic.
+// Clearing a bound rule resets those models to Automatic, so the dialog needs
+// the split up front to show counts and decide what a scope would remove.
+//
+// Deliberately narrower than "referenced": combos, aliases, mitm targets,
+// pricing overrides and capacity lists are not bindings — they keep resolving
+// against whatever remains after a clear.
 
-export function collectCatalogForms(usage) {
-  const prefixToId = new Map();
-  for (const node of usage?.nodes || []) {
-    if (node?.prefix && node?.id) {
-      prefixToId.set(String(node.prefix).toLowerCase(), String(node.id).toLowerCase());
-    }
-  }
-  const forms = new Set();
-  const add = (raw) => {
-    if (typeof raw !== "string" || !raw.includes("/")) return;
-    const separator = raw.indexOf("/");
-    const rawProvider = raw.slice(0, separator).toLowerCase();
-    const model = raw.slice(separator + 1);
-    if (!model) return;
-    forms.add(`${prefixToId.get(rawProvider) || rawProvider}/${model}`);
-  };
-  for (const combo of usage?.combos || []) {
-    for (const member of combo?.models || []) add(member);
-  }
-  for (const target of usage?.aliasTargets || []) add(target);
-  for (const target of flattenReferenceMap(usage?.mitmAlias)) add(target);
-  for (const form of pricingTableForms(usage?.userPricing)) add(form);
-  for (const form of capacityAdapterForms(usage?.capacityAdapter)) add(form);
-  for (const [provider, ids] of Object.entries(usage?.disabled || {})) {
-    for (const id of ids || []) add(`${provider}/${id}`);
-  }
-  return forms;
+// Case-insensitive `provider|pattern` identity, matching the repository's pin
+// matching. Values are not validated here; a junk legacy pin must still count
+// as a binding rather than throw.
+export function bindingKey(provider, pattern) {
+  return `${String(provider || "*").trim().toLowerCase()}|${String(pattern || "").trim().toLowerCase()}`;
 }
 
-export function partitionCatalogRules(rules, usage) {
-  const pins = new Set(
-    (usage?.customModels || []).map(
-      (pin) => `${String(pin.provider || "*").toLowerCase()}|${String(pin.pattern || "").toLowerCase()}`,
-    ),
+export function summarizeClearRules(rules, pins) {
+  const bound = new Set(
+    (pins || []).map((pin) => bindingKey(pin.provider ?? pin.catalogRef?.provider, pin.pattern ?? pin.catalogRef?.pattern)),
   );
-  const forms = [...collectCatalogForms(usage)];
-  const used = [];
-  const unused = [];
+
+  const empty = () => ({ rules: [], bound: [], unbound: [] });
+  const summary = { all: empty(), glob: empty(), exact: empty() };
+
   for (const rule of rules || []) {
-    const provider = String(rule.provider || "*").toLowerCase();
-    const pattern = String(rule.pattern || "");
-    if (pins.has(`${provider}|${pattern.toLowerCase()}`)) {
-      used.push(rule);
-      continue;
-    }
-    const referenced = forms.some((form) => {
-      const separator = form.indexOf("/");
-      if (provider !== "*" && provider !== form.slice(0, separator)) return false;
-      const model = form.slice(separator + 1);
-      return matchCatalogPattern(pattern, model) || matchCatalogPattern(pattern, form);
-    });
-    (referenced ? used : unused).push(rule);
+    const isBound = bound.has(bindingKey(rule.provider, rule.pattern));
+    summary.all.rules.push(rule);
+    (isBound ? summary.all.bound : summary.all.unbound).push(rule);
+    const bucket = String(rule.pattern || "").includes("*") ? summary.glob : summary.exact;
+    bucket.rules.push(rule);
+    (isBound ? bucket.bound : bucket.unbound).push(rule);
   }
-  return { used, unused };
+
+  return summary;
+}
+
+// Rules a scope would remove, given the "also clear bound patterns" choice.
+export function clearScopeRules(summary, scope, includeBound) {
+  const bucket = summary?.[scope] || summary?.all;
+  if (!bucket) return [];
+  return includeBound ? bucket.rules : bucket.unbound;
 }

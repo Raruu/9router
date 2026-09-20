@@ -6,6 +6,7 @@ import {
   clearAccountError,
   extractApiKey,
   isValidApiKey,
+  resolveProviderDisplayLabel,
 } from "../services/auth.js";
 import { handleAntigravityQuotaError, clearAntigravityStrikes } from "../services/antigravityQuota.js";
 import { getSettings } from "@/lib/localDb";
@@ -20,9 +21,9 @@ import { checkFallbackError } from "open-sse/services/accountFallback.js";
 import { augmentModelsWithCapacityAdapter, withCapacityAdapterStripping, getActiveAdapterStrategy } from "open-sse/services/capacityAdapter.js";
 import { handleBypassRequest } from "open-sse/utils/bypassHandler.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
-import { providerDisplayLabel } from "open-sse/utils/providerLabel.js";
+import { providerModelTag } from "open-sse/utils/providerLabel.js";
 import { resolveProviderTimeouts } from "open-sse/config/timeouts.js";
-import { resolveProviderRetries } from "open-sse/config/retries.js";
+import { resolveProviderRetries, shouldRetrySameKey } from "open-sse/config/retries.js";
 import { detectFormatByEndpoint } from "open-sse/translator/formats.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
@@ -290,19 +291,21 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       if (credentials?.allRateLimited) {
         const errorMsg = lastError || credentials.lastError || "Unavailable";
         const status = HTTP_STATUS.SERVICE_UNAVAILABLE;
-        log.warn("CHAT", `[${providerDisplayLabel(provider, credentials.providerSpecificData)}/${model}] ${errorMsg} (${credentials.retryAfterHuman})`);
+        const tag = providerModelTag(provider, credentials.providerSpecificData, model);
+        log.warn("CHAT", `[${tag}] ${errorMsg} (${credentials.retryAfterHuman})`);
         return withRetrySignal(
-          unavailableResponse(status, `[${provider}/${model}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman),
+          unavailableResponse(status, `[${tag}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman),
           provider,
           lastStatus,
           resolveRetryWaitMs(credentials.retryAfter, lastStatus, errorMsg)
         );
       }
       if (excludeConnectionIds.size === 0) {
-        log.warn("AUTH", `No active credentials for provider: ${provider}`);
-        return errorResponse(HTTP_STATUS.NOT_FOUND, `No active credentials for provider: ${provider}`);
+        const label = await resolveProviderDisplayLabel(provider);
+        log.warn("AUTH", `No active credentials for provider: ${label}`);
+        return errorResponse(HTTP_STATUS.NOT_FOUND, `No active credentials for provider: ${label}`);
       }
-      log.warn("CHAT", "No more accounts available", { provider });
+      log.warn("CHAT", "No more accounts available", { provider: await resolveProviderDisplayLabel(provider) });
       return withRetrySignal(
         errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable"),
         provider,
@@ -331,87 +334,111 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     const providerRetryConfig = comboRetryContext
       ? resolveProviderRetries((chatSettings.providerRetries || {})[provider])
       : null;
-    const result = await handleChatCore({
-      body: { ...body, model: `${provider}/${model}` },
-      modelInfo: { provider, model },
-      credentials: refreshedCredentials,
-      log,
-      clientRawRequest,
-      connectionId: credentials.connectionId,
-      userAgent,
-      apiKey,
-      // Echo the combo name back instead of the member that served the request.
-      responseModelOverride: chatSettings.comboNameInResponse ? responseModelOverride : null,
-      ccFilterNaming: !!chatSettings.ccFilterNaming,
-      rtkEnabled: !!chatSettings.rtkEnabled,
-      headroomEnabled: !!chatSettings.headroomEnabled,
-      headroomUrl: chatSettings.headroomUrl || DEFAULT_HEADROOM_URL,
-      headroomCompressUserMessages: !!chatSettings.headroomCompressUserMessages,
-      headroomTimeoutMs: chatSettings.headroomTimeoutMs,
-      cavemanEnabled: !!chatSettings.cavemanEnabled,
-      cavemanLevel: chatSettings.cavemanLevel || "full",
-      ponytailEnabled: !!chatSettings.ponytailEnabled,
-      ponytailLevel: chatSettings.ponytailLevel || "full",
-      pxpipeEnabled: !!chatSettings.pxpipeEnabled,
-      pxpipeMinChars: chatSettings.pxpipeMinChars,
-      pxpipeTimeoutMs: chatSettings.pxpipeTimeoutMs,
-      // Lazily warms the in-process module on first use; null when not installed (fail-open)
-      pxpipeTransform: chatSettings.pxpipeEnabled ? await getPxpipeTransform() : null,
-      onPxpipeEvent: appendPxpipeEvent,
-      providerThinking,
-      // Per-provider timeout overrides (ms); empty object means global defaults.
-      timeoutOverrides,
-      // Detect source format by endpoint + body
-      sourceFormatOverride: request?.url ? detectFormatByEndpoint(new URL(request.url).pathname, body) : null,
-      onCredentialsRefreshed: async (newCreds) => {
-        await updateProviderCredentials(credentials.connectionId, {
-          ...newCreds,
-          existingProviderSpecificData: credentials.providerSpecificData,
-          testStatus: "active"
-        });
-      },
-      onRequestSuccess: async () => {
-        await clearAccountError(credentials.connectionId, credentials, model);
-        // "Consecutive" strikes: a success clears the breaker for this pair.
-        clearAntigravityStrikes(credentials.connectionId, model);
+
+    // Per-key retry (combo "per-key" mode): re-run this key up to `tries` times
+    // after a transient failure before rotating. The lock markAccountUnavailable
+    // writes is intentionally ignored for the retry — it only steers other
+    // requests away from the key.
+    let keyAttempt = 0;
+    let failedResult = null;
+    while (true) {
+      const result = await handleChatCore({
+        body: { ...body, model: `${provider}/${model}` },
+        modelInfo: { provider, model },
+        credentials: refreshedCredentials,
+        log,
+        clientRawRequest,
+        connectionId: credentials.connectionId,
+        userAgent,
+        apiKey,
+        // Echo the combo name back instead of the member that served the request.
+        responseModelOverride: chatSettings.comboNameInResponse ? responseModelOverride : null,
+        ccFilterNaming: !!chatSettings.ccFilterNaming,
+        rtkEnabled: !!chatSettings.rtkEnabled,
+        headroomEnabled: !!chatSettings.headroomEnabled,
+        headroomUrl: chatSettings.headroomUrl || DEFAULT_HEADROOM_URL,
+        headroomCompressUserMessages: !!chatSettings.headroomCompressUserMessages,
+        headroomTimeoutMs: chatSettings.headroomTimeoutMs,
+        cavemanEnabled: !!chatSettings.cavemanEnabled,
+        cavemanLevel: chatSettings.cavemanLevel || "full",
+        ponytailEnabled: !!chatSettings.ponytailEnabled,
+        ponytailLevel: chatSettings.ponytailLevel || "full",
+        pxpipeEnabled: !!chatSettings.pxpipeEnabled,
+        pxpipeMinChars: chatSettings.pxpipeMinChars,
+        pxpipeTimeoutMs: chatSettings.pxpipeTimeoutMs,
+        // Lazily warms the in-process module on first use; null when not installed (fail-open)
+        pxpipeTransform: chatSettings.pxpipeEnabled ? await getPxpipeTransform() : null,
+        onPxpipeEvent: appendPxpipeEvent,
+        providerThinking,
+        // Per-provider timeout overrides (ms); empty object means global defaults.
+        timeoutOverrides,
+        // Detect source format by endpoint + body
+        sourceFormatOverride: request?.url ? detectFormatByEndpoint(new URL(request.url).pathname, body) : null,
+        onCredentialsRefreshed: async (newCreds) => {
+          await updateProviderCredentials(credentials.connectionId, {
+            ...newCreds,
+            existingProviderSpecificData: credentials.providerSpecificData,
+            testStatus: "active"
+          });
+        },
+        onRequestSuccess: async () => {
+          await clearAccountError(credentials.connectionId, credentials, model);
+          // "Consecutive" strikes: a success clears the breaker for this pair.
+          clearAntigravityStrikes(credentials.connectionId, model);
+        }
+      });
+
+      if (result.success) return result.response;
+
+      // Antigravity 409/429: refresh live quota to get exact resetAt before locking
+      let quotaResetMs = null;
+      let resetsAtMs = result.resetsAtMs;
+      if (provider === "antigravity" && (result.status === 409 || result.status === 429)) {
+        quotaResetMs = await handleAntigravityQuotaError(
+          credentials.connectionId, result.status, model,
+          refreshedCredentials.accessToken, credentials.providerSpecificData
+        );
+        if (quotaResetMs) resetsAtMs = quotaResetMs;
       }
-    });
 
-    if (result.success) return result.response;
+      // Exhausted Antigravity model is blocked only in RAM cache until upstream resetAt.
+      // Do not persist a modelLock_* for this path.
+      const failure = provider === "antigravity" && quotaResetMs
+        ? { shouldFallback: true, cooldownMs: 0 }
+        : await markAccountUnavailable(
+            credentials.connectionId,
+            result.status,
+            result.error,
+            provider,
+            model,
+            resetsAtMs,
+            providerRetryConfig ? { maxBackoffMs: providerRetryConfig.maxBackoffMs } : {},
+          );
 
-    // Antigravity 409/429: refresh live quota to get exact resetAt before locking
-    let quotaResetMs = null;
-    let resetsAtMs = result.resetsAtMs;
-    if (provider === "antigravity" && (result.status === 409 || result.status === 429)) {
-      quotaResetMs = await handleAntigravityQuotaError(
-        credentials.connectionId, result.status, model,
-        refreshedCredentials.accessToken, credentials.providerSpecificData
-      );
-      if (quotaResetMs) resetsAtMs = quotaResetMs;
+      if (!failure.shouldFallback) return withRetrySignal(result.response, provider, result.status, 0);
+
+      if (shouldRetrySameKey({
+        mode: providerRetryConfig?.mode,
+        status: result.status,
+        attemptsUsed: keyAttempt,
+        tries: providerRetryConfig?.tries,
+        cooldownMs: failure.cooldownMs,
+        maxBackoffMs: providerRetryConfig?.maxBackoffMs,
+      })) {
+        keyAttempt += 1;
+        log.warn("FALLBACK", `↻ KEY:${credentials.connectionName} transient ${result.status}, retry ${keyAttempt}/${providerRetryConfig.tries}`);
+        if (failure.cooldownMs > 0) await new Promise((resolve) => setTimeout(resolve, failure.cooldownMs));
+        continue;
+      }
+
+      failedResult = result;
+      break;
     }
 
-    // Exhausted Antigravity model is blocked only in RAM cache until upstream resetAt.
-    // Do not persist a modelLock_* for this path.
-    const shouldFallback = provider === "antigravity" && quotaResetMs
-      ? true
-      : (await markAccountUnavailable(
-          credentials.connectionId,
-          result.status,
-          result.error,
-          provider,
-          model,
-          resetsAtMs,
-          providerRetryConfig ? { maxBackoffMs: providerRetryConfig.maxBackoffMs } : {},
-        )).shouldFallback;
-
-    if (shouldFallback) {
-      log.warn("FALLBACK", `⇄ ACC:${credentials.connectionName} UNAVAILABLE (${result.status}) → NEXT ACCOUNT`);
-      excludeConnectionIds.add(credentials.connectionId);
-      lastError = result.error;
-      lastStatus = result.status;
-      continue;
-    }
-
-    return withRetrySignal(result.response, provider, result.status, 0);
+    log.warn("FALLBACK", `⇄ ACC:${credentials.connectionName} UNAVAILABLE (${failedResult.status}) → NEXT ACCOUNT`);
+    excludeConnectionIds.add(credentials.connectionId);
+    lastError = failedResult.error;
+    lastStatus = failedResult.status;
+    continue;
   }
 }

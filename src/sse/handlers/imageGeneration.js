@@ -4,11 +4,13 @@ import {
   clearAccountError,
   extractApiKey,
   isValidApiKey,
+  resolveProviderDisplayLabel,
 } from "../services/auth.js";
 import { getSettings } from "@/lib/localDb";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleImageGenerationCore } from "open-sse/handlers/imageGenerationCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
+import { providerModelTag } from "open-sse/utils/providerLabel.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import { handleComboChat } from "open-sse/services/combo.js";
@@ -97,10 +99,12 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
       if (credentials?.allRateLimited) {
         const errorMsg = lastError || credentials.lastError || "Unavailable";
         const status = lastStatus || Number(credentials.lastErrorCode) || HTTP_STATUS.SERVICE_UNAVAILABLE;
-        return unavailableResponse(status, `[${provider}/${model}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman);
+        const tag = providerModelTag(provider, credentials.providerSpecificData, model);
+        return unavailableResponse(status, `[${tag}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman);
       }
       if (excludeConnectionIds.size === 0) {
-        return errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${provider}`);
+        const label = await resolveProviderDisplayLabel(provider);
+        return errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${label}`);
       }
       return errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable");
     }

@@ -5,8 +5,8 @@ import { Button, CardSkeleton, ConfirmModal, Select } from "@/shared/components"
 import { useNotificationStore } from "@/store/notificationStore";
 import CatalogSection from "./components/CatalogSection";
 import UserCatalogDialog from "./components/UserCatalogDialog";
+import ClearCatalogDialog from "./components/ClearCatalogDialog";
 import { matchesCatalogRow } from "./components/CatalogTable";
-import { partitionCatalogRules } from "@/shared/utils/catalogUsage";
 import { buildCatalogProviderLabel } from "@/shared/utils/catalogDisplay";
 
 const PRIORITY_OPTIONS = [
@@ -71,7 +71,8 @@ export default function ModelCatalogPage() {
   const [deleting, setDeleting] = useState(null);
   const [deletingOpenRouter, setDeletingOpenRouter] = useState(null);
   const [confirmClear, setConfirmClear] = useState(false);
-  const [clearUnusedRules, setClearUnusedRules] = useState(null);
+  const [clearDialogOpen, setClearDialogOpen] = useState(false);
+  const [clearPins, setClearPins] = useState([]);
   const notify = useNotificationStore();
 
   // Display label for rule provider scopes: custom node ids render as their
@@ -226,19 +227,14 @@ export default function ModelCatalogPage() {
     setDialogOpen(true);
   };
 
-  // Fetch the usage snapshot, partition the user rules, and open a
-  // confirmation listing the unused entries before deleting them.
-  const openClearUnusedConfirm = async () => {
-    setBusy("clear-unused");
+  // Load the catalog pins (custom models bound to a user rule) before opening
+  // the Clear dialog, so the scope counts reflect what each option would remove.
+  const openClearDialog = async () => {
+    setBusy("clear-open");
     try {
       const usage = await requestJson("/api/models/catalog/user");
-      const rules = rowsFrom(catalog?.userDefined ?? catalog?.user);
-      const { unused } = partitionCatalogRules(rules, usage);
-      if (unused.length === 0) {
-        notify.success("Every user-defined model is in use — nothing to clear.");
-        return;
-      }
-      setClearUnusedRules(unused);
+      setClearPins(rowsFrom(usage?.customModels));
+      setClearDialogOpen(true);
     } catch (error) {
       notify.error(error.message);
     } finally {
@@ -246,29 +242,25 @@ export default function ModelCatalogPage() {
     }
   };
 
-  const clearUnused = async () => {
-    if (!clearUnusedRules?.length) return;
-    setBusy("delete-unused");
-    let deleted = 0;
-    let failed = 0;
-    for (const rule of clearUnusedRules) {
-      try {
-        await requestJson("/api/models/catalog/user", {
-          method: "DELETE",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ provider: rule.provider, pattern: rule.pattern }),
-        });
-        deleted += 1;
-      } catch {
-        failed += 1;
-      }
+  const clearRules = async ({ scope, includeBound }) => {
+    setBusy("clear-rules");
+    try {
+      const result = await requestJson("/api/models/catalog/user", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ scope, includeBound }),
+      });
+      setClearDialogOpen(false);
+      await load();
+      invalidateModelCapabilities();
+      const unboundNote = result?.unbound > 0 ? `, ${result.unbound} model${result.unbound === 1 ? "" : "s"} back to Automatic` : "";
+      const skippedNote = result?.skippedBound > 0 ? ` (${result.skippedBound} bound kept)` : "";
+      notify.success(`Cleared ${result?.deleted ?? 0} rule${result?.deleted === 1 ? "" : "s"}${unboundNote}${skippedNote}`);
+    } catch (error) {
+      notify.error(error.message);
+    } finally {
+      setBusy("");
     }
-    setClearUnusedRules(null);
-    await load();
-    invalidateModelCapabilities();
-    if (failed > 0) notify.error(`Cleared ${deleted} unused model${deleted === 1 ? "" : "s"}, ${failed} failed`);
-    else notify.success(`Cleared ${deleted} unused model${deleted === 1 ? "" : "s"}`);
-    setBusy("");
   };
 
   if (loading || !catalog) {
@@ -304,11 +296,11 @@ export default function ModelCatalogPage() {
             <Button
               variant="danger"
               icon="delete_sweep"
-              loading={busy === "clear-unused"}
-              disabled={!filtered.user.length || busy === "delete-unused"}
-              onClick={openClearUnusedConfirm}
+              loading={busy === "clear-open"}
+              disabled={!filtered.user.length || busy === "clear-rules"}
+              onClick={openClearDialog}
             >
-              Clear Unused
+              Clear
             </Button>
           </>
         }
@@ -346,29 +338,15 @@ export default function ModelCatalogPage() {
       <ConfirmModal isOpen={Boolean(deletingOpenRouter)} onClose={() => setDeletingOpenRouter(null)} onConfirm={deleteOpenRouter} loading={busy === "delete-openrouter"} title="Delete OpenRouter model" message={`Delete ${deletingOpenRouter?.pattern || "this cached entry"}? Fetching OpenRouter again may restore it.`} confirmText="Delete" />
       <ConfirmModal isOpen={confirmClear} onClose={() => setConfirmClear(false)} onConfirm={clearOpenRouter} loading={busy === "clear"} title="Clear OpenRouter catalog" message="Remove all fetched OpenRouter models? User-defined and hardcoded entries will not be changed." confirmText="Clear All" />
 
-      <ConfirmModal
-        isOpen={Boolean(clearUnusedRules)}
-        onClose={() => setClearUnusedRules(null)}
-        onConfirm={clearUnused}
-        loading={busy === "delete-unused"}
-        title="Clear Unused Models"
-        message={`Remove ${clearUnusedRules?.length || 0} user-defined model${clearUnusedRules?.length === 1 ? "" : "s"} not pinned or referenced by any combo, alias, mitm target, pricing override, capacity list or disabled entry? Used models are kept. This cannot be undone.`}
-        confirmText="Clear Unused"
-      >
-        {clearUnusedRules && (
-          <div className="mt-3 max-h-56 overflow-y-auto rounded-lg border border-border bg-bg-subtle p-2 custom-scrollbar">
-            {clearUnusedRules.slice(0, 50).map((rule) => (
-              <div key={`${rule.provider}|${rule.pattern}`} className="flex items-baseline justify-between gap-2 px-1 py-0.5 text-xs">
-                <code className="truncate font-mono text-text-main" title={rule.pattern}>{rule.pattern}</code>
-                <span className="shrink-0 text-text-muted" title={rule.provider}>{providerLabel(rule.provider)}</span>
-              </div>
-            ))}
-            {clearUnusedRules.length > 50 && (
-              <p className="px-1 pt-1 text-xs italic text-text-muted">+{clearUnusedRules.length - 50} more</p>
-            )}
-          </div>
-        )}
-      </ConfirmModal>
+      <ClearCatalogDialog
+        isOpen={clearDialogOpen}
+        rules={rowsFrom(catalog?.userDefined ?? catalog?.user)}
+        pins={clearPins}
+        providerLabel={providerLabel}
+        clearing={busy === "clear-rules"}
+        onClose={() => setClearDialogOpen(false)}
+        onConfirm={clearRules}
+      />
     </div>
   );
 }

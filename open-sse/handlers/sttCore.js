@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { createErrorResult } from "../utils/error.js";
+import { providerDisplayLabel } from "../utils/providerLabel.js";
 import { HTTP_STATUS } from "../config/runtimeConfig.js";
 
 // Build auth headers from sttConfig + token
@@ -167,11 +168,12 @@ function jsonResponse(obj) {
  * @returns {Promise<{success, response, status?, error?}>}
  */
 export async function handleSttCore({ provider, model, formData, credentials, sttConfig }) {
+  const displayProvider = providerDisplayLabel(provider, credentials?.providerSpecificData);
   const file = formData.get("file");
   if (!file) return createErrorResult(HTTP_STATUS.BAD_REQUEST, "Missing required field: file");
 
   let cfg = sttConfig;
-  if (!cfg) return createErrorResult(HTTP_STATUS.BAD_REQUEST, `Provider '${provider}' does not support STT`);
+  if (!cfg) return createErrorResult(HTTP_STATUS.BAD_REQUEST, `Provider '${displayProvider}' does not support STT`);
 
   // Per-connection endpoint override. Registry entries carry a fixed baseUrl,
   // which is right for a named cloud service but useless for a self-hosted one
@@ -183,7 +185,7 @@ export async function handleSttCore({ provider, model, formData, credentials, st
 
   const token = cfg.authType === "none" ? null : (credentials?.apiKey || credentials?.accessToken);
   if (cfg.authType !== "none" && !token) {
-    return createErrorResult(HTTP_STATUS.UNAUTHORIZED, `No credentials for STT provider: ${provider}`);
+    return createErrorResult(HTTP_STATUS.UNAUTHORIZED, `No credentials for STT provider: ${displayProvider}`);
   }
 
   try {

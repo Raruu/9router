@@ -1,11 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import PropTypes from "prop-types";
 import { Button, Input, Modal, Select } from "@/shared/components";
+import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import {
   SNAPSHOT_BOOL_CAPS,
   buildCatalogRuleBodyFromRaw,
+  collectLeafPaths,
   detectImportMapping,
   detectCurrencyFromKey,
   detectPriceUnit,
@@ -78,19 +80,12 @@ function priceOptionLabel(key) {
   return suffix ? `${key} · ${suffix}` : key;
 }
 
-function collectSourceKeys(entriesById, models) {
-  const keys = [];
-  const seen = new Set();
-  for (const id of models) {
-    const entry = entriesById?.[id];
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
-    for (const key of Object.keys(entry)) {
-      if (seen.has(key) || IGNORED_SOURCE_KEYS.has(key)) continue;
-      seen.add(key);
-      keys.push(key);
-    }
-  }
-  return keys;
+// Default model for the mapping preview + raw JSON viewer: the first selected
+// model that carries a raw /models entry, else the first entry at all.
+function pickPreviewModel(models, entriesById, selected) {
+  return models.find((id) => selected.has(id) && entriesById?.[id])
+    || models.find((id) => entriesById?.[id])
+    || null;
 }
 
 export default function ImportModelsDialog({ isOpen, models = [], entriesById = {}, existingIds = [], importing = false, onConfirm, onClose }) {
@@ -99,18 +94,24 @@ export default function ImportModelsDialog({ isOpen, models = [], entriesById = 
   const [fetchCapabilities, setFetchCapabilities] = useState(false);
   const [mapping, setMapping] = useState({});
   const [currencyRate, setCurrencyRate] = useState(DEFAULT_IDR_RATE);
+  const [previewModel, setPreviewModel] = useState(null);
   const [initializedFor, setInitializedFor] = useState(null);
+  const { copied, copy } = useCopyToClipboard();
 
   // (Re)initialize selection every time the dialog opens with a fresh list.
   // State adjustment during render — no effect needed.
   const signature = isOpen ? `${models.length}:${models.join(",")}` : null;
   if (signature !== initializedFor) {
+    const initialSelected = isOpen
+      ? new Set(models.filter((id) => !existingIds.includes(id)))
+      : new Set();
     setInitializedFor(signature);
-    setSelected(isOpen ? new Set(models.filter((id) => !existingIds.includes(id))) : new Set());
+    setSelected(initialSelected);
     setSearch("");
     setFetchCapabilities(false);
     setMapping(isOpen ? detectImportMapping(models.map((id) => entriesById?.[id])) : {});
     setCurrencyRate(DEFAULT_IDR_RATE);
+    setPreviewModel(isOpen ? pickPreviewModel(models, entriesById, initialSelected) : null);
   }
 
   const toggle = (id) => {
@@ -133,7 +134,17 @@ export default function ImportModelsDialog({ isOpen, models = [], entriesById = 
     setSelected(on ? new Set(selectableVisible) : new Set());
   };
 
-  const sourceKeys = collectSourceKeys(entriesById, models);
+  // Nested payloads flatten to dot-paths ("capabilities.vision"), so the source
+  // dropdowns cover fields buried inside capability/limit containers too.
+  const sourceKeys = useMemo(
+    () => collectLeafPaths(models.map((id) => entriesById?.[id]))
+      .filter((path) => !IGNORED_SOURCE_KEYS.has(path)),
+    [models, entriesById],
+  );
+  const rawModelOptions = useMemo(
+    () => models.filter((id) => entriesById?.[id]).map((id) => ({ value: id, label: id })),
+    [models, entriesById],
+  );
   const sourceOptions = [
     { value: NONE_SOURCE, label: "— none —" },
     ...sourceKeys.map((key) => ({ value: key, label: key })),
@@ -156,12 +167,15 @@ export default function ImportModelsDialog({ isOpen, models = [], entriesById = 
     });
   };
 
-  // Preview the first selected model that has raw data, so a wrong source
-  // field or rate is visible before the batch import runs.
-  const previewId = fetchCapabilities ? models.find((id) => selected.has(id) && entriesById?.[id]) || null : null;
+  // Preview the chosen model's raw entry, so a wrong source field or rate is
+  // visible before the batch import runs. Defaults to the first selected model.
+  const previewId = fetchCapabilities ? previewModel : null;
   const previewBody = previewId
     ? buildCatalogRuleBodyFromRaw({ provider: "preview", pattern: previewId, raw: entriesById[previewId], mapping, currencyRate })
     : null;
+  const rawJsonText = previewId && entriesById?.[previewId]
+    ? JSON.stringify(entriesById[previewId], null, 2)
+    : "";
   const currency = mapping.currency || "USD";
 
   const handleConfirm = () => {
@@ -308,6 +322,43 @@ export default function ImportModelsDialog({ isOpen, models = [], entriesById = 
                       )}
                     </>
                   )}
+
+                  {/* Raw payload inspector: pick any model to see the exact
+                      upstream entry the mapping above is resolved against. */}
+                  <details className="mt-3 rounded-lg border border-border bg-surface">
+                    <summary className="cursor-pointer px-2 py-1.5 text-[11px] font-medium text-text-muted hover:text-text-main">
+                      Raw JSON
+                    </summary>
+                    <div className="border-t border-border p-2">
+                      {rawModelOptions.length === 0 ? (
+                        <p className="text-[11px] text-text-muted">No raw payload available.</p>
+                      ) : (
+                        <>
+                          <Select
+                            label="Preview model"
+                            value={previewModel || ""}
+                            disabled={importing}
+                            onChange={(event) => setPreviewModel(event.target.value)}
+                            options={rawModelOptions}
+                          />
+                          <div className="mb-1 mt-2 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => copy(rawJsonText, "raw-json")}
+                              disabled={!rawJsonText || importing}
+                              className="inline-flex items-center gap-1 rounded px-2 py-1 text-[11px] text-text-muted transition-colors hover:bg-surface-2 hover:text-primary disabled:opacity-50"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">
+                                {copied === "raw-json" ? "check" : "content_copy"}
+                              </span>
+                              {copied === "raw-json" ? "Copied" : "Copy"}
+                            </button>
+                          </div>
+                          <pre className="max-h-64 overflow-auto rounded bg-bg-alt/60 p-2 font-mono text-[11px] leading-relaxed text-text-muted">{rawJsonText}</pre>
+                        </>
+                      )}
+                    </div>
+                  </details>
                 </div>
               </div>
             )}

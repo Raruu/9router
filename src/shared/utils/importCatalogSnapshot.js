@@ -85,13 +85,22 @@ const PRICE_ALIASES = {
   cached: ["cache_read", "cached", "cache_read_input", "cache_hit", "input_cache_read"],
 };
 
-function keyMatchesAlias(key, alias) {
-  return key === alias
-    || key.startsWith(`${alias}_`)
-    || key.startsWith(`${alias}-`)
-    || key.endsWith(`_${alias}`)
-    || key.endsWith(`-${alias}`)
-    || key.endsWith(`.${alias}`);
+// Matches an alias against the leaf segment of a (possibly dotted) key, so a
+// nested source like "pricing.output_usd_per_1m" scores the same as the flat
+// "output_usd_per_1m". Returns 2 for an exact segment, 1 for an affixed one,
+// 0 for no match.
+function aliasRank(key, alias) {
+  const segment = key.includes(".") ? key.slice(key.lastIndexOf(".") + 1) : key;
+  if (segment === alias) return 2;
+  if (
+    segment.startsWith(`${alias}_`)
+    || segment.startsWith(`${alias}-`)
+    || segment.endsWith(`_${alias}`)
+    || segment.endsWith(`-${alias}`)
+  ) {
+    return 1;
+  }
+  return 0;
 }
 
 // "input_idr_per_1m" -> "per_1m"; plain values (no marker) default to per-1M.
@@ -111,14 +120,11 @@ export function detectCurrencyFromKey(key) {
 
 function scoreCandidate(key, aliases, pricing) {
   const lower = key.toLowerCase();
-  let aliasRank = 0;
-  for (const alias of aliases) {
-    if (lower === alias) aliasRank = Math.max(aliasRank, 2);
-    else if (keyMatchesAlias(lower, alias)) aliasRank = Math.max(aliasRank, 1);
-  }
-  if (aliasRank === 0) return -1;
+  let rank = 0;
+  for (const alias of aliases) rank = Math.max(rank, aliasRank(lower, alias));
+  if (rank === 0) return -1;
 
-  let score = aliasRank * 100;
+  let score = rank * 100;
   if (pricing) {
     const unit = detectPriceUnit(lower);
     if (unit === "per_1m") score += 2000;
@@ -136,7 +142,10 @@ function pickField(keys, aliases, pricing = false) {
   let bestScore = -1;
   for (const key of keys) {
     const score = scoreCandidate(key, aliases, pricing);
-    if (score > bestScore) {
+    // On a tie prefer the shallower path, so a flat "vision" wins over
+    // "capabilities.vision" when a payload happens to carry both.
+    const shallower = bestScore >= 0 && score === bestScore && key.split(".").length < best.split(".").length;
+    if (score > bestScore || shallower) {
       bestScore = score;
       best = key;
     }
@@ -144,27 +153,62 @@ function pickField(keys, aliases, pricing = false) {
   return best;
 }
 
-// Union of keys across every entry, in first-seen order (keeps detection
-// deterministic when several aliases score the same).
-function collectKeys(entries) {
-  const keys = [];
-  const seen = new Set();
-  for (const entry of entries || []) {
-    if (!entry || typeof entry !== "object" || Array.isArray(entry)) continue;
-    for (const key of Object.keys(entry)) {
-      if (seen.has(key)) continue;
-      seen.add(key);
-      keys.push(key);
-    }
+// Some /models payloads nest capability flags and limits inside containers
+// (e.g. capabilities: { vision: true }, limits: { context_window: 128000 }).
+// The helpers below flatten nested objects to dot-paths ("capabilities.vision")
+// so the same alias detection and value resolution work for flat and nested
+// shapes alike.
+
+export function resolvePath(source, path) {
+  if (!source || typeof source !== "object" || !path) return undefined;
+  let current = source;
+  for (const segment of String(path).split(".")) {
+    if (current === null || typeof current !== "object") return undefined;
+    current = current[segment];
   }
-  return keys;
+  return current;
+}
+
+const MAX_SOURCE_DEPTH = 4;
+
+function isPlainObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isScalar(value) {
+  return typeof value === "boolean" || typeof value === "number" || typeof value === "string";
+}
+
+// Union of dot-paths to scalar leaves across every entry, in first-seen order
+// (keeps detection deterministic when several aliases score the same). Arrays
+// and empty objects contribute nothing; nesting stops at maxDepth segments.
+export function collectLeafPaths(entries, { maxDepth = MAX_SOURCE_DEPTH } = {}) {
+  const paths = [];
+  const seen = new Set();
+  const visit = (value, prefix, depth) => {
+    for (const key of Object.keys(value)) {
+      const path = prefix ? `${prefix}.${key}` : key;
+      const child = value[key];
+      if (isScalar(child)) {
+        if (seen.has(path)) continue;
+        seen.add(path);
+        paths.push(path);
+      } else if (isPlainObject(child) && depth < maxDepth) {
+        visit(child, path, depth + 1);
+      }
+    }
+  };
+  for (const entry of entries || []) {
+    if (isPlainObject(entry)) visit(entry, "", 1);
+  }
+  return paths;
 }
 
 // Auto-detected mapping for the import dialog: { caps, contextWindow,
 // maxOutput, pricing: { input, output, cached }, currency }. Unmatched targets
 // are null; the user edits the guesses in the dialog before importing.
 export function detectImportMapping(entries = []) {
-  const keys = collectKeys(entries);
+  const keys = collectLeafPaths(entries);
   const caps = {};
   for (const cap of SNAPSHOT_BOOL_CAPS) caps[cap] = pickField(keys, CAP_ALIASES[cap], false);
   const pricing = {
@@ -216,21 +260,21 @@ export function buildCatalogRuleBodyFromRaw({ provider, pattern, raw, mapping, c
   for (const cap of SNAPSHOT_BOOL_CAPS) {
     const source = mapping.caps?.[cap];
     if (!source) continue;
-    const value = readBoolean(raw[source]);
+    const value = readBoolean(resolvePath(raw, source));
     if (value !== undefined) capabilities[cap] = value;
   }
 
   const body = { provider, pattern, matchType: "exact", capabilities };
 
-  const contextWindow = readNumber(raw[mapping.contextWindow]);
+  const contextWindow = readNumber(resolvePath(raw, mapping.contextWindow));
   if (contextWindow !== undefined && contextWindow > 0) body.contextWindow = Math.floor(contextWindow);
-  const maxOutput = readNumber(raw[mapping.maxOutput]);
+  const maxOutput = readNumber(resolvePath(raw, mapping.maxOutput));
   if (maxOutput !== undefined && maxOutput > 0) body.maxOutput = Math.floor(maxOutput);
 
   const pricing = {};
   for (const [target, source] of Object.entries(mapping.pricing || {})) {
     if (!source) continue;
-    let value = readNumber(raw[source]);
+    let value = readNumber(resolvePath(raw, source));
     if (value === undefined || value < 0) continue;
     if (detectPriceUnit(source) === "per_1k") value *= 1000;
     const currency = detectCurrencyFromKey(source) || mapping.currency || "USD";

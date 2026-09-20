@@ -1,3 +1,44 @@
+# v0.5.81-2 (2026-09-20)
+
+## Features
+- **Providers**: custom provider cards show an OpenAI (white) or Anthropic
+  (#e56a4a) API-family chip. It floats in the card's top-right corner with the
+  enable toggle bottom-right, so the wider Anthropic chip can no longer squeeze
+  the connection count and endpoint badge onto separate lines
+- **Providers**: Import Models from /models understands nested payloads — flags
+  and limits inside containers (`capabilities.vision`,
+  `limits.context_window`, `pricing.input_usd_per_1m`) flatten to dot-paths in
+  the field-mapping dropdowns and resolve when the catalog rule is built; price
+  aliases score the leaf segment, so per-1K/per-1M and currency markers inside a
+  container still apply. The mapping panel also gains a collapsible Raw JSON
+  inspector with a model picker and copy button
+- **Model Catalog**: Clear is now scope-aware — Clear All / Glob / Exact with
+  live counts plus an "Also clear bound patterns" checkbox. Including bound
+  patterns unbinds the pinned models back to Automatic (locked models included)
+  in one transaction instead of the old delete-every-unused loop
+- **Providers**: Combo Retries gains a Retry behaviour selector. "Per member"
+  (default, unchanged) tries every key then waits and retries the member; "Per
+  key" gives each key its own extra tries before rotating, and the combo
+  advances once every key is exhausted
+
+## Fixes
+- **Logging**: locked-account and no-credentials errors show the connection
+  prefix instead of the generated compatible-node id
+  (`anthropic-compatible-<uuid>`) in every handler — chat, stt, tts, image,
+  video, embeddings, search, fetch — plus the AUTH console lines and the chat
+  `Invalid JSON response` path. Only chat was fixed before; where no credentials
+  object exists the prefix is recovered from the connection
+- **Console Log**: token-refresh errors stay out of the Requests tab — `❌` lock
+  lines are classified as account errors again instead of requests
+
+## Improvements
+- **Providers**: importing from /models is much lighter — each model is added
+  once, already pinned, instead of add → refetch the whole custom-model list →
+  save rule → add again. With capabilities on that is 2 requests per model
+  instead of 5
+- **Tests**: the unit suite documents that it must run with an isolated
+  `DATA_DIR`
+
 # v0.5.81-1 (2026-09-18)
 
 Merged upstream v0.5.81 (plus the post-release changelog header fix) into the

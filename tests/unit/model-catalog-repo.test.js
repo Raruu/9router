@@ -128,4 +128,53 @@ describe("model catalog repository", () => {
     expect((await db.getUserModelCatalog()).map((rule) => rule.pattern)).toEqual(["first-*", "second-*"]);
     expect((await db.getCustomModels())[0].catalogRef.pattern).toBe("first-*");
   });
+
+  it("clears rules by scope without touching bound ones by default", async () => {
+    const db = await import("../../src/lib/db/index.js");
+    await db.createUserModelCatalogRule({ provider: "*", pattern: "bound-exact", data: {} });
+    await db.createUserModelCatalogRule({ provider: "*", pattern: "free-exact", data: {} });
+    await db.createUserModelCatalogRule({ provider: "*", pattern: "bound-glob*", data: {} });
+    await db.addCustomModel({
+      providerAlias: "acme",
+      id: "pinned",
+      catalogRef: { source: "user", provider: "*", pattern: "bound-exact" },
+    });
+
+    const result = await db.deleteUserModelCatalogRules({ scope: "all", includeBound: false });
+    expect(result).toMatchObject({ deleted: 2, unbound: 0, skippedBound: 1 });
+    expect((await db.getUserModelCatalog()).map((rule) => rule.pattern)).toEqual(["bound-exact"]);
+    // The pin survives because its rule was kept.
+    expect((await db.getCustomModels())[0].catalogRef.pattern).toBe("bound-exact");
+  });
+
+  it("unbinds pinned models when bound patterns are cleared", async () => {
+    const db = await import("../../src/lib/db/index.js");
+    await db.createUserModelCatalogRule({ provider: "*", pattern: "bound-exact", data: {} });
+    await db.createUserModelCatalogRule({ provider: "*", pattern: "bound-glob*", data: {} });
+    await db.addCustomModel({
+      providerAlias: "acme",
+      id: "pinned",
+      locked: true,
+      catalogRef: { source: "user", provider: "*", pattern: "bound-exact" },
+    });
+    await db.addCustomModel({ providerAlias: "acme", id: "other", caps: { vision: true } });
+
+    const result = await db.deleteUserModelCatalogRules({ scope: "exact", includeBound: true });
+    expect(result).toMatchObject({ deleted: 1, unbound: 1 });
+    expect((await db.getUserModelCatalog()).map((rule) => rule.pattern)).toEqual(["bound-glob*"]);
+    // Locked models unbind too — the rule they pointed at is gone.
+    const models = await db.getCustomModels();
+    expect(models.find((model) => model.id === "pinned").catalogRef).toBeUndefined();
+    expect(models.find((model) => model.id === "other").caps).toEqual({ vision: true });
+  });
+
+  it("scopes a clear to glob patterns", async () => {
+    const db = await import("../../src/lib/db/index.js");
+    await db.createUserModelCatalogRule({ provider: "*", pattern: "keep-exact", data: {} });
+    await db.createUserModelCatalogRule({ provider: "*", pattern: "drop-*", data: {} });
+
+    const result = await db.deleteUserModelCatalogRules({ scope: "glob", includeBound: true });
+    expect(result).toMatchObject({ deleted: 1 });
+    expect((await db.getUserModelCatalog()).map((rule) => rule.pattern)).toEqual(["keep-exact"]);
+  });
 });

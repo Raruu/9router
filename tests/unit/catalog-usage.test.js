@@ -1,60 +1,65 @@
 import { describe, it, expect } from "vitest";
-import { collectCatalogForms, partitionCatalogRules } from "../../src/shared/utils/catalogUsage.js";
-
-const NODE = "openai-compatible-chat-88e8";
-const usage = {
-  nodes: [{ id: NODE, prefix: "qwen-3.8" }],
-  customModels: [{ provider: NODE, pattern: "Pinned-Model" }],
-  combos: [{ id: "c1", name: "Fallback", models: [`qwen-3.8/combo-model`, "anthropic/claude-x"] }],
-  aliasTargets: [`QWEN-3.8/Aliased-Model`, "anthropic/other", "anthropic/glob-model-two"],
-  mitmAlias: { claude: { "claude-sonnet-4-5": `${NODE}/mitm-model` } },
-  userPricing: { [NODE]: { "priced-model": { input: 1 } } },
-  capacityAdapter: { vision: { models: [`${NODE}/vision-model`] } },
-  disabled: { [NODE]: ["disabled-model"] },
-};
+import {
+  bindingKey,
+  clearScopeRules,
+  summarizeClearRules,
+} from "../../src/shared/utils/catalogUsage.js";
 
 const rules = [
-  { provider: NODE, pattern: "pinned-model" },          // pin (case-insensitive)
-  { provider: NODE, pattern: "combo-model" },            // combo via prefix→id canonicalization
-  { provider: NODE, pattern: "aliased-model" },          // alias target, mixed case
-  { provider: NODE, pattern: "mitm-model" },             // mitm target
-  { provider: NODE, pattern: "priced-model" },           // pricing override
-  { provider: NODE, pattern: "vision-model" },           // capacity list
-  { provider: NODE, pattern: "disabled-model" },         // disabled entry
-  { provider: "anthropic", pattern: "claude-*" },        // scoped glob
-  { provider: "*", pattern: "*glob-model*" },            // global glob
-  { provider: NODE, pattern: "nobody-uses-me" },         // unused
-  { provider: "*", pattern: "ghost-*" },                 // unused global
+  { provider: "acme", pattern: "pinned-model" },   // bound (below, mixed case)
+  { provider: "acme", pattern: "exact-model" },
+  { provider: "acme", pattern: "combo-*" },
+  { provider: "*", pattern: "global-*" },
 ];
+const pins = [{ provider: "ACME", pattern: "Pinned-Model" }];
 
-describe("catalogUsage", () => {
-  it("canonicalizes prefix-scoped forms to node ids", () => {
-    const forms = collectCatalogForms(usage);
-    expect(forms.has(`${NODE}/combo-model`)).toBe(true);
-    expect(forms.has(`qwen-3.8/combo-model`)).toBe(false);
-    expect(forms.has("anthropic/claude-x")).toBe(true);
+describe("summarizeClearRules", () => {
+  it("splits rules by pattern shape and binding", () => {
+    const summary = summarizeClearRules(rules, pins);
+    expect(summary.all.rules).toHaveLength(4);
+    expect(summary.all.bound.map((r) => r.pattern)).toEqual(["pinned-model"]);
+    expect(summary.all.unbound.map((r) => r.pattern)).toEqual(["exact-model", "combo-*", "global-*"]);
+    expect(summary.glob.rules.map((r) => r.pattern)).toEqual(["combo-*", "global-*"]);
+    expect(summary.glob.bound).toEqual([]);
+    expect(summary.exact.rules.map((r) => r.pattern)).toEqual(["pinned-model", "exact-model"]);
+    expect(summary.exact.bound.map((r) => r.pattern)).toEqual(["pinned-model"]);
   });
 
-  it("marks pinned or referenced rules used and the rest unused", () => {
-    const { used, unused } = partitionCatalogRules(rules, usage);
-    expect(used.map((r) => r.pattern)).toEqual([
-      "pinned-model", "combo-model", "aliased-model", "mitm-model",
-      "priced-model", "vision-model", "disabled-model", "claude-*", "*glob-model*",
-    ]);
-    expect(unused.map((r) => r.pattern)).toEqual(["nobody-uses-me", "ghost-*"]);
+  it("matches bindings case-insensitively", () => {
+    expect(bindingKey("ACME", "Pinned-Model")).toBe(bindingKey("acme", "pinned-model"));
+    const summary = summarizeClearRules([{ provider: "AcMe", pattern: "PINNED-model" }], pins);
+    expect(summary.all.bound).toHaveLength(1);
   });
 
-  it("treats an empty usage snapshot as everything unused", () => {
-    const { used, unused } = partitionCatalogRules(rules, {});
-    expect(used).toEqual([]);
-    expect(unused.length).toBe(rules.length);
+  it("treats an empty rule list as nothing to clear", () => {
+    const summary = summarizeClearRules([], []);
+    expect(summary.all).toEqual({ rules: [], bound: [], unbound: [] });
+    expect(clearScopeRules(summary, "all", true)).toEqual([]);
   });
 
-  it("a provider-scoped rule does not match another provider's model", () => {
-    const { used } = partitionCatalogRules(
-      [{ provider: "other-provider", pattern: "combo-model" }],
-      usage,
-    );
-    expect(used).toEqual([]);
+  it("ignores non-user pins by key shape", () => {
+    // A pin without a usable shape still cannot match a rule.
+    const summary = summarizeClearRules(rules, [{ provider: "acme", pattern: "other-*" }]);
+    expect(summary.all.bound).toEqual([]);
+  });
+});
+
+describe("clearScopeRules", () => {
+  it("keeps bound rules unless includeBound is set", () => {
+    const summary = summarizeClearRules(rules, pins);
+    expect(clearScopeRules(summary, "all", false).map((r) => r.pattern)).toEqual(["exact-model", "combo-*", "global-*"]);
+    expect(clearScopeRules(summary, "all", true).map((r) => r.pattern)).toEqual(["pinned-model", "exact-model", "combo-*", "global-*"]);
+  });
+
+  it("scopes by pattern shape", () => {
+    const summary = summarizeClearRules(rules, pins);
+    expect(clearScopeRules(summary, "glob", false).map((r) => r.pattern)).toEqual(["combo-*", "global-*"]);
+    expect(clearScopeRules(summary, "exact", false).map((r) => r.pattern)).toEqual(["exact-model"]);
+    expect(clearScopeRules(summary, "exact", true).map((r) => r.pattern)).toEqual(["pinned-model", "exact-model"]);
+  });
+
+  it("falls back to the full set for an unknown scope", () => {
+    const summary = summarizeClearRules(rules, pins);
+    expect(clearScopeRules(summary, "nope", true)).toHaveLength(4);
   });
 });

@@ -1,4 +1,5 @@
 import { createErrorResult, parseUpstreamError, formatProviderError } from "../utils/error.js";
+import { providerDisplayLabel } from "../utils/providerLabel.js";
 import { HTTP_STATUS } from "../config/runtimeConfig.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
 import { getExecutor } from "../executors/index.js";
@@ -37,6 +38,9 @@ export async function handleImageGenerationCore({
   onRequestSuccess,
 }) {
   const { provider, model } = modelInfo;
+  // Display-only label: compatible nodes read as their prefix, not the
+  // generated provider id, in client errors and logs.
+  const displayProvider = providerDisplayLabel(provider, credentials?.providerSpecificData);
 
   if (!body.prompt) {
     return createErrorResult(HTTP_STATUS.BAD_REQUEST, "Missing required field: prompt");
@@ -46,14 +50,14 @@ export async function handleImageGenerationCore({
   if (!adapter) {
     return createErrorResult(
       HTTP_STATUS.BAD_REQUEST,
-      `Provider '${provider}' does not support image generation`
+      `Provider '${displayProvider}' does not support image generation`
     );
   }
 
   // Executor-delegating adapters: skip manual URL/headers/body, use the proven executor flow
   if (adapter.useExecutor && adapter.executeViaExecutor) {
     try {
-      log?.debug?.("IMAGE", `${provider.toUpperCase()} | ${model} | prompt="${body.prompt.slice(0, 50)}..." (executor)`);
+      log?.debug?.("IMAGE", `${displayProvider.toUpperCase()} | ${model} | prompt="${body.prompt.slice(0, 50)}..." (executor)`);
       const responseBody = await adapter.executeViaExecutor(model, body, credentials, log);
       if (onRequestSuccess) await onRequestSuccess();
       const normalized = adapter.normalize(responseBody, body.prompt);
@@ -100,10 +104,10 @@ export async function handleImageGenerationCore({
     requestBody = await adapter.buildBody(model, body);
     headers = adapter.buildHeaders(credentials, requestBody, model, body);
   } catch (error) {
-    return createErrorResult(HTTP_STATUS.BAD_REQUEST, error.message || `Invalid ${provider} image request`);
+    return createErrorResult(HTTP_STATUS.BAD_REQUEST, error.message || `Invalid ${displayProvider} image request`);
   }
 
-  log?.debug?.("IMAGE", `${provider.toUpperCase()} | ${model} | prompt="${body.prompt.slice(0, 50)}..."`);
+  log?.debug?.("IMAGE", `${displayProvider.toUpperCase()} | ${model} | prompt="${body.prompt.slice(0, 50)}..."`);
 
   let providerResponse;
   try {
@@ -133,7 +137,7 @@ export async function handleImageGenerationCore({
     );
 
     if (newCredentials?.accessToken || newCredentials?.apiKey) {
-      log?.info?.("TOKEN", `${provider.toUpperCase()} | refreshed for image generation`);
+      log?.info?.("TOKEN", `${displayProvider.toUpperCase()} | refreshed for image generation`);
       Object.assign(credentials, newCredentials);
       if (onCredentialsRefreshed) await onCredentialsRefreshed(newCredentials);
 
@@ -147,10 +151,10 @@ export async function handleImageGenerationCore({
           body: serializeRequestBody(retryBody),
         });
       } catch {
-        log?.warn?.("TOKEN", `${provider.toUpperCase()} | retry after refresh failed`);
+        log?.warn?.("TOKEN", `${displayProvider.toUpperCase()} | retry after refresh failed`);
       }
     } else {
-      log?.warn?.("TOKEN", `${provider.toUpperCase()} | refresh failed`);
+      log?.warn?.("TOKEN", `${displayProvider.toUpperCase()} | refresh failed`);
     }
   }
 
@@ -183,7 +187,7 @@ export async function handleImageGenerationCore({
       parsed = await providerResponse.json();
     }
   } catch (parseError) {
-    return createErrorResult(HTTP_STATUS.BAD_GATEWAY, parseError.message || `Invalid response from ${provider}`);
+    return createErrorResult(HTTP_STATUS.BAD_GATEWAY, parseError.message || `Invalid response from ${displayProvider}`);
   }
 
   if (onRequestSuccess) await onRequestSuccess();

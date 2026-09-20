@@ -175,7 +175,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   let toolNameMap;
   let customToolNames;
   if (passthrough) {
-    log?.debug?.("PASSTHROUGH", `${clientTool} → ${provider} | native lossless`);
+    log?.debug?.("PASSTHROUGH", `${clientTool} → ${displayProvider} | native lossless`);
     translatedBody = { ...body, model: stripThinkingSuffix(upstreamModel) };
     if (provider === "codex") {
       const suffixThinking = {};
@@ -482,7 +482,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     return createErrorResult(statusCode, errMsg, resetsAtMs);
   }
 
-  const sharedCtx = { provider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, responseModelOverride, pxpipe: pxpipeSummary, reqTag, log, timeoutOverrides };
+  const sharedCtx = { provider, displayProvider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, responseModelOverride, pxpipe: pxpipeSummary, reqTag, log, timeoutOverrides };
   const appendLog = (extra) => appendRequestLog({ model, provider, connectionId, ...extra }).catch(() => { });
   const trackDone = () => trackPendingRequest(model, provider, connectionId, false);
 

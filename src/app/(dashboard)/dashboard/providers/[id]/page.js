@@ -51,6 +51,12 @@ const RETRY_DEFAULT_TRIES = 2;
 const RETRY_MIN_BACKOFF_SEC = 1;
 const RETRY_MAX_BACKOFF_SEC = 30;
 const RETRY_DEFAULT_BACKOFF_SEC = 16;
+const RETRY_MODE_MEMBER = "member";
+const RETRY_MODE_PER_KEY = "per-key";
+const RETRY_MODE_OPTIONS = [
+  { value: RETRY_MODE_MEMBER, label: "Per member (all keys, then wait)" },
+  { value: RETRY_MODE_PER_KEY, label: "Per key (each key on its own)" },
+];
 
 function parseRetryTries(raw) {
   if (raw === "" || raw == null) return null;
@@ -122,7 +128,7 @@ export default function ProviderDetailPage() {
   const [providerStickyLimit, setProviderStickyLimit] = useState("");
   const [thinkingMode, setThinkingMode] = useState("auto");
   const [timeoutInputs, setTimeoutInputs] = useState({ connect: "", firstChunk: "", stall: "" });
-  const [retryCfg, setRetryCfg] = useState({ enabled: false, tries: "", maxBackoffSeconds: "" });
+  const [retryCfg, setRetryCfg] = useState({ enabled: false, tries: "", maxBackoffSeconds: "", mode: RETRY_MODE_MEMBER });
   const [autoPing, setAutoPing] = useState({ enabled: false, connections: {} });
   const [suggestedModels, setSuggestedModels] = useState([]);
   const [liveModels, setLiveModels] = useState([]);
@@ -398,6 +404,7 @@ export default function ProviderDetailPage() {
         enabled: retryCfgRaw.enabled === true,
         tries: retryCfgRaw.tries != null ? String(retryCfgRaw.tries) : "",
         maxBackoffSeconds: retryCfgRaw.maxBackoffSeconds != null ? String(retryCfgRaw.maxBackoffSeconds) : "",
+        mode: retryCfgRaw.mode === RETRY_MODE_PER_KEY ? RETRY_MODE_PER_KEY : RETRY_MODE_MEMBER,
       });
       const autoPingSettingsKey = AUTO_PING_SETTINGS_KEYS[providerId];
       const apCfg = autoPingSettingsKey ? settingsData[autoPingSettingsKey] || {} : {};
@@ -579,6 +586,7 @@ export default function ProviderDetailPage() {
           enabled: true,
           tries: next.tries,
           maxBackoffSeconds: next.maxBackoffSeconds,
+          mode: next.mode === RETRY_MODE_PER_KEY ? RETRY_MODE_PER_KEY : RETRY_MODE_MEMBER,
         };
       }
       await fetch("/api/settings", {
@@ -598,9 +606,10 @@ export default function ProviderDetailPage() {
       enabled,
       tries: enabled ? String(tries) : retryCfg.tries,
       maxBackoffSeconds: enabled ? String(maxBackoffSeconds) : retryCfg.maxBackoffSeconds,
+      mode: retryCfg.mode,
     };
     setRetryCfg(next);
-    saveProviderRetries({ enabled, tries: enabled ? tries : 0, maxBackoffSeconds });
+    saveProviderRetries({ enabled, tries: enabled ? tries : 0, maxBackoffSeconds, mode: retryCfg.mode });
   };
 
   const handleRetryTriesChange = (raw) => {
@@ -609,7 +618,7 @@ export default function ProviderDetailPage() {
     const tries = parseRetryTries(raw);
     if (tries === undefined || tries === null) return;
     const maxBackoffSeconds = parseRetryBackoffSec(retryCfg.maxBackoffSeconds) ?? RETRY_DEFAULT_BACKOFF_SEC;
-    saveProviderRetries({ enabled: true, tries, maxBackoffSeconds });
+    saveProviderRetries({ enabled: true, tries, maxBackoffSeconds, mode: retryCfg.mode });
   };
 
   const handleRetryBackoffChange = (raw) => {
@@ -618,7 +627,15 @@ export default function ProviderDetailPage() {
     const maxBackoffSeconds = parseRetryBackoffSec(raw);
     if (maxBackoffSeconds === undefined || maxBackoffSeconds === null) return;
     const tries = parseRetryTries(retryCfg.tries) ?? RETRY_DEFAULT_TRIES;
-    saveProviderRetries({ enabled: true, tries, maxBackoffSeconds });
+    saveProviderRetries({ enabled: true, tries, maxBackoffSeconds, mode: retryCfg.mode });
+  };
+
+  const handleRetryModeChange = (mode) => {
+    setRetryCfg({ ...retryCfg, mode });
+    if (!retryCfg.enabled) return;
+    const tries = parseRetryTries(retryCfg.tries) ?? RETRY_DEFAULT_TRIES;
+    const maxBackoffSeconds = parseRetryBackoffSec(retryCfg.maxBackoffSeconds) ?? RETRY_DEFAULT_BACKOFF_SEC;
+    saveProviderRetries({ enabled: true, tries, maxBackoffSeconds, mode });
   };
 
   const saveAutoPing = async (next) => {
@@ -740,7 +757,7 @@ export default function ProviderDetailPage() {
     }
   };
 
-  const handleAddCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias, catalogRef, name, quiet = false) => {
+  const handleAddCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias, catalogRef, name, quiet = false, skipRefresh = false) => {
     try {
       const res = await fetch("/api/models/custom", {
         method: "POST",
@@ -748,8 +765,12 @@ export default function ProviderDetailPage() {
         body: JSON.stringify({ providerAlias: providerAliasOverride, id: modelId, type, catalogRef: catalogRef || null, ...(name ? { name } : {}) }),
       });
       if (res.ok) {
-        await fetchCustomModels();
-        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
+        // Batch callers (model import) skip the per-add refetch and refresh once
+        // at the end instead of pulling the whole list for every model.
+        if (!skipRefresh) {
+          await fetchCustomModels();
+          if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
+        }
         return true;
       }
       const data = await res.json();
@@ -1162,13 +1183,14 @@ export default function ProviderDetailPage() {
   };
 
   // Snapshot one model's resolved detail into a provider-scoped user catalog
-  // rule, then pin the imported row to it. When the import dialog supplied a
-  // field mapping for the raw /models entry, that mapping wins; unmapped models
-  // fall back to the resolved /api/models/detail path. Best-effort: false on
-  // any failure.
-  const snapshotModelToCatalog = async (modelId, rawMapping = null) => {
+  // rule and return the catalogRef to pin the imported row to. When the import
+  // dialog supplied a field mapping for the raw /models entry, that mapping
+  // wins; unmapped models fall back to the resolved /api/models/detail path.
+  // Best-effort: null on any failure, so the caller imports the model unpinned.
+  const saveModelCatalogRule = async (modelId, rawMapping = null) => {
     try {
       const provider = providerStorageAlias.toLowerCase();
+      const catalogRef = { source: "user", provider, pattern: modelId };
       if (rawMapping?.raw) {
         const body = buildCatalogRuleBodyFromRaw({
           provider,
@@ -1177,10 +1199,7 @@ export default function ProviderDetailPage() {
           mapping: rawMapping.mapping,
           currencyRate: rawMapping.currencyRate,
         });
-        if (body && await saveCatalogRule(body)) {
-          await handleAddCustomModel(modelId, "llm", providerStorageAlias, { source: "user", provider, pattern: modelId }, undefined, true);
-          return true;
-        }
+        if (body && await saveCatalogRule(body)) return catalogRef;
       }
 
       const prefixes = [providerStorageAlias];
@@ -1194,15 +1213,13 @@ export default function ProviderDetailPage() {
           break;
         }
       }
-      if (!detail) return false;
+      if (!detail) return null;
       const body = buildCatalogRuleBody({ provider, pattern: modelId, detail });
-      if (!body) return false;
-      if (!(await saveCatalogRule(body))) return false;
-      await handleAddCustomModel(modelId, "llm", providerStorageAlias, { source: "user", provider, pattern: modelId }, undefined, true);
-      return true;
+      if (!body) return null;
+      return (await saveCatalogRule(body)) ? catalogRef : null;
     } catch (error) {
       console.log("Error saving model capabilities to catalog:", error);
-      return false;
+      return null;
     }
   };
 
@@ -1214,10 +1231,15 @@ export default function ProviderDetailPage() {
       let importedCount = 0;
       let catalogCount = 0;
       for (const modelId of ids) {
-        const added = await handleAddCustomModel(modelId, "llm", providerStorageAlias, null, undefined, true);
+        // Save the catalog rule first so the model can be added once, already
+        // pinned, instead of adding then re-adding to attach catalogRef.
+        const catalogRef = fetchCapabilities
+          ? await saveModelCatalogRule(modelId, { raw: importEntriesById[modelId], mapping, currencyRate })
+          : null;
+        const added = await handleAddCustomModel(modelId, "llm", providerStorageAlias, catalogRef, undefined, true, true);
         if (!added) continue;
         importedCount += 1;
-        if (fetchCapabilities && await snapshotModelToCatalog(modelId, { raw: importEntriesById[modelId], mapping, currencyRate })) catalogCount += 1;
+        if (catalogRef) catalogCount += 1;
       }
       await refreshModelLists();
       if (importedCount === 0) {
@@ -2273,8 +2295,8 @@ export default function ProviderDetailPage() {
           <h2 className="text-lg font-semibold">Combo Retries</h2>
           <p className="text-sm text-text-muted">
             When this provider fails inside a combo with a transient error (rate limit, overloaded, network),
-            retry the same member before moving to the next provider. Off by default. Local exponential backoff
-            is capped per retry; genuine provider reset times beyond the cap still skip to the next member.
+            retry before moving to the next provider. Off by default. Local exponential backoff is capped per
+            retry; genuine provider reset times beyond the cap still skip to the next member.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-4">
@@ -2287,6 +2309,17 @@ export default function ProviderDetailPage() {
           </div>
           {retryCfg.enabled && (
             <>
+              <Select
+                label="Retry behaviour"
+                value={retryCfg.mode}
+                onChange={(e) => handleRetryModeChange(e.target.value)}
+                options={RETRY_MODE_OPTIONS}
+                selectClassName="min-w-56"
+                hint={retryCfg.mode === RETRY_MODE_PER_KEY
+                  ? "Each key gets its own extra tries before the next key; once all keys are exhausted the combo moves on."
+                  : "Every key is tried first, then the whole member is retried after the wait."
+                }
+              />
               <Input
                 label="Extra tries"
                 type="number"
@@ -2295,7 +2328,10 @@ export default function ProviderDetailPage() {
                 placeholder={`Default: ${RETRY_DEFAULT_TRIES}`}
                 value={retryCfg.tries}
                 onChange={(e) => handleRetryTriesChange(e.target.value)}
-                hint="Same-member attempts after the first failure (1–10)."
+                hint={retryCfg.mode === RETRY_MODE_PER_KEY
+                  ? "Extra attempts per key after its first failure (1–10)."
+                  : "Same-member attempts after the first failure (1–10)."
+                }
               />
               <Input
                 label="Max backoff"

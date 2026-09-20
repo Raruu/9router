@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  clearUserEntries,
   deleteUserEntry,
   errorResponse,
   saveUserEntry,
@@ -78,8 +79,13 @@ export async function PUT(request) {
 
 export async function DELETE(request) {
   try {
-    const identity = await request.json();
-    await deleteUserEntry(identity);
+    const payload = await request.json();
+    // Bulk clear: { scope: "all" | "glob" | "exact", includeBound?: boolean }.
+    // Single-entry delete keeps { provider, pattern } (row trash icon).
+    if (payload?.scope !== undefined) {
+      return NextResponse.json({ success: true, ...(await clearUserEntries(payload)) });
+    }
+    await deleteUserEntry(payload);
     return NextResponse.json({ success: true });
   } catch (error) {
     const { status, body } = errorResponse(error);

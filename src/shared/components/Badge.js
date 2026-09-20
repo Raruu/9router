@@ -9,6 +9,10 @@ const variants = {
   warning: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400",
   error: "bg-red-500/10 text-red-600 dark:text-red-400",
   info: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+  // API-family chips for compatible nodes. Solid fills, so the ring keeps the
+  // white one legible on light cards.
+  openai: "bg-white text-black ring-1 ring-black/10",
+  anthropic: "bg-[#e56a4a] text-white",
 };
 
 const sizes = {
