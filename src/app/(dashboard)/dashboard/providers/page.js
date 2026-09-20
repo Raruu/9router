@@ -866,6 +866,16 @@ function ApiKeyProviderCard({
             <div className="min-w-0">
               <h3 className="truncate font-semibold">{provider.name}</h3>
               <div className="flex min-w-0 items-center gap-1.5 text-xs flex-wrap">
+                {isCompatible && (
+                  <Badge variant="openai" size="sm">
+                    OpenAI
+                  </Badge>
+                )}
+                {isAnthropicCompatible && (
+                  <Badge variant="anthropic" size="sm">
+                    Anthropic
+                  </Badge>
+                )}
                 {allDisabled ? (
                   <Badge variant="default" size="sm">
                     <span className="flex items-center gap-1">
