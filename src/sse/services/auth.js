@@ -10,6 +10,21 @@ import * as log from "../utils/logger.js";
 // Mutex to prevent race conditions during account selection
 let selectionMutex = Promise.resolve();
 
+// Display label for error paths that have no credentials object to read a
+// prefix from (e.g. "No credentials for provider"). Falls back to a connection
+// lookup so a compatible node still reads as its prefix; returns the id when
+// nothing better exists. Label-only — never throws.
+export async function resolveProviderDisplayLabel(provider, providerSpecificData) {
+  const direct = providerDisplayLabel(provider, providerSpecificData);
+  if (direct !== provider) return direct;
+  try {
+    const connections = await getProviderConnections({ provider });
+    const prefix = connections?.find((c) => c?.providerSpecificData?.prefix)?.providerSpecificData?.prefix;
+    if (typeof prefix === "string" && prefix.trim()) return prefix.trim();
+  } catch { /* best-effort label */ }
+  return provider;
+}
+
 const GITHUB_MONTHLY_USAGE_LIMIT = "you've reached your additional usage limit for your plan";
 
 function githubMonthlyResetMs(status, errorText, provider) {
@@ -71,7 +86,8 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     }
 
     const connections = await getProviderConnections({ provider: providerId, isActive: true });
-    log.debug("AUTH", `${provider} | total connections: ${connections.length}, excludeIds: ${excludeSet.size > 0 ? [...excludeSet].join(",") : "none"}, model: ${model || "any"}`);
+    const displayProvider = providerDisplayLabel(provider, connections[0]?.providerSpecificData);
+    log.debug("AUTH", `${displayProvider} | total connections: ${connections.length}, excludeIds: ${excludeSet.size > 0 ? [...excludeSet].join(",") : "none"}, model: ${model || "any"}`);
 
     if (connections.length === 0) {
       log.warn("AUTH", `No credentials for ${provider}`);
@@ -98,7 +114,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       return true;
     });
 
-    log.debug("AUTH", `${provider} | available: ${availableConnections.length}/${connections.length}`);
+    log.debug("AUTH", `${displayProvider} | available: ${availableConnections.length}/${connections.length}`);
     connections.forEach(c => {
       const excluded = excludeSet.has(c.id);
       const locked = isModelLockActive(c, model);
@@ -121,7 +137,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
       const earliest = expiries.sort()[0] || null;
       if (earliest) {
         const earliestConn = lockedConns[0];
-        log.warn("AUTH", `${provider} | all ${connections.length} accounts locked for ${model || "all"} (${formatRetryAfter(earliest)}) | lastError=${earliestConn?.lastError?.slice(0, 50)}`);
+        log.warn("AUTH", `${providerDisplayLabel(provider, earliestConn?.providerSpecificData)} | all ${connections.length} accounts locked for ${model || "all"} (${formatRetryAfter(earliest)}) | lastError=${earliestConn?.lastError?.slice(0, 50)}`);
         return {
           allRateLimited: true,
           retryAfter: earliest,
@@ -133,7 +149,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
           providerSpecificData: { prefix: earliestConn?.providerSpecificData?.prefix },
         };
       }
-      log.warn("AUTH", `${provider} | all ${connections.length} accounts unavailable`);
+      log.warn("AUTH", `${displayProvider} | all ${connections.length} accounts unavailable`);
       return null;
     }
 
@@ -147,7 +163,7 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
     if (preferredConnectionId) {
       connection = availableConnections.find((c) => c.id === preferredConnectionId);
       if (connection) {
-        log.info("AUTH", `${provider} | pinned to ${connection.id?.slice(0, 8)} (${connection.name || connection.email || "unnamed"})`);
+        log.info("AUTH", `${providerDisplayLabel(provider, connection.providerSpecificData)} | pinned to ${connection.id?.slice(0, 8)} (${connection.name || connection.email || "unnamed"})`);
       }
     }
     if (connection) {

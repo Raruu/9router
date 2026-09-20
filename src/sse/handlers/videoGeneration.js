@@ -4,11 +4,13 @@ import {
   clearAccountError,
   extractApiKey,
   isValidApiKey,
+  resolveProviderDisplayLabel,
 } from "../services/auth.js";
 import { getSettings, getProviderConnectionById } from "@/lib/localDb";
 import { getModelInfo } from "../services/model.js";
 import { handleVideoProxyCore, getVideoConfig, sanitizeSecrets } from "open-sse/handlers/videoCore.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
+import { providerModelTag } from "open-sse/utils/providerLabel.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
 import * as log from "../utils/logger.js";
@@ -138,10 +140,12 @@ export async function handleVideoCreate(request, action) {
       if (credentials?.allRateLimited) {
         const errorMsg = lastError || credentials.lastError || "Unavailable";
         const status = lastStatus || Number(credentials.lastErrorCode) || HTTP_STATUS.SERVICE_UNAVAILABLE;
-        return unavailableResponse(status, `[${provider}/${model || "video"}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman);
+        const tag = providerModelTag(provider, credentials.providerSpecificData, model || "video");
+        return unavailableResponse(status, `[${tag}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman);
       }
       if (excludeConnectionIds.size === 0) {
-        return errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${provider}`);
+        const label = await resolveProviderDisplayLabel(provider);
+        return errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${label}`);
       }
       return errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable");
     }
@@ -205,7 +209,8 @@ export async function handleVideoGet(request, requestId) {
 
   const credentials = await getProviderCredentials(provider, null, null, { preferredConnectionId });
   if (!credentials || credentials.allRateLimited) {
-    return errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${provider}`);
+    const label = await resolveProviderDisplayLabel(provider, credentials?.providerSpecificData);
+    return errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${label}`);
   }
 
   const refreshedCredentials = await checkAndRefreshToken(provider, credentials);

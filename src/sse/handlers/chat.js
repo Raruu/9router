@@ -6,6 +6,7 @@ import {
   clearAccountError,
   extractApiKey,
   isValidApiKey,
+  resolveProviderDisplayLabel,
 } from "../services/auth.js";
 import { handleAntigravityQuotaError, clearAntigravityStrikes } from "../services/antigravityQuota.js";
 import { getSettings } from "@/lib/localDb";
@@ -300,10 +301,11 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         );
       }
       if (excludeConnectionIds.size === 0) {
-        log.warn("AUTH", `No active credentials for provider: ${provider}`);
-        return errorResponse(HTTP_STATUS.NOT_FOUND, `No active credentials for provider: ${provider}`);
+        const label = await resolveProviderDisplayLabel(provider);
+        log.warn("AUTH", `No active credentials for provider: ${label}`);
+        return errorResponse(HTTP_STATUS.NOT_FOUND, `No active credentials for provider: ${label}`);
       }
-      log.warn("CHAT", "No more accounts available", { provider });
+      log.warn("CHAT", "No more accounts available", { provider: await resolveProviderDisplayLabel(provider) });
       return withRetrySignal(
         errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable"),
         provider,

@@ -4,11 +4,13 @@ import {
   clearAccountError,
   extractApiKey,
   isValidApiKey,
+  resolveProviderDisplayLabel,
 } from "../services/auth.js";
 import { getSettings, getCombos } from "@/lib/localDb";
 import { AI_PROVIDERS, resolveProviderId } from "@/shared/constants/providers.js";
 import { handleFetchCore } from "open-sse/handlers/fetch/index.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
+import { providerDisplayLabel } from "open-sse/utils/providerLabel.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import * as log from "../utils/logger.js";
 import { updateProviderCredentials, checkAndRefreshToken } from "../services/tokenRefresh.js";
@@ -171,18 +173,20 @@ async function handleSingleProviderFetch(body, providerInput, request, apiKey, s
       if (credentials?.allRateLimited) {
         const errorMsg = lastError || credentials.lastError || "Unavailable";
         const status = lastStatus || Number(credentials.lastErrorCode) || HTTP_STATUS.SERVICE_UNAVAILABLE;
-        log.warn("FETCH", `[${providerId}] ${errorMsg} (${credentials.retryAfterHuman})`);
-        return unavailableResponse(status, `[${providerId}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman);
+        const label = providerDisplayLabel(providerId, credentials.providerSpecificData);
+        log.warn("FETCH", `[${label}] ${errorMsg} (${credentials.retryAfterHuman})`);
+        return unavailableResponse(status, `[${label}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman);
       }
       if (excludeConnectionIds.size === 0) {
-        log.error("AUTH", `No credentials for provider: ${providerId}`);
-        return errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${providerId}`);
+        const label = await resolveProviderDisplayLabel(providerId);
+        log.error("AUTH", `No credentials for provider: ${label}`);
+        return errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${label}`);
       }
-      log.warn("FETCH", "No more accounts available", { provider: providerId });
+      log.warn("FETCH", "No more accounts available", { provider: await resolveProviderDisplayLabel(providerId) });
       return errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable");
     }
 
-    log.info("AUTH", `\x1b[32mUsing ${providerId} account: ${credentials.connectionName}\x1b[0m`);
+    log.info("AUTH", `\x1b[32mUsing ${providerDisplayLabel(providerId, credentials.providerSpecificData)} account: ${credentials.connectionName}\x1b[0m`);
 
     const refreshedCredentials = await checkAndRefreshToken(providerId, credentials);
 

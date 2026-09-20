@@ -23,7 +23,7 @@ vi.mock("@/shared/constants/providers.js", () => ({
 }));
 vi.mock("@/sse/utils/logger.js", () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn() }));
 
-const { getProviderCredentials } = await import("../../src/sse/services/auth.js");
+const { getProviderCredentials, resolveProviderDisplayLabel } = await import("../../src/sse/services/auth.js");
 
 const PROVIDER = "anthropic-compatible-21e3714a-fa4b-4f78-8685-b113805ded1e";
 const MODEL = "kimi-k3";
@@ -63,5 +63,32 @@ describe("getProviderCredentials all-locked return", () => {
     const result = await getProviderCredentials(PROVIDER, null, MODEL);
     expect(result.allRateLimited).toBe(true);
     expect(result.providerSpecificData).toEqual({ prefix: undefined });
+  });
+});
+
+describe("resolveProviderDisplayLabel", () => {
+  it("prefers the prefix already in hand and skips the lookup", async () => {
+    await expect(resolveProviderDisplayLabel(PROVIDER, { prefix: "hcnsec" })).resolves.toBe("hcnsec");
+    expect(mocks.getProviderConnections).not.toHaveBeenCalled();
+  });
+
+  it("falls back to the first connection prefix when credentials are absent", async () => {
+    mocks.getProviderConnections.mockResolvedValue([
+      { id: "conn-a", providerSpecificData: {} },
+      { id: "conn-b", providerSpecificData: { prefix: "hcnsec" } },
+    ]);
+
+    await expect(resolveProviderDisplayLabel(PROVIDER)).resolves.toBe("hcnsec");
+    expect(mocks.getProviderConnections).toHaveBeenCalledWith({ provider: PROVIDER });
+  });
+
+  it("returns the provider id when no connection carries a prefix", async () => {
+    mocks.getProviderConnections.mockResolvedValue([]);
+    await expect(resolveProviderDisplayLabel(PROVIDER)).resolves.toBe(PROVIDER);
+  });
+
+  it("returns the provider id when the lookup throws", async () => {
+    mocks.getProviderConnections.mockRejectedValue(new Error("db down"));
+    await expect(resolveProviderDisplayLabel(PROVIDER)).resolves.toBe(PROVIDER);
   });
 });

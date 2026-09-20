@@ -1,4 +1,5 @@
 import { createErrorResult, parseUpstreamError, formatProviderError } from "../utils/error.js";
+import { providerDisplayLabel, providerModelTag } from "../utils/providerLabel.js";
 import { HTTP_STATUS, FETCH_CONNECT_TIMEOUT_MS } from "../config/runtimeConfig.js";
 import { getExecutor } from "../executors/index.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
@@ -19,6 +20,10 @@ export async function handleEmbeddingsCore({
   onRequestSuccess,
 }) {
   const { provider, model } = modelInfo;
+  // Display-only label: compatible nodes read as their prefix, not the
+  // generated provider id, in client errors and logs.
+  const displayProvider = providerDisplayLabel(provider, credentials?.providerSpecificData);
+  const tag = providerModelTag(provider, credentials?.providerSpecificData, model);
 
   // Validate input
   const input = body.input;
@@ -33,7 +38,7 @@ export async function handleEmbeddingsCore({
   if (!adapter) {
     return createErrorResult(
       HTTP_STATUS.BAD_REQUEST,
-      `Provider '${provider}' does not support embeddings.`
+      `Provider '${displayProvider}' does not support embeddings.`
     );
   }
 
@@ -54,10 +59,10 @@ export async function handleEmbeddingsCore({
     });
   } catch (error) {
     log?.debug?.("EMBEDDINGS", `Request build failed: ${error.message}`);
-    return createErrorResult(HTTP_STATUS.BAD_REQUEST, `[${provider}/${model}] ${error.message}`);
+    return createErrorResult(HTTP_STATUS.BAD_REQUEST, `[${tag}] ${error.message}`);
   }
 
-  log?.debug?.("EMBEDDINGS", `${provider.toUpperCase()} | ${model} | input_type=${Array.isArray(input) ? `array[${input.length}]` : "string"}`);
+  log?.debug?.("EMBEDDINGS", `${displayProvider.toUpperCase()} | ${model} | input_type=${Array.isArray(input) ? `array[${input.length}]` : "string"}`);
 
   let providerResponse;
   try {
@@ -89,7 +94,7 @@ export async function handleEmbeddingsCore({
     );
 
     if (newCredentials?.accessToken || newCredentials?.apiKey) {
-      log?.info?.("TOKEN", `${provider.toUpperCase()} | refreshed for embeddings`);
+      log?.info?.("TOKEN", `${displayProvider.toUpperCase()} | refreshed for embeddings`);
       Object.assign(credentials, newCredentials);
       if (onCredentialsRefreshed) await onCredentialsRefreshed(newCredentials);
 
@@ -102,10 +107,10 @@ export async function handleEmbeddingsCore({
           body: JSON.stringify(requestBody),
         });
       } catch {
-        log?.warn?.("TOKEN", `${provider.toUpperCase()} | retry after refresh failed`);
+        log?.warn?.("TOKEN", `${displayProvider.toUpperCase()} | retry after refresh failed`);
       }
     } else {
-      log?.warn?.("TOKEN", `${provider.toUpperCase()} | refresh failed`);
+      log?.warn?.("TOKEN", `${displayProvider.toUpperCase()} | refresh failed`);
     }
   }
 
@@ -120,7 +125,7 @@ export async function handleEmbeddingsCore({
   try {
     responseBody = await providerResponse.json();
   } catch {
-    return createErrorResult(HTTP_STATUS.BAD_GATEWAY, `Invalid JSON response from ${provider}`);
+    return createErrorResult(HTTP_STATUS.BAD_GATEWAY, `Invalid JSON response from ${displayProvider}`);
   }
 
   if (onRequestSuccess) await onRequestSuccess();
