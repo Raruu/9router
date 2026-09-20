@@ -4,7 +4,7 @@
 
 import { checkFallbackError, formatRetryAfter } from "./accountFallback.js";
 import { unavailableResponse } from "../utils/error.js";
-import { isRetryableStatus, MAX_RETRY_WAIT_MS } from "../config/retries.js";
+import { isRetryableStatus, MAX_RETRY_WAIT_MS, RETRY_MODE_PER_KEY } from "../config/retries.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
 
@@ -257,6 +257,9 @@ function getMemberRetryConfig(resolveMemberRetries, result) {
     if (!isRetryableStatus(signal.status)) return null;
     const cfg = resolveMemberRetries(signal.providerId);
     if (!cfg || cfg.enabled !== true) return null;
+    // Per-key mode spends its budget inside the member's account loop; once
+    // every key is exhausted the combo advances instead of waiting again.
+    if (cfg.mode === RETRY_MODE_PER_KEY) return null;
     const tries = Math.floor(cfg.tries);
     if (!Number.isFinite(tries) || tries <= 0) return null;
     const maxBackoffMs = Number.isFinite(cfg.maxBackoffMs)

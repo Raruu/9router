@@ -5,11 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   isRetryableStatus,
   resolveProviderRetries,
+  shouldRetrySameKey,
   MAX_MEMBER_RETRIES,
   MAX_RETRY_WAIT_MS,
   DEFAULT_MEMBER_RETRIES,
   DEFAULT_RETRY_BACKOFF_MS,
   MIN_RETRY_BACKOFF_MS,
+  RETRY_MODE_MEMBER,
+  RETRY_MODE_PER_KEY,
 } from "../../open-sse/config/retries.js";
 import { handleComboChat } from "../../open-sse/services/combo.js";
 import { checkFallbackError } from "../../open-sse/services/accountFallback.js";
@@ -42,7 +45,14 @@ describe("resolveProviderRetries", () => {
       enabled: true,
       tries: 3,
       maxBackoffMs: DEFAULT_RETRY_BACKOFF_MS,
+      mode: RETRY_MODE_MEMBER,
     });
+  });
+
+  it("carries an explicit retry mode and defaults unknown values to member", () => {
+    expect(resolveProviderRetries({ enabled: true, mode: RETRY_MODE_PER_KEY }).mode).toBe(RETRY_MODE_PER_KEY);
+    expect(resolveProviderRetries({ enabled: true, mode: "per_key" }).mode).toBe(RETRY_MODE_MEMBER);
+    expect(resolveProviderRetries({ enabled: true, mode: 5 }).mode).toBe(RETRY_MODE_MEMBER);
   });
 
   it("defaults tries when enabled without a usable count", () => {
@@ -81,6 +91,43 @@ describe("isRetryableStatus", () => {
     for (const s of [400, 401, 402, 403, 404, 500, null, undefined]) {
       expect(isRetryableStatus(s)).toBe(false);
     }
+  });
+});
+
+describe("shouldRetrySameKey", () => {
+  const base = {
+    mode: RETRY_MODE_PER_KEY,
+    status: 429,
+    attemptsUsed: 0,
+    tries: 2,
+    cooldownMs: 2000,
+    maxBackoffMs: 16000,
+  };
+
+  it("retries a transient key while budget and wait allow it", () => {
+    expect(shouldRetrySameKey(base)).toBe(true);
+    expect(shouldRetrySameKey({ ...base, attemptsUsed: 1 })).toBe(true);
+  });
+
+  it("stops once the per-key budget is spent", () => {
+    expect(shouldRetrySameKey({ ...base, attemptsUsed: 2 })).toBe(false);
+  });
+
+  it("only applies in per-key mode", () => {
+    expect(shouldRetrySameKey({ ...base, mode: RETRY_MODE_MEMBER })).toBe(false);
+    expect(shouldRetrySameKey({ ...base, mode: undefined })).toBe(false);
+  });
+
+  it("skips non-transient statuses and over-cap waits", () => {
+    expect(shouldRetrySameKey({ ...base, status: 401 })).toBe(false);
+    expect(shouldRetrySameKey({ ...base, status: 500 })).toBe(false);
+    expect(shouldRetrySameKey({ ...base, cooldownMs: 16001 })).toBe(false);
+    expect(shouldRetrySameKey({ ...base, cooldownMs: undefined })).toBe(false);
+  });
+
+  it("fails closed on malformed budgets", () => {
+    expect(shouldRetrySameKey({ ...base, tries: undefined })).toBe(false);
+    expect(shouldRetrySameKey({ ...base, tries: NaN })).toBe(false);
   });
 });
 
@@ -214,6 +261,23 @@ describe("handleComboChat same-member retries", () => {
     });
     expect(res.ok).toBe(true);
     expect(calls).toEqual(["p1/a", "p1/a", "p1/a", "p2/b"]);
+  });
+
+  it("advances without a member retry when the provider is in per-key mode", async () => {
+    const calls = [];
+    const res = await handleComboChat({
+      body: {},
+      models: ["p1/a", "p2/b"],
+      handleSingleModel: async (b, m) => {
+        calls.push(m);
+        return m === "p2/b" ? okResponse() : failResponse({ signal: transientSignal() });
+      },
+      log: silentLog,
+      comboName: "retry-per-key",
+      resolveMemberRetries: () => resolveProviderRetries({ enabled: true, tries: 2, mode: RETRY_MODE_PER_KEY }),
+    });
+    expect(res.ok).toBe(true);
+    expect(calls).toEqual(["p1/a", "p2/b"]);
   });
 
   it("uses all 10 retries when each lock is capped at 16 seconds", async () => {
@@ -486,6 +550,7 @@ describe("provider combo retries after restart", () => {
       enabled: true,
       tries: 2,
       maxBackoffMs: 12_000,
+      mode: RETRY_MODE_MEMBER,
     });
 
     // Once the pre-restart lock expires, the next 429 starts at level 1 (2s),
