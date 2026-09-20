@@ -740,7 +740,7 @@ export default function ProviderDetailPage() {
     }
   };
 
-  const handleAddCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias, catalogRef, name, quiet = false) => {
+  const handleAddCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias, catalogRef, name, quiet = false, skipRefresh = false) => {
     try {
       const res = await fetch("/api/models/custom", {
         method: "POST",
@@ -748,8 +748,12 @@ export default function ProviderDetailPage() {
         body: JSON.stringify({ providerAlias: providerAliasOverride, id: modelId, type, catalogRef: catalogRef || null, ...(name ? { name } : {}) }),
       });
       if (res.ok) {
-        await fetchCustomModels();
-        if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
+        // Batch callers (model import) skip the per-add refetch and refresh once
+        // at the end instead of pulling the whole list for every model.
+        if (!skipRefresh) {
+          await fetchCustomModels();
+          if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
+        }
         return true;
       }
       const data = await res.json();
@@ -1162,13 +1166,14 @@ export default function ProviderDetailPage() {
   };
 
   // Snapshot one model's resolved detail into a provider-scoped user catalog
-  // rule, then pin the imported row to it. When the import dialog supplied a
-  // field mapping for the raw /models entry, that mapping wins; unmapped models
-  // fall back to the resolved /api/models/detail path. Best-effort: false on
-  // any failure.
-  const snapshotModelToCatalog = async (modelId, rawMapping = null) => {
+  // rule and return the catalogRef to pin the imported row to. When the import
+  // dialog supplied a field mapping for the raw /models entry, that mapping
+  // wins; unmapped models fall back to the resolved /api/models/detail path.
+  // Best-effort: null on any failure, so the caller imports the model unpinned.
+  const saveModelCatalogRule = async (modelId, rawMapping = null) => {
     try {
       const provider = providerStorageAlias.toLowerCase();
+      const catalogRef = { source: "user", provider, pattern: modelId };
       if (rawMapping?.raw) {
         const body = buildCatalogRuleBodyFromRaw({
           provider,
@@ -1177,10 +1182,7 @@ export default function ProviderDetailPage() {
           mapping: rawMapping.mapping,
           currencyRate: rawMapping.currencyRate,
         });
-        if (body && await saveCatalogRule(body)) {
-          await handleAddCustomModel(modelId, "llm", providerStorageAlias, { source: "user", provider, pattern: modelId }, undefined, true);
-          return true;
-        }
+        if (body && await saveCatalogRule(body)) return catalogRef;
       }
 
       const prefixes = [providerStorageAlias];
@@ -1194,15 +1196,13 @@ export default function ProviderDetailPage() {
           break;
         }
       }
-      if (!detail) return false;
+      if (!detail) return null;
       const body = buildCatalogRuleBody({ provider, pattern: modelId, detail });
-      if (!body) return false;
-      if (!(await saveCatalogRule(body))) return false;
-      await handleAddCustomModel(modelId, "llm", providerStorageAlias, { source: "user", provider, pattern: modelId }, undefined, true);
-      return true;
+      if (!body) return null;
+      return (await saveCatalogRule(body)) ? catalogRef : null;
     } catch (error) {
       console.log("Error saving model capabilities to catalog:", error);
-      return false;
+      return null;
     }
   };
 
@@ -1214,10 +1214,15 @@ export default function ProviderDetailPage() {
       let importedCount = 0;
       let catalogCount = 0;
       for (const modelId of ids) {
-        const added = await handleAddCustomModel(modelId, "llm", providerStorageAlias, null, undefined, true);
+        // Save the catalog rule first so the model can be added once, already
+        // pinned, instead of adding then re-adding to attach catalogRef.
+        const catalogRef = fetchCapabilities
+          ? await saveModelCatalogRule(modelId, { raw: importEntriesById[modelId], mapping, currencyRate })
+          : null;
+        const added = await handleAddCustomModel(modelId, "llm", providerStorageAlias, catalogRef, undefined, true, true);
         if (!added) continue;
         importedCount += 1;
-        if (fetchCapabilities && await snapshotModelToCatalog(modelId, { raw: importEntriesById[modelId], mapping, currencyRate })) catalogCount += 1;
+        if (catalogRef) catalogCount += 1;
       }
       await refreshModelLists();
       if (importedCount === 0) {
