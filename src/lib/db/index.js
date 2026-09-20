@@ -57,7 +57,7 @@ export {
 export {
   getOpenRouterModels, replaceOpenRouterModels, clearOpenRouterModels, deleteOpenRouterModel,
   getUserModelCatalog, createUserModelCatalogRule, updateUserModelCatalogRule,
-  upsertUserModelCatalogRule, deleteUserModelCatalogRule,
+  upsertUserModelCatalogRule, deleteUserModelCatalogRule, deleteUserModelCatalogRules,
   replaceUserModelCatalog,
 } from "../modelCatalog/repository.js";
 

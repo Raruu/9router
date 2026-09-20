@@ -207,6 +207,76 @@ export async function deleteUserModelCatalogRule(provider, pattern) {
   return result.changes > 0;
 }
 
+// Lowercased `provider|pattern` identity for catalogRef matching. Deliberately
+// does not reuse normalizeProvider/normalizePattern: those validate and throw,
+// and a legacy pin with a junk provider must not abort a clear.
+function pinKey(provider, pattern) {
+  return `${String(provider || "*").trim().toLowerCase()}|${String(pattern || "").trim().toLowerCase()}`;
+}
+
+// Every user rule a custom model is currently pinned to.
+function pinIndex(db) {
+  const pins = new Set();
+  for (const row of db.all(`SELECT value FROM kv WHERE scope = 'customModels'`)) {
+    const ref = parseJson(row.value, {})?.catalogRef;
+    if (ref?.source !== "user") continue;
+    pins.add(pinKey(ref.provider, ref.pattern));
+  }
+  return pins;
+}
+
+// Drop catalogRef from every custom model pinned to one rule, so the model
+// falls back to Automatic. Returns how many models were unbound.
+function clearCatalogRefs(db, provider, pattern) {
+  const target = pinKey(provider, pattern);
+  let count = 0;
+  for (const row of db.all(`SELECT key, value FROM kv WHERE scope = 'customModels'`)) {
+    const model = parseJson(row.value, {});
+    if (model?.catalogRef?.source !== "user") continue;
+    if (pinKey(model.catalogRef.provider, model.catalogRef.pattern) !== target) continue;
+    delete model.catalogRef;
+    db.run(`UPDATE kv SET value = ? WHERE scope = 'customModels' AND key = ?`, [stringifyJson(model), row.key]);
+    count += 1;
+  }
+  return count;
+}
+
+// Bulk clear with an optional unbind. `scope` picks the rules:
+//   all   — every user rule
+//   glob  — patterns containing *
+//   exact — patterns without *
+// `includeBound` decides whether rules a custom model is pinned to are eligible.
+// When it is on, those models lose their catalogRef inside the same transaction,
+// so they fall back to Automatic instead of keeping a dangling pin; off leaves
+// both the rule and the pin untouched. Locked models unbind too — the rule they
+// pointed at is gone.
+export async function deleteUserModelCatalogRules({ scope = "all", includeBound = false } = {}) {
+  const db = await getAdapter();
+  const rules = db.all(`SELECT provider, pattern FROM userModelCatalog ORDER BY provider, pattern`);
+  const wanted = rules.filter((rule) => {
+    if (scope === "glob") return rule.pattern.includes("*");
+    if (scope === "exact") return !rule.pattern.includes("*");
+    return true;
+  });
+
+  const pins = pinIndex(db);
+  const deletable = wanted.filter((rule) => includeBound || !pins.has(pinKey(rule.provider, rule.pattern)));
+
+  let unbound = 0;
+  let deleted = 0;
+  db.transaction(() => {
+    for (const rule of deletable) {
+      db.run(`DELETE FROM userModelCatalog WHERE provider = ? AND pattern = ?`, [rule.provider, rule.pattern]);
+      deleted += 1;
+      if (!includeBound) continue;
+      unbound += clearCatalogRefs(db, rule.provider, rule.pattern);
+    }
+  });
+
+  await refreshRuntime();
+  return { deleted, unbound, skippedBound: wanted.length - deletable.length };
+}
+
 export async function replaceUserModelCatalog(rules) {
   const db = await getAdapter();
   db.transaction(() => {

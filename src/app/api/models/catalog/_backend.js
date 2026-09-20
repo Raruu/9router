@@ -3,6 +3,7 @@ import {
   createUserModelCatalogRule,
   deleteOpenRouterModel,
   deleteUserModelCatalogRule,
+  deleteUserModelCatalogRules,
   getOpenRouterModels,
   getSettings,
   getUserModelCatalog,
@@ -201,6 +202,18 @@ export async function deleteUserEntry(identity) {
     throw new CatalogBackendError("provider and pattern are required", 400);
   }
   return await deleteUserModelCatalogRule(provider, pattern);
+}
+
+export const CLEAR_SCOPES = ["all", "glob", "exact"];
+
+// Bulk clear. `scope` selects by pattern shape ("exact" = no wildcard),
+// `includeBound` decides whether rules a custom model is pinned to are eligible
+// — when they are, those models return to Automatic.
+export async function clearUserEntries({ scope = "all", includeBound = false } = {}) {
+  if (!CLEAR_SCOPES.includes(scope)) {
+    throw new CatalogBackendError(`scope must be one of ${CLEAR_SCOPES.join(", ")}`, 400);
+  }
+  return await deleteUserModelCatalogRules({ scope, includeBound: includeBound === true });
 }
 
 export async function setPriority(priority) {
