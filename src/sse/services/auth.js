@@ -127,7 +127,10 @@ export async function getProviderCredentials(provider, excludeConnectionIds = nu
           retryAfter: earliest,
           retryAfterHuman: formatRetryAfter(earliest),
           lastError: earliestConn?.lastError || null,
-          lastErrorCode: earliestConn?.errorCode || null
+          lastErrorCode: earliestConn?.errorCode || null,
+          // Display-only: lets handlers label the provider by its connection
+          // prefix instead of the generated compatible-node id.
+          providerSpecificData: { prefix: earliestConn?.providerSpecificData?.prefix },
         };
       }
       log.warn("AUTH", `${provider} | all ${connections.length} accounts unavailable`);

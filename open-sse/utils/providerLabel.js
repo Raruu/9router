@@ -10,3 +10,10 @@ export function providerDisplayLabel(provider, providerSpecificData) {
   if (typeof prefix === "string" && prefix.trim()) return prefix.trim();
   return provider;
 }
+
+// `provider/model` tag for console lines and client-visible error messages, so
+// a compatible node reads as its prefix ("hcnsec/kimi-k3") rather than the
+// generated id ("anthropic-compatible-<uuid>/kimi-k3").
+export function providerModelTag(provider, providerSpecificData, model) {
+  return `${providerDisplayLabel(provider, providerSpecificData)}/${model}`;
+}

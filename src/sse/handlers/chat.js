@@ -20,7 +20,7 @@ import { checkFallbackError } from "open-sse/services/accountFallback.js";
 import { augmentModelsWithCapacityAdapter, withCapacityAdapterStripping, getActiveAdapterStrategy } from "open-sse/services/capacityAdapter.js";
 import { handleBypassRequest } from "open-sse/utils/bypassHandler.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
-import { providerDisplayLabel } from "open-sse/utils/providerLabel.js";
+import { providerModelTag } from "open-sse/utils/providerLabel.js";
 import { resolveProviderTimeouts } from "open-sse/config/timeouts.js";
 import { resolveProviderRetries } from "open-sse/config/retries.js";
 import { detectFormatByEndpoint } from "open-sse/translator/formats.js";
@@ -290,9 +290,10 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       if (credentials?.allRateLimited) {
         const errorMsg = lastError || credentials.lastError || "Unavailable";
         const status = HTTP_STATUS.SERVICE_UNAVAILABLE;
-        log.warn("CHAT", `[${providerDisplayLabel(provider, credentials.providerSpecificData)}/${model}] ${errorMsg} (${credentials.retryAfterHuman})`);
+        const tag = providerModelTag(provider, credentials.providerSpecificData, model);
+        log.warn("CHAT", `[${tag}] ${errorMsg} (${credentials.retryAfterHuman})`);
         return withRetrySignal(
-          unavailableResponse(status, `[${provider}/${model}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman),
+          unavailableResponse(status, `[${tag}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman),
           provider,
           lastStatus,
           resolveRetryWaitMs(credentials.retryAfter, lastStatus, errorMsg)
