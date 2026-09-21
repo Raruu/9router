@@ -4,6 +4,7 @@ import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLock
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { providerDisplayLabel } from "open-sse/utils/providerLabel.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
+import { checkApiKeyLimit } from "@/shared/constants/apiKeyLimits";
 import { getAntigravityQuotaCache } from "./antigravityQuota.js";
 import * as log from "../utils/logger.js";
 
@@ -387,4 +388,104 @@ export function extractApiKey(request) {
 export async function isValidApiKey(apiKey) {
   if (!apiKey) return false;
   return await validateApiKey(apiKey);
+}
+
+/**
+ * Check whether a requested model is allowed for an API key.
+ * Patterns may be exact ids ("gpt-4o"), provider-prefixed ids
+ * ("oc/muse-spark-1.2-contributor-free"), provider wildcards ("oc/*",
+ * "openai/*") or globs ("*claude*"). null/empty list = everything allowed.
+ */
+export function isModelAllowedForKey(requestedModel, allowedModels) {
+  if (!allowedModels || !Array.isArray(allowedModels) || allowedModels.length === 0) {
+    return true;
+  }
+  if (!requestedModel || typeof requestedModel !== "string") {
+    return false;
+  }
+
+  const modelLower = requestedModel.trim().toLowerCase();
+  const parts = modelLower.split("/");
+  const modelNameOnly = parts.length > 1 ? parts.slice(1).join("/") : modelLower;
+  const prefix = parts.length > 1 ? parts[0] : "";
+
+  for (const rawPattern of allowedModels) {
+    if (!rawPattern || typeof rawPattern !== "string") continue;
+    const pattern = rawPattern.trim().toLowerCase();
+    if (pattern === "*" || pattern === modelLower || pattern === modelNameOnly) {
+      return true;
+    }
+    const patternParts = pattern.split("/");
+    const patternNameOnly = patternParts.length > 1 ? patternParts.slice(1).join("/") : pattern;
+    if (patternNameOnly === modelLower || patternNameOnly === modelNameOnly) {
+      return true;
+    }
+    // Pattern like "provider/*"
+    if (pattern.endsWith("/*")) {
+      const pfx = pattern.slice(0, -2);
+      if (prefix && prefix === pfx) return true;
+      if (modelLower.startsWith(`${pfx}/`)) return true;
+    }
+    // Wildcard pattern like "*gpt-4*"
+    if (pattern.includes("*")) {
+      const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+      const regex = new RegExp(`^${escaped}$`, "i");
+      if (regex.test(modelLower) || regex.test(modelNameOnly)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Validate an API key: active state, per-key usage limits (limitType) and
+ * model access. Returns { valid: true, keyRecord } or an HTTP error to relay.
+ */
+export async function validateApiKeyWithRules(apiKey, requestedModel = null) {
+  if (!apiKey) {
+    return { valid: false, error: "Missing API key", status: 401 };
+  }
+  const { getApiKeyByKey } = await import("@/lib/db/repos/apiKeysRepo.js");
+  const keyRecord = await getApiKeyByKey(apiKey);
+  if (!keyRecord) {
+    return { valid: false, error: "Invalid API key", status: 401 };
+  }
+  if (!keyRecord.isActive) {
+    return { valid: false, error: "API key is paused", status: 401 };
+  }
+  const limitError = checkApiKeyLimit(keyRecord);
+  if (limitError) {
+    return { valid: false, error: limitError, status: 429 };
+  }
+  if (requestedModel && !isModelAllowedForKey(requestedModel, keyRecord.allowedModels)) {
+    return {
+      valid: false,
+      error: `Model '${requestedModel}' is not allowed for this API key`,
+      status: 403,
+    };
+  }
+  return { valid: true, keyRecord };
+}
+
+/**
+ * Filter a /v1/models payload for the key on the request. A key with an
+ * `allowedModels` list only sees matching entries; a key without one — or no
+ * key at all — keeps the exposure-driven catalog exactly as built.
+ */
+export async function filterModelsForKey(request, data) {
+  try {
+    const apiKey = extractApiKey(request);
+    if (!apiKey) return data;
+    const { getApiKeyByKey } = await import("@/lib/db/repos/apiKeysRepo.js");
+    const keyRecord = await getApiKeyByKey(apiKey);
+    if (!keyRecord || !Array.isArray(keyRecord.allowedModels) || keyRecord.allowedModels.length === 0) {
+      return data;
+    }
+    return data.filter((m) => isModelAllowedForKey(m.id, keyRecord.allowedModels));
+  } catch {
+    // Fail open: a lookup problem must not hide the catalog.
+    return data;
+  }
 }

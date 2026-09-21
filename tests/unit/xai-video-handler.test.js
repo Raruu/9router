@@ -19,6 +19,8 @@ const authMocks = vi.hoisted(() => ({
   clearAccountError: vi.fn(async () => {}),
   extractApiKey: vi.fn(() => null),
   isValidApiKey: vi.fn(async () => true),
+  validateApiKeyWithRules: vi.fn(async () => ({ valid: true, keyRecord: null })),
+  isModelAllowedForKey: vi.fn(() => true),
   resolveProviderDisplayLabel: vi.fn(async (provider) => provider),
 }));
 const tokenMocks = vi.hoisted(() => ({

@@ -3,8 +3,8 @@ import {
   markAccountUnavailable,
   clearAccountError,
   extractApiKey,
-  isValidApiKey,
   resolveProviderDisplayLabel,
+  validateApiKeyWithRules,
 } from "../services/auth.js";
 import { getSettings } from "@/lib/localDb";
 import { getModelInfo, getComboModels } from "../services/model.js";
@@ -38,11 +38,18 @@ export async function handleImageGeneration(request) {
   const modelStr = body.model;
 
   const apiKey = extractApiKey(request);
+  // Enforce the API key when required, and always apply its per-key rules
+  // (limits, allowed models) when one is presented.
   const settings = await getSettings();
-  if (settings.requireApiKey) {
-    if (!apiKey) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
-    const valid = await isValidApiKey(apiKey);
-    if (!valid) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
+  if (apiKey) {
+    const keyCheck = await validateApiKeyWithRules(apiKey, modelStr);
+    if (!keyCheck.valid) {
+      log.warn("AUTH", `${keyCheck.error} (key=${log.maskKey(apiKey)})`);
+      return errorResponse(keyCheck.status || HTTP_STATUS.UNAUTHORIZED, keyCheck.error);
+    }
+  } else if (settings.requireApiKey) {
+    log.warn("AUTH", "Missing API key (requireApiKey=true)");
+    return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
   }
 
   if (!modelStr) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing model");

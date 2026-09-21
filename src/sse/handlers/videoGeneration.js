@@ -3,8 +3,9 @@ import {
   markAccountUnavailable,
   clearAccountError,
   extractApiKey,
-  isValidApiKey,
   resolveProviderDisplayLabel,
+  validateApiKeyWithRules,
+  isModelAllowedForKey,
 } from "../services/auth.js";
 import { getSettings, getProviderConnectionById } from "@/lib/localDb";
 import { getModelInfo } from "../services/model.js";
@@ -43,15 +44,20 @@ const CREATE_ROTATION_STATUSES = new Set([
   HTTP_STATUS.RATE_LIMITED,
 ]);
 
+// Returns { error } to relay or { keyRecord } for the caller to check model
+// access once the body has been parsed (the model lives in the request body).
 async function requireValidApiKey(request) {
   const apiKey = extractApiKey(request);
   const settings = await getSettings();
-  if (settings.requireApiKey) {
-    if (!apiKey) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key");
-    const valid = await isValidApiKey(apiKey);
-    if (!valid) return errorResponse(HTTP_STATUS.UNAUTHORIZED, "Invalid API key");
+  if (apiKey) {
+    const keyCheck = await validateApiKeyWithRules(apiKey, null);
+    if (!keyCheck.valid) {
+      return { error: errorResponse(keyCheck.status || HTTP_STATUS.UNAUTHORIZED, keyCheck.error) };
+    }
+    return { keyRecord: keyCheck.keyRecord };
   }
-  return null;
+  if (settings.requireApiKey) return { error: errorResponse(HTTP_STATUS.UNAUTHORIZED, "Missing API key") };
+  return {};
 }
 
 /**
@@ -109,8 +115,8 @@ function withConnectionHeader(response, connectionId) {
  * POST /v1/videos/{generations|edits|extensions} — async job creation proxy.
  */
 export async function handleVideoCreate(request, action) {
-  const authError = await requireValidApiKey(request);
-  if (authError) return authError;
+  const auth = await requireValidApiKey(request);
+  if (auth.error) return auth.error;
 
   const bodyInfo = await readForwardableBody(request);
   if (bodyInfo.error) return bodyInfo.error;
@@ -118,6 +124,10 @@ export async function handleVideoCreate(request, action) {
   const resolved = await resolveVideoProvider(bodyInfo.parsed);
   if (resolved.error) return resolved.error;
   const { provider, model } = resolved;
+
+  if (model && !isModelAllowedForKey(`${provider}/${model}`, auth.keyRecord?.allowedModels)) {
+    return errorResponse(HTTP_STATUS.FORBIDDEN, `Model '${provider}/${model}' is not allowed for this API key`);
+  }
 
   // Strip the provider prefix (e.g. "xai/grok-imagine-video") before forwarding;
   // otherwise forward the original bytes untouched.
@@ -199,8 +209,8 @@ export async function handleVideoCreate(request, action) {
  * caller pins the creating account via `x-connection-id` (returned on create).
  */
 export async function handleVideoGet(request, requestId) {
-  const authError = await requireValidApiKey(request);
-  if (authError) return authError;
+  const auth = await requireValidApiKey(request);
+  if (auth.error) return auth.error;
 
   if (!requestId) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Missing video request id");
 

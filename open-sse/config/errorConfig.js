@@ -73,6 +73,13 @@ export const ERROR_RULES = [
   { status: 402, cooldownMs: COOLDOWN.long },
   { status: 403, cooldownMs: COOLDOWN.long },
   { status: 404, cooldownMs: COOLDOWN.long },
+  // Transient 4xx that must keep rotating: timeouts, conflicts, locks and
+  // retry-later. Without an explicit rule these fall into the request-scoped
+  // 4xx catch-all in checkFallbackError and stop the chain instead.
+  { status: 408, cooldownMs: TRANSIENT_COOLDOWN_MS },
+  { status: 409, cooldownMs: TRANSIENT_COOLDOWN_MS },
+  { status: 423, cooldownMs: TRANSIENT_COOLDOWN_MS },
+  { status: 425, cooldownMs: TRANSIENT_COOLDOWN_MS },
   { status: 429, backoff: true },
 ];
 

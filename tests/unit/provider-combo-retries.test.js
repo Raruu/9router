@@ -409,6 +409,37 @@ describe("handleComboChat same-member retries", () => {
   });
 });
 
+describe("handleComboChat member advancement on a request-scoped 4xx", () => {
+  it("advances past a member whose upstream rejected the request", async () => {
+    const calls = [];
+    const res = await handleComboChat({
+      body: {},
+      models: ["p1/a", "p2/b"],
+      handleSingleModel: async (b, m) => {
+        calls.push(m);
+        return m === "p2/b" ? okResponse() : failResponse({ status: 400, message: "invalid request" });
+      },
+      log: silentLog,
+      comboName: "combo-4xx-advance",
+    });
+    expect(res.ok).toBe(true);
+    expect(calls).toEqual(["p1/a", "p2/b"]);
+  });
+
+  it("surfaces the upstream 4xx when every member fails with it", async () => {
+    const res = await handleComboChat({
+      body: {},
+      models: ["p1/a", "p2/b"],
+      handleSingleModel: async () => failResponse({ status: 400, message: "invalid request" }),
+      log: silentLog,
+      comboName: "combo-4xx-all-fail",
+    });
+    expect(res.ok).toBe(false);
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toEqual({ error: { message: "invalid request" } });
+  });
+});
+
 describe("handleComboChat same-member wait lines", () => {
   it("marks the retry line with the attempt count and a humanized wait", async () => {
     const { lines, log } = captureLog();

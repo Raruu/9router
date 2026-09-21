@@ -2314,6 +2314,7 @@ export default function ProviderDetailPage() {
                 value={retryCfg.mode}
                 onChange={(e) => handleRetryModeChange(e.target.value)}
                 options={RETRY_MODE_OPTIONS}
+                className="flex-1 min-w-48"
                 selectClassName="min-w-56"
                 hint={retryCfg.mode === RETRY_MODE_PER_KEY
                   ? "Each key gets its own extra tries before the next key; once all keys are exhausted the combo moves on."
@@ -2323,6 +2324,7 @@ export default function ProviderDetailPage() {
               <Input
                 label="Extra tries"
                 type="number"
+                className="flex-1 min-w-48"
                 min={RETRY_MIN_TRIES}
                 max={RETRY_MAX_TRIES}
                 placeholder={`Default: ${RETRY_DEFAULT_TRIES}`}
@@ -2336,6 +2338,7 @@ export default function ProviderDetailPage() {
               <Input
                 label="Max backoff"
                 type="number"
+                className="flex-1 min-w-48"
                 min={RETRY_MIN_BACKOFF_SEC}
                 max={RETRY_MAX_BACKOFF_SEC}
                 placeholder={`Default: ${RETRY_DEFAULT_BACKOFF_SEC}s`}

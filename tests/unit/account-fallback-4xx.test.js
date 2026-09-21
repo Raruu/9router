@@ -5,6 +5,7 @@
 // looked like the same failure in unrelated sessions.
 import { describe, expect, it } from "vitest";
 import { checkFallbackError } from "../../open-sse/services/accountFallback.js";
+import { TRANSIENT_COOLDOWN_MS } from "../../open-sse/config/errorConfig.js";
 
 describe("checkFallbackError — request-scoped vs account-scoped failures", () => {
   it("does not cool the account down for a 400 caused by the request", () => {
@@ -21,6 +22,15 @@ describe("checkFallbackError — request-scoped vs account-scoped failures", () 
   it("still falls back for account-scoped statuses", () => {
     for (const status of [401, 402, 403, 404, 429]) {
       expect(checkFallbackError(status, "nope").shouldFallback).toBe(true);
+    }
+  });
+
+  it("keeps rotating for transient 4xx the catch-all would otherwise suppress", () => {
+    for (const status of [408, 409, 423, 425]) {
+      expect(checkFallbackError(status, "nope")).toEqual({
+        shouldFallback: true,
+        cooldownMs: TRANSIENT_COOLDOWN_MS,
+      });
     }
   });
 

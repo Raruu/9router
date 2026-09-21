@@ -1,3 +1,31 @@
+# v0.5.81-3 (2026-09-21)
+
+## Features
+- **API Keys**: per-key model access and usage limits — allowed model patterns
+  (exact ids, `oc/*`, `*claude*`) gate routing (403) and `/v1/models`, and a
+  Usage Limit selector covers No limit / Token / Request / Token or request.
+  The key row shows both counters with progress bars plus reset-usage and
+  rotate-key actions (rotation reissues the value on the same record). Enforced
+  in chat, embeddings, image, stt, tts, search, fetch and video; unrestricted
+  keys keep following the Model List setting. Based on #4073 by @miqonee
+- **Usage**: per-API-key attribution keeps the keyId in the mask so keys on one
+  instance no longer collapse into a single bucket, and the cost breakdown uses
+  per-component rates (input / cached / cache-write / output) instead of a
+  blended token share, back-filled for daily rows written before it existed.
+  Based on #4216 by @yangwei-x
+
+## Fixes
+- **Combo / accounts**: a request-scoped 4xx (context overflow, validation) no
+  longer stops the chain — combos advance to the next member again, and
+  transient 4xx (408/409/423/425) rotate accounts. Upstream v0.5.81's catch-all
+  had suppressed both
+- **Providers**: the per-key retry hint no longer wraps the Combo Retries row
+  onto a second line (the three fields share the row evenly)
+
+## Improvements
+- **API Keys**: unlimited keys skip the per-request counter write — their usage
+  stays visible in the Usage dashboard, only the quota counters are untracked
+
 # v0.5.81-2 (2026-09-20)
 
 ## Features
