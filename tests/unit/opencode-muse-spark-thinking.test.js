@@ -214,12 +214,26 @@ describe("OpenCode Free Muse Spark thinking", () => {
     // User message, function_call, function_call_output, and next user message survive
     const types = out.input.map((item) => item.type);
     expect(types).toEqual(["message", "function_call", "function_call_output", "message"]);
-    // Tools flattened and empty properties added
+    // Tools flattened and empty properties added, then cloaked with the
+    // free-tier bash/read decoys (upstream 403s any Responses request whose
+    // tools payload lacks both — see OpenCodeExecutor.cloakOpencodeTools).
     expect(out.tools).toEqual([
       {
         type: "function",
         name: "shell",
         description: "Run shell command",
+        parameters: { type: "object", properties: {} },
+      },
+      {
+        type: "function",
+        name: "bash",
+        description: "This tool is currently unavailable and must not be used.",
+        parameters: { type: "object", properties: {} },
+      },
+      {
+        type: "function",
+        name: "read",
+        description: "This tool is currently unavailable and must not be used.",
         parameters: { type: "object", properties: {} },
       },
     ]);

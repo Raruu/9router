@@ -23,7 +23,10 @@ export default {
     forceStream: true,
     noAuth: true,
     quirks: {
-      forceAutoToolChoiceModels: ["muse-spark-1.3-contributor-free"],
+      forceAutoToolChoiceModels: [
+        "muse-spark-1.2-contributor-free",
+        "muse-spark-1.3-contributor-free",
+      ],
     },
   },
   models: [
