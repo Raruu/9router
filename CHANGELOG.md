@@ -1,3 +1,12 @@
+# v0.5.81-4 (2026-09-21)
+
+## Fixes
+- **OpenCode Free**: Responses requests that carry tools no longer 403 with
+  `FreeTierError` — the executor now cloaks the `bash` + `read` decoy tools
+  and forces `tool_choice: "auto"` on every Responses request (was: empty tool
+  lists only), and `muse-spark-1.2-contributor-free` joins the auto-only
+  tool-choice quirk. Based on #4165 by @suryacagur
+
 # v0.5.81-3 (2026-09-21)
 
 ## Features
