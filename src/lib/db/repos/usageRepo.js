@@ -383,12 +383,17 @@ export async function saveRequestUsage(entry) {
         ]
       );
 
-      // Increment usedTokens on apiKey if request used a key
+      // Per-key counters: tokens and completed requests feed key quota
+      // enforcement (see checkApiKeyLimit). Runs inside the transaction so a
+      // key's counters can never drift from the usage row that produced them.
+      // Unlimited keys (limitType "none", or pre-migration NULL) write nothing —
+      // there is no quota to steer, and their usage stays visible in usageHistory.
       if (entry.apiKey && typeof entry.apiKey === "string") {
         const totalTokens = (promptTokens || 0) + (completionTokens || 0);
-        if (totalTokens > 0) {
-          db.run(`UPDATE apiKeys SET usedTokens = COALESCE(usedTokens, 0) + ? WHERE key = ?`, [totalTokens, entry.apiKey]);
-        }
+        db.run(
+          `UPDATE apiKeys SET usedTokens = COALESCE(usedTokens, 0) + ?, usedRequests = COALESCE(usedRequests, 0) + 1 WHERE key = ? AND COALESCE(limitType, 'none') != 'none'`,
+          [totalTokens, entry.apiKey]
+        );
       }
 
       const dateKey = getLocalDateKey(entry.timestamp);

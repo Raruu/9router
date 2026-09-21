@@ -704,7 +704,8 @@ export async function GET(request) {
     const skipDynamicFetch = request?.headers?.get(INTERNAL_MODELS_FETCH_HEADER) === "1";
     const { exposure, comboLimitStrategy, comboEffortStrategy } = await resolveCatalogOptions(request);
     const data = await buildModelsList([LLM_KIND], { skipDynamicFetch, exposure, comboLimitStrategy, comboEffortStrategy });
-    return Response.json({ object: "list", data }, {
+    const { filterModelsForKey } = await import("@/sse/services/auth.js");
+    return Response.json({ object: "list", data: await filterModelsForKey(request, data) }, {
       headers: { "Access-Control-Allow-Origin": "*" },
     });
   } catch (error) {
