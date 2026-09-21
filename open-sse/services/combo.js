@@ -396,13 +396,11 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
         try { errorText = JSON.stringify(errorText); } catch { errorText = String(errorText); }
       }
 
-      // Check if should fallback to next model
-      const { shouldFallback, cooldownMs } = checkFallbackError(result.status, errorText);
-
-      if (!shouldFallback) {
-        log.warn("COMBO", `Model ${modelStr} failed (no fallback)`, { status: result.status });
-        return result;
-      }
+      // Cooldown length for the transient wait below. Account-cooling policy —
+      // the request-scoped 4xx catch-all in checkFallbackError — must not stop
+      // the combo trying its next member: another provider or model can still
+      // serve the request, and no account state is written here.
+      const { cooldownMs } = checkFallbackError(result.status, errorText);
 
       // Same-member retry on transient failures when the serving provider opted in.
       const retryConfig = getMemberRetryConfig(resolveMemberRetries, result);
