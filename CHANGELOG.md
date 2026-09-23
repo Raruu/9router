@@ -1,3 +1,53 @@
+# v0.5.85-1 (2026-09-22)
+
+Merged upstream v0.5.85 into the fork. This section includes the full upstream
+release notes and the fork-side merge work. The fork's PR #4165 OpenCode
+free-tier Responses-tools fix is superseded by upstream's evolved
+`opencodeFingerprint.js` (same author, same symptom) — upstream's file wins
+wholesale, matching how v0.5.81-1 handled the earlier #4132 fingerprint.
+
+## Features
+- **System One**: add `/v1/systemone` decision endpoint for Jev models (OpenCode Zen and OpenRouter lanes), wire into sidebar and Media Providers page with interactive probe testing
+- **CLI Tools**: add dynamic configuration, settings APIs, and official logos for Pi, OMP, Crush, ForgeCode, Smelt, and CodeWhale
+- **Analytics & Usage**: add Requests mode, provider/model breakdown charts, All Time period filter, and refined overview cards
+- **Combos**: add Cursor/Claude Default presets; support bulk select/delete and bulk strategy changes (Fallback / Round Robin / Fusion)
+- **Model Capabilities**: expose model capability metadata on `/v1/models` and aggregate capabilities across combo targets
+- **OpenCode Zen & MiMo**: add OpenCode Zen (`opencode-zen`) provider with free-tier fingerprint; switch default vision fallback to MiMo V2.6 Flash Free
+- **Qoder CN**: add `qoder-cn` provider for qoder.com.cn with OAuth flow, COSY protocol, and CN gateway routing
+
+## Fixes
+- **Translator**: map Claude `refusal` stop_reason to `content_filter` and surface explanation; strip replayed reasoning fields for Groq, Mistral, and Cerebras (#4220)
+- **Antigravity**: drop requestType `agent` to avoid false 429 `RESOURCE_EXHAUSTED`; separate weekly and short-window (5-hour) quotas and deduplicate dashboard rows
+- **Responses API**: report usage on `response.completed` so clients can auto-compact (#3432)
+- **Hugging Face**: migrate to Inference Providers router (`router.huggingface.co`), expand image models catalog, and add STT route
+- **Qoder**: prevent signed request replay (`403/103 Duplicate request`), handle code 110 billing blocks, and preserve upstream SSE error status
+- **Performance**: bound usage `lastUsed` scan to a 2-day window; map large budget tokens to `max` reasoning tier
+- **Docker**: publish verified multi-platform images (linux/amd64 and linux/arm64) with configurable apk build mirrors
+
+## Fork merge notes
+- The fork's `cloakOpencodeTools` (PR #4165) is replaced by upstream's
+  `applyFingerprintTools`: it canonicalises the `bash`/`glob`/`grep`/`read`
+  quartet, de-duplicates case variants, appends missing members on every
+  Responses request, and restores the caller's original tool spellings on the
+  response side. The fork-side tests were updated to the 4-tool expectation.
+- Conflict resolutions kept both sides where features coexist:
+  `chatCore/sseToJsonHandler.js` + `chatCore/nonStreamingHandler.js` (fork's
+  `responseModelOverride` **and** upstream's `toolNameMap`/`restoreToolNames`),
+  `usageRepo.js` (fork latency percentiles + cost breakdown + local-day cutoff
+  + upstream's 2-day `lastUsed` overlay, `ORDER BY dateKey ASC` and the
+  `requests` bucket field alongside the fork's `ttft`/`requestCount`),
+  `api/v1/models/route.js` (fork `comboCapabilities`/`comboEffortTiers` + upstream's
+  `resolveQoderLiveModels`), `dashboard/combos/page.js` (fork search/sort +
+  upstream bulk-select/presets), `UsageChart.js` (fork latency view + upstream
+  Requests view), `providers/[id]/page.js` (fork clear-forms + upstream
+  Qoder/Cline import buttons) and `capabilities.js` (fork `*qwen3.8*` patterns
+  + upstream's `vision` on `*qwen*max*`)
+- `Dockerfile` takes upstream's parametric Alpine/NPM mirrors and
+  `APP_VERSION` label, dropping the fork's hardcoded CN mirror default
+- Registry `opencode.js` keeps the fork's `union-alpha` Messages route and the
+  `forceAutoToolChoiceModels` entry for `muse-spark-1.2-contributor-free`
+  alongside upstream's `jev-1.13-free` System One lane
+
 # v0.5.81-4 (2026-09-21)
 
 ## Fixes
