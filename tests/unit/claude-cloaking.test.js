@@ -9,10 +9,14 @@
 import { describe, it, expect } from "vitest";
 import { applyCloaking, cloakClaudeTools, decloakStreamChunk } from "../../open-sse/utils/claudeCloaking.js";
 import { CLAUDE_TOOL_SUFFIX } from "../../open-sse/config/appConstants.js";
+import { CLAUDE_CLI_VERSION } from "../../open-sse/providers/shared.js";
 
 it("advertises a Claude Code version accepted by Fable 5.1", () => {
   const body = applyCloaking({ messages: [] }, "sk-ant-oat-test", "session-id");
-  expect(body.system[0].text).toMatch(/^x-anthropic-billing-header: cc_version=2.1.258\./);
+  // Read the constant instead of pinning a literal: upstream bumped it to
+  // 2.1.280 in v0.5.86 and this assertion was left behind, failing the suite.
+  const version = CLAUDE_CLI_VERSION.replace(/\./g, "\\.");
+  expect(body.system[0].text).toMatch(new RegExp(`^x-anthropic-billing-header: cc_version=${version}\\.`));
 });
 
 describe("cloakClaudeTools", () => {
