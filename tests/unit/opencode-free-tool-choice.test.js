@@ -10,12 +10,16 @@ vi.mock("../../open-sse/utils/proxyFetch.js", () => ({
 // Break caught: Muse Spark free Responses models 400 vì upstream
 // chỉ nhận tool_choice "auto"; named/required/none phải demote sang "auto".
 // Live 2026-09-19: both 1.2-free and 1.3-free reject non-auto with 400, and any
-// Responses request without both 'bash'+'read' tools returns 403 FreeTierError.
+// Responses request without the full bash/glob/grep/read fingerprint returns
+// 403 FreeTierError (see utils/opencodeFingerprint.js).
 const FREE_12 = "muse-spark-1.2-contributor-free";
 const FREE_13 = "muse-spark-1.3-contributor-free";
 const CREDS = { connectionId: "opencode-free-tool-choice-test" };
 const INPUT = [{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] }];
 const TOOLS = [{ type: "function", name: "get_weather", description: "w", parameters: { type: "object", properties: {} } }];
+// Fingerprint quartet appended after caller tools when absent.
+const FINGERPRINT = ["bash", "glob", "grep", "read"];
+const TOOLS_WITH_FINGERPRINT = ["get_weather", ...FINGERPRINT];
 
 function responsesBody(model, tool_choice) {
   const body = { model, input: structuredClone(INPUT), tools: structuredClone(TOOLS) };
@@ -39,8 +43,8 @@ describe("opencode Free tool_choice auto-only", () => {
       const body = responsesBody(model, structuredClone(choice));
       const out = new OpenCodeExecutor().transformRequest(model, body, true, CREDS);
       expect(out.tool_choice).toBe("auto");
-      // Cloak: original tool preserved + bash/read decoys (prevents 403 FreeTierError)
-      expect(out.tools.map((t) => t.name)).toEqual(["get_weather", "bash", "read"]);
+      // Fingerprint: original tool preserved + quartet appended (prevents 403 FreeTierError)
+      expect(out.tools.map((t) => t.name)).toEqual(TOOLS_WITH_FINGERPRINT);
       expect(out.input).toEqual(INPUT);
     }
   });
@@ -50,15 +54,15 @@ describe("opencode Free tool_choice auto-only", () => {
       FREE_13, responsesBody(FREE_13, "auto"), true, CREDS,
     );
     expect(autoOut.tool_choice).toBe("auto");
-    expect(autoOut.tools.map((t) => t.name)).toEqual(["get_weather", "bash", "read"]);
+    expect(autoOut.tools.map((t) => t.name)).toEqual(TOOLS_WITH_FINGERPRINT);
     expect(autoOut.input).toEqual(INPUT);
 
     const absentOut = new OpenCodeExecutor().transformRequest(
       FREE_13, responsesBody(FREE_13, undefined), true, CREDS,
     );
-    // Cloak defaults missing choice to auto so upstream never sees absent + tools
+    // Fingerprint defaults missing choice to auto so upstream never sees absent + tools
     expect(absentOut.tool_choice).toBe("auto");
-    expect(absentOut.tools.map((t) => t.name)).toEqual(["get_weather", "bash", "read"]);
+    expect(absentOut.tools.map((t) => t.name)).toEqual(TOOLS_WITH_FINGERPRINT);
     expect(absentOut.input).toEqual(INPUT);
   });
 
@@ -88,21 +92,35 @@ describe("opencode Free tool_choice auto-only", () => {
     const sent = JSON.parse(actualInit.body);
     expect(sent.tool_choice).toBe("auto");
     expect(sent.model).toBe(FREE_13);
-    expect(sent.tools.map((t) => t.name)).toEqual(["get_weather", "bash", "read"]);
+    expect(sent.tools.map((t) => t.name)).toEqual(TOOLS_WITH_FINGERPRINT);
     expect(sent.input).toEqual(INPUT);
   });
 
-  it("cloak 46 external tools: tambah bash/read agar lolos FreeTierError", () => {
+  it("fingerprint 46 external tools: tambah kuartet agar lolos FreeTierError", () => {
     const tools46 = Array.from({ length: 46 }, (_, i) => ({
       type: "function", name: `ext_tool_${i}`, description: "d", parameters: { type: "object", properties: {} },
     }));
     const body = { model: FREE_13, input: structuredClone(INPUT), tools: tools46 };
     const out = new OpenCodeExecutor().transformRequest(FREE_13, body, true, CREDS);
-    expect(out.tools).toHaveLength(48);
+    expect(out.tools).toHaveLength(50);
     const names = new Set(out.tools.map((t) => t.name));
-    expect(names.has("bash")).toBe(true);
-    expect(names.has("read")).toBe(true);
+    for (const n of FINGERPRINT) expect(names.has(n)).toBe(true);
     expect(names.has("ext_tool_0")).toBe(true);
     expect(out.tool_choice).toBe("auto");
+  });
+
+  it("fingerprint: canonicalise case variants and drop duplicate quartet members", () => {
+    const body = {
+      model: FREE_13,
+      input: structuredClone(INPUT),
+      tools: [
+        { type: "function", name: "Bash", description: "x", parameters: { type: "object", properties: {} } },
+        { type: "function", name: "bash", description: "y", parameters: { type: "object", properties: {} } },
+        ...structuredClone(TOOLS),
+      ],
+    };
+    const out = new OpenCodeExecutor().transformRequest(FREE_13, body, true, CREDS);
+    // Only one lowercase 'bash' survives; the quartet is completed.
+    expect(out.tools.map((t) => t.name)).toEqual(["bash", "get_weather", ...FINGERPRINT.filter((n) => n !== "bash")]);
   });
 });

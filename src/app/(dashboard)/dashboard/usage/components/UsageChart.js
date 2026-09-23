@@ -25,6 +25,20 @@ const fmtTokens = (n) => {
 };
 
 const fmtCost = (n) => `$${(n || 0).toFixed(4)}`;
+const fmtRequests = (n) => String(n || 0);
+
+const VIEW_MODES = [
+  { value: "tokens", label: "Tokens" },
+  { value: "requests", label: "Requests" },
+  { value: "cost", label: "Cost" },
+  { value: "latency", label: "Latency" },
+];
+
+const VIEW_CONFIG = {
+  tokens:   { dataKey: "tokens",   color: "#6366f1", gradId: "gradTokens",   formatter: fmtTokens,   label: "Tokens" },
+  requests: { dataKey: "requests", color: "#14b8a6", gradId: "gradRequests", formatter: fmtRequests, label: "Requests" },
+  cost:     { dataKey: "cost",     color: "#f59e0b", gradId: "gradCost",     formatter: fmtCost,     label: "Cost" },
+};
 
 const HIDDEN_MODELS_STORAGE_KEY = "usage-chart:hidden-latency-models";
 
@@ -189,6 +203,7 @@ export default function UsageChart({
     return (key) => byKey.get(key) ?? key;
   }, [latency.data]);
 
+  const cfg = VIEW_CONFIG[viewMode] || VIEW_CONFIG.tokens;
   const hasData = data.some((d) => d.tokens > 0 || d.cost > 0);
   const chartHeight = latency.data.length > 0
     ? Math.max(140, latency.data.length * 22 + 50)
@@ -197,25 +212,19 @@ export default function UsageChart({
   return (
     <Card className="flex min-w-0 flex-col gap-3 p-3 sm:p-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="grid w-full grid-cols-3 items-center gap-1 rounded-lg border border-border bg-bg-subtle p-1 sm:w-auto">
-          <button
-            onClick={() => setViewMode("tokens")}
-            className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${viewMode === "tokens" ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-text hover:bg-bg-hover"}`}
-          >
-            Tokens
-          </button>
-          <button
-            onClick={() => setViewMode("cost")}
-            className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${viewMode === "cost" ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-text hover:bg-bg-hover"}`}
-          >
-            Cost
-          </button>
-          <button
-            onClick={() => setViewMode("latency")}
-            className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${viewMode === "latency" ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-text hover:bg-bg-hover"}`}
-          >
-            Latency
-          </button>
+        <div
+          className="grid w-full items-center gap-1 rounded-lg border border-border bg-bg-subtle p-1 sm:w-auto"
+          style={{ gridTemplateColumns: `repeat(${VIEW_MODES.length}, minmax(0, 1fr))` }}
+        >
+          {VIEW_MODES.map((m) => (
+            <button
+              key={m.value}
+              onClick={() => setViewMode(m.value)}
+              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${viewMode === m.value ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-text hover:bg-bg-hover"}`}
+            >
+              {m.label}
+            </button>
+          ))}
         </div>
 
         <div className="flex items-center gap-2 self-end sm:self-auto">
@@ -402,6 +411,10 @@ export default function UsageChart({
                 <stop offset="5%" stopColor="#6366f1" stopOpacity={0.25} />
                 <stop offset="95%" stopColor="#6366f1" stopOpacity={0} />
               </linearGradient>
+              <linearGradient id="gradRequests" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%" stopColor="#14b8a6" stopOpacity={0.25} />
+                <stop offset="95%" stopColor="#14b8a6" stopOpacity={0} />
+              </linearGradient>
               <linearGradient id="gradCost" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="#f59e0b" stopOpacity={0.25} />
                 <stop offset="95%" stopColor="#f59e0b" stopOpacity={0} />
@@ -419,7 +432,7 @@ export default function UsageChart({
               tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.5 }}
               tickLine={false}
               axisLine={false}
-              tickFormatter={viewMode === "tokens" ? fmtTokens : fmtCost}
+              tickFormatter={cfg.formatter}
               width={50}
             />
             <Tooltip
@@ -429,33 +442,17 @@ export default function UsageChart({
                 borderRadius: "8px",
                 fontSize: "12px",
               }}
-              formatter={(value, name) => {
-                if (name === "tokens") return [fmtTokens(value), "Tokens"];
-                if (name === "cost") return [fmtCost(value), "Cost"];
-                return [value, name];
-              }}
+formatter={(value) => [cfg.formatter(value), cfg.label]}
             />
-            {viewMode === "tokens" ? (
-              <Area
-                type="monotone"
-                dataKey="tokens"
-                stroke="#6366f1"
-                strokeWidth={2}
-                fill="url(#gradTokens)"
-                dot={false}
-                activeDot={{ r: 4 }}
-              />
-            ) : (
-              <Area
-                type="monotone"
-                dataKey="cost"
-                stroke="#f59e0b"
-                strokeWidth={2}
-                fill="url(#gradCost)"
-                dot={false}
-                activeDot={{ r: 4 }}
-              />
-            )}
+            <Area
+              type="monotone"
+              dataKey={cfg.dataKey}
+              stroke={cfg.color}
+              strokeWidth={2}
+              fill={`url(#${cfg.gradId})`}
+              dot={false}
+              activeDot={{ r: 4 }}
+            />
           </AreaChart>
         </ResponsiveContainer>
       )}

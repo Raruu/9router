@@ -96,6 +96,14 @@ by the same author — upstream's file wins wholesale.
 - **i18n**: integrate Persian (fa) translation
 
 ## Fixes
+- **Cursor**: stop AgentService empty turns (`OUT 0`) and silent hangs — fold
+  system prompts instead of `custom_system_prompt`, send `ModelDetails`, read
+  Composer/Grok `thinking_delta`, ack request-context without echoing MCP tools,
+  and reject IDE execs so the model can continue
+- **RTK**: for Cursor, compress source-format `tool_result` / `role:tool`
+  **before** translation — its translator rewrites those shapes, so
+  post-translate compression missed them. Other providers keep the
+  post-translate pass unchanged
 - **OpenCode / OpenCode Go**: resolve 403 `FreeTierError` and 429 rate limits
   with canonical session format, valid User-Agent, and stable upstream session
   reuse (one long-lived session per downstream identity, evicted by
