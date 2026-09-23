@@ -2,6 +2,8 @@ import { EventEmitter } from "events";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { getMeta, setMeta } from "../helpers/metaStore.js";
+import { vacuumAdapter } from "../helpers/maintenance.js";
+import { purgeDeleteStatements } from "../helpers/purgeOps.js";
 
 // Keys are `sk-{machineId}-{keyId}-{crc8}` and machineId is shared by every key on
 // an instance, so masking a fixed-length head collapses all of them to one string.
@@ -439,6 +441,27 @@ export async function getUsageHistory(filter = {}) {
     connectionId: r.connectionId, apiKeyMasked: maskApiKey(r.apiKey), endpoint: r.endpoint,
     cost: r.cost, status: r.status, tokens: parseJson(r.tokens, {}),
   }));
+}
+
+// Wipe every Overview data source: the raw request log, the per-day rollup the
+// charts/cards read, and the lifetime counter. Deliberately does NOT touch the
+// apiKeys quota counters (usedTokens/usedRequests) — those track key quota
+// enforcement, not display history — nor in-flight pendingRequests.
+// The in-memory recentRequests ring is seeded from usageHistory, so it must be
+// emptied too or stale rows resurface until the next restart.
+export async function clearUsageHistory() {
+  const db = await getAdapter();
+  let deleted = 0;
+  db.transaction(() => {
+    const cnt = db.get(`SELECT COUNT(*) as c FROM usageHistory`);
+    deleted = cnt ? cnt.c : 0;
+    for (const sql of purgeDeleteStatements("overview")) db.run(sql);
+  });
+  recentRing.items = [];
+  recentRing.initialized = true;
+  vacuumAdapter(db);
+  scheduleStatsEvent("update", 0);
+  return { deleted };
 }
 
 function loadDaysInRange(adapter, maxDays) {

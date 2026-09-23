@@ -649,36 +649,6 @@ export default function ProfilePage() {
     }
   };
 
-  const updateObservabilityEnabled = async (enabled) => {
-    try {
-      const res = await fetch("/api/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enableObservability: enabled }),
-      });
-      if (res.ok) {
-        setSettings(prev => ({ ...prev, enableObservability: enabled }));
-      }
-    } catch (err) {
-      console.error("Failed to update enableObservability:", err);
-    }
-  };
-
-  const updateObservabilityShowBodies = async (enabled) => {
-    try {
-      const res = await fetch("/api/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ observabilityShowBodies: enabled }),
-      });
-      if (res.ok) {
-        setSettings(prev => ({ ...prev, observabilityShowBodies: enabled }));
-      }
-    } catch (err) {
-      console.error("Failed to update observabilityShowBodies:", err);
-    }
-  };
-
   const reloadSettings = async () => {
     try {
       const res = await fetch("/api/settings");
@@ -768,9 +738,6 @@ export default function ProfilePage() {
     if (mode === "export") await handleExportDatabase(password);
     else if (mode === "import") await runImportDatabase(password);
   };
-
-  const observabilityEnabled = settings.enableObservability === true;
-  const observabilityShowBodies = settings.observabilityShowBodies === true;
 
   const handleShutdown = async () => {
     setIsShuttingDown(true);
@@ -1632,43 +1599,6 @@ export default function ProfilePage() {
                 {proxyStatus.message}
               </p>
             )}
-          </div>
-        </Card>
-
-        {/* Observability Settings */}
-        <Card>
-          <div className="flex items-center gap-3 mb-4">
-            <div className="p-2 rounded-lg bg-orange-500/10 text-orange-500 shrink-0">
-              <span className="material-symbols-outlined text-[20px]">monitoring</span>
-            </div>
-            <h3 className="text-base sm:text-lg font-semibold">Observability</h3>
-          </div>
-          <div className="flex items-start sm:items-center justify-between gap-4">
-            <div className="flex-1 min-w-0">
-              <p className="font-medium text-sm sm:text-base">Enable Observability</p>
-              <p className="text-xs sm:text-sm text-text-muted">
-                Record request details for inspection in the logs view
-              </p>
-            </div>
-            <Toggle
-              checked={observabilityEnabled}
-              onChange={updateObservabilityEnabled}
-              disabled={loading}
-            />
-          </div>
-          <div className="flex items-start sm:items-center justify-between gap-4 mt-4 pt-4 border-t border-border">
-            <div className="flex-1 min-w-0">
-              <p className="font-medium text-sm sm:text-base">Show request bodies</p>
-              <p className="text-xs sm:text-sm text-text-muted">
-                Serve full request/response payloads in request details instead of
-                redacting them. Disable this if the dashboard is shared with others.
-              </p>
-            </div>
-            <Toggle
-              checked={observabilityShowBodies}
-              onChange={updateObservabilityShowBodies}
-              disabled={loading}
-            />
           </div>
         </Card>
 

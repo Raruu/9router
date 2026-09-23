@@ -1,3 +1,43 @@
+# v0.5.86-1 (2026-09-23)
+
+Merged upstream v0.5.86 into the fork. This section includes the full upstream
+release notes and the fork-side merge work.
+
+## Features
+- **Xiaomi MiMo**: server-assisted desktop login for headless/Docker deployments, five account clusters (cn/sgp/ams/ru/in), and v2.6 pro/flash/pro-ultraspeed models with dual-route (account service vs. cloud API)
+- **Claude**: add Claude Opus 5.5 support
+- **i18n**: translate React text rewrites via characterData mutation observer
+
+## Fixes
+- **Proxy Pools**: keep request headers intact through Vercel/Cloudflare/Deno relays (spreading a `Headers` instance yielded `{}`, dropping auth and content-type)
+- **Xiaomi MiMo login**: keep the session in the httpOnly cookie only, require dashboard auth on the proxy branch, and stop forwarding authorization headers upstream
+
+## Fork merge notes
+- Conflict resolutions kept both sides: `package.json` / `cli/package.json`
+  stay on the fork version (`0.5.86-1`) and `CHANGELOG.md` keeps the fork
+  section layout, so upstream's notes are folded into this entry rather than
+  kept as a separate `# v0.5.86` heading.
+- `open-sse/providers/thinkingLevels.js` auto-merged: upstream's new
+  `*mimo*v2.6*` pattern lands in the pattern table while the fork's rewritten
+  `getThinkingLevels` (explicit user-catalog list → format override → pattern
+  table → capability format → default) is preserved. Added a regression test
+  pinning that the v2.6 pattern is still reachable through the fallback branch,
+  since a mistake there would silently downgrade the picker to the deepseek
+  default (`high|max`).
+- `src/dashboardGuard.js` auto-merged: the fork's extracted
+  `@/lib/auth/cliToken` import and upstream's new `export { isAuthenticated }`
+  (needed by the MiMo login proxy in `src/proxy.js`) coexist.
+- Upstream's MiMo account-route work replaces the fork's untouched
+  `mimo-x-*-preview` code wholesale: `isPreviewModel`/`PREVIEW_MODELS` become
+  `isAccountRoute`/`ACCOUNT_MODELS`, and the executor now falls back to the
+  cloud API (sk- key) instead of throwing when no desktop session exists.
+- `tests/__baseline__/providers-baseline.json` refreshed for the
+  `CLAUDE_CLI_VERSION` bump (2.1.258 → 2.1.280) that flows into the claude
+  provider headers.
+- Upstream bumped `CLAUDE_CLI_VERSION` but left `2.1.258` pinned in its own
+  `claude-cloaking` / `claude-header-forwarding` assertions; both now derive
+  from the constant so the next bump can't break them.
+
 # v0.5.85-1 (2026-09-22)
 
 Merged upstream v0.5.85 into the fork. This section includes the full upstream

@@ -12,7 +12,6 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-import Card from "@/shared/components/Card";
 
 const COLORS = ["#6366f1", "#14b8a6", "#f59e0b", "#ef4444", "#8b5cf6"];
 
@@ -24,17 +23,28 @@ const fmtTokens = (n) => {
 
 const truncate = (s, max = 22) => (s && s.length > max ? s.slice(0, max) + "…" : s || "");
 
+// Same y-axis width tracking as ProviderBarChart: model names run long, so a
+// fixed width either clips them or wastes half the chart.
+const labelWidth = (rows) => {
+  const longest = rows.reduce((m, r) => Math.max(m, (r.fullName || r.name || "").length), 0);
+  return Math.min(180, Math.max(70, longest * 6.5 + 12));
+};
+
 export default function TopModelsChart({ byModel }) {
   const [viewMode, setViewMode] = useState("tokens");
 
   const chartData = useMemo(() => {
     if (!byModel) return [];
     return Object.values(byModel)
-      .map((data) => ({
-        name: truncate(data.rawModel || "Unknown"),
-        tokens: (data.promptTokens || 0) + (data.completionTokens || 0),
-        requests: data.requests || 0,
-      }))
+      .map((data) => {
+        const fullName = data.rawModel || "Unknown";
+        return {
+          fullName,
+          name: truncate(fullName),
+          tokens: (data.promptTokens || 0) + (data.completionTokens || 0),
+          requests: data.requests || 0,
+        };
+      })
       .filter((d) => d[viewMode] > 0)
       .sort((a, b) => b[viewMode] - a[viewMode])
       .slice(0, 5);
@@ -42,9 +52,11 @@ export default function TopModelsChart({ byModel }) {
 
   const fmt = viewMode === "tokens" ? fmtTokens : String;
   const label = viewMode === "tokens" ? "Tokens" : "Requests";
+  const height = Math.max(140, chartData.length * 24 + 40);
+  const width = labelWidth(chartData);
 
   return (
-    <Card className="flex min-w-0 flex-col gap-3 p-3 sm:p-4">
+    <div className="flex min-w-0 flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
         <span className="text-sm font-semibold text-text-muted uppercase tracking-wide">Top Models</span>
         <div className="grid grid-cols-2 items-center gap-1 rounded-lg border border-border bg-bg-subtle p-1">
@@ -66,11 +78,11 @@ export default function TopModelsChart({ byModel }) {
       {!chartData.length ? (
         <div className="h-44 flex items-center justify-center text-text-muted text-sm">No model usage yet</div>
       ) : (
-        <ResponsiveContainer width="100%" height={180}>
+        <ResponsiveContainer width="100%" height={height}>
           <BarChart
             data={chartData}
             layout="vertical"
-            margin={{ top: 4, right: 40, left: 4, bottom: 4 }}
+            margin={{ top: 4, right: 16, left: 4, bottom: 4 }}
           >
             <CartesianGrid strokeDasharray="3 3" strokeOpacity={0.1} horizontal={false} />
             <XAxis
@@ -86,7 +98,8 @@ export default function TopModelsChart({ byModel }) {
               tick={{ fontSize: 10, fill: "currentColor", fillOpacity: 0.7 }}
               tickLine={false}
               axisLine={false}
-              width={90}
+              width={width}
+              interval={0}
             />
             <Tooltip
               contentStyle={{
@@ -95,6 +108,9 @@ export default function TopModelsChart({ byModel }) {
                 borderRadius: "8px",
                 fontSize: "12px",
               }}
+              itemStyle={{ color: "var(--color-text-main)" }}
+              labelStyle={{ color: "var(--color-text-muted)" }}
+              labelFormatter={(_, payload) => payload?.[0]?.payload?.fullName || ""}
               formatter={(value) => [fmt(value), label]}
             />
             <Bar dataKey={viewMode} radius={[0, 4, 4, 0]}>
@@ -105,7 +121,7 @@ export default function TopModelsChart({ byModel }) {
           </BarChart>
         </ResponsiveContainer>
       )}
-    </Card>
+    </div>
   );
 }
 

@@ -1,6 +1,8 @@
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { getRetentionCutoff } from "./usageRepo.js";
+import { vacuumAdapter } from "../helpers/maintenance.js";
+import { CONTENT_SECTIONS, normalizeSections, purgeDeleteStatements, redactRecord } from "../helpers/purgeOps.js";
 
 const DEFAULT_MAX_RECORDS = 200;
 const DEFAULT_BATCH_SIZE = 20;
@@ -64,6 +66,10 @@ async function getObservabilityConfig() {
 let writeBuffer = [];
 let flushTimer = null;
 let isFlushing = false;
+// Tracks the in-flight flush so clearRequestDetails() can wait it out: the
+// flusher splices its batch out of writeBuffer before awaiting, so a purge that
+// only emptied the buffer would still race that batch into the table.
+let inflightFlush = null;
 
 function sanitizeHeaders(headers) {
   if (!headers || typeof headers !== "object") return {};
@@ -164,12 +170,24 @@ export async function saveRequestDetail(detail) {
   // flushToDatabase() drains entire buffer in a loop, so all pushes during await are persisted.
   if (writeBuffer.length >= config.batchSize) {
     if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
-    flushToDatabase().catch((e) => console.error("[requestDetailsRepo] flush err:", e));
+    inflightFlush = flushToDatabase().catch((e) => console.error("[requestDetailsRepo] flush err:", e));
   } else if (!flushTimer) {
     flushTimer = setTimeout(() => {
       flushTimer = null;
-      flushToDatabase().catch(() => {});
+      inflightFlush = flushToDatabase().catch(() => {});
     }, config.flushIntervalMs);
+  }
+}
+
+// Persist anything still buffered. The content purge does this before rewriting
+// rows (buffered entries would otherwise land unredacted afterwards); the size
+// estimate does it so the snapshot contains the same rows the purge will see.
+export async function flushRequestDetails() {
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+  if (writeBuffer.length > 0) await flushToDatabase();
+  else if (inflightFlush) {
+    try { await inflightFlush; } catch {}
+    inflightFlush = null;
   }
 }
 
@@ -212,10 +230,64 @@ export async function getDistinctProviders() {
   return rows.map((r) => r.provider);
 }
 
+// Wipe every stored request detail. The pending write buffer is dropped first:
+// entries pushed before the purge would otherwise be flushed moments later and
+// resurrect rows the user just deleted. An already-running flush is awaited
+// before the DELETE, since it holds a batch that is no longer in the buffer.
+export async function clearRequestDetails() {
+  if (flushTimer) { clearTimeout(flushTimer); flushTimer = null; }
+  writeBuffer = [];
+  if (inflightFlush) {
+    try { await inflightFlush; } catch {}
+    inflightFlush = null;
+  }
+  const db = await getAdapter();
+  let deleted = 0;
+  db.transaction(() => {
+    const cnt = db.get(`SELECT COUNT(*) as c FROM requestDetails`);
+    deleted = cnt ? cnt.c : 0;
+    for (const sql of purgeDeleteStatements("details")) db.run(sql);
+  });
+  vacuumAdapter(db);
+  return { deleted };
+}
+
 export async function getRequestDetailById(id) {
   const db = await getAdapter();
   const row = db.get(`SELECT data FROM requestDetails WHERE id = ?`, [id]);
   return row ? parseJson(row.data, null) : null;
+}
+
+export { CONTENT_SECTIONS };
+
+// Replace the stored payloads of the given sections with { redacted: true } on
+// every row, keeping the rows themselves. This is the destructive counterpart of
+// the read-time redaction in /api/usage/request-details: that one only masks the
+// API response, the payloads stay on disk.
+//
+// Pending writes are flushed first (not dropped): a buffered row still holds its
+// full payload and would otherwise land unredacted moments after the purge. Rows
+// that never had a section keep it absent, so conditionally-rendered sections in
+// the drawer keep their current behavior.
+export async function clearRequestDetailContent(sections) {
+  const keys = normalizeSections(sections);
+  if (!keys.length) return { updated: 0 };
+
+  await flushRequestDetails();
+
+  const db = await getAdapter();
+  let updated = 0;
+  db.transaction(() => {
+    const rows = db.all(`SELECT id, data FROM requestDetails`);
+    for (const row of rows) {
+      const record = parseJson(row.data, null);
+      if (!redactRecord(record, keys)) continue;
+      db.run(`UPDATE requestDetails SET data = ? WHERE id = ?`, [stringifyJson(record), row.id]);
+      updated++;
+    }
+  });
+  vacuumAdapter(db);
+  return { updated };
 }
 
 const _shutdownHandler = async () => {

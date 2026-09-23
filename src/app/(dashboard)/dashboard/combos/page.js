@@ -731,15 +731,6 @@ export default function CombosPage() {
   );
 }
 
-const fmtK = (n) => {
-  if (!n) return "?";
-  if (n >= 1000000) {
-    const m = n / 1000000;
-    return `${Number.isInteger(m) ? m : m.toFixed(1)}M`;
-  }
-  return `${Math.round(n / 1000)}k`;
-};
-
 // Capacity adapter pools only support fallback/round-robin — getCapacityAdapterStrategy
 // in open-sse/services/capacityAdapter.js has no fusion path.
 const ADAPTER_STRATEGY_OPTIONS = [
@@ -753,7 +744,6 @@ function ComboCard({ combo, getCaps, comboByName = {}, activeProviders = [], cop
   const current = strategy.fallbackStrategy || "fallback";
   const judge = strategy.judgeModel || "";
   const isFusion = current === "fusion";
-  const comboCaps = aggregateComboCapabilities(combo.models, comboByName);
 
   return (
     <Card padding="sm" className={`group ${selected ? "ring-1 ring-primary/40 bg-primary/[0.03]" : ""}`}>
@@ -793,13 +783,6 @@ function ComboCard({ combo, getCaps, comboByName = {}, activeProviders = [], cop
                 <span className="text-[10px] text-text-muted">+{combo.models.length - 3} more</span>
               )}
             </div>
-            {comboCaps && (
-              <div className="mt-1 flex items-center gap-2 text-[10px] text-text-muted">
-                <span>ctx {fmtK(comboCaps.contextWindow)}</span>
-                <span className="opacity-40">·</span>
-                <span>max {fmtK(comboCaps.maxOutput)}</span>
-              </div>
-            )}
             {/* Fusion: judge picker (Auto = first model) */}
             {isFusion && (
               <div className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5">

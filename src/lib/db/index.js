@@ -70,12 +70,13 @@ export {
 export {
   statsEmitter, trackPendingRequest, getActiveRequests,
   saveRequestUsage, getUsageHistory, getUsageStats, getChartData,
-  appendRequestLog, getRecentLogs,
+  appendRequestLog, getRecentLogs, clearUsageHistory,
 } from "./repos/usageRepo.js";
 
 // Request details
 export {
   saveRequestDetail, getRequestDetails, getRequestDetailById, getDistinctProviders,
+  clearRequestDetails, clearRequestDetailContent, flushRequestDetails, CONTENT_SECTIONS,
 } from "./repos/requestDetailsRepo.js";
 
 // Export/import full DB
