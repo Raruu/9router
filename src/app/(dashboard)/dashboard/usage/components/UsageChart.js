@@ -17,6 +17,8 @@ import {
 } from "recharts";
 import Card from "@/shared/components/Card";
 import Toggle from "@/shared/components/Toggle";
+import ProviderBarChart from "./ProviderBarChart";
+import TopModelsChart from "./TopModelsChart";
 
 const fmtTokens = (n) => {
   if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
@@ -32,6 +34,7 @@ const VIEW_MODES = [
   { value: "requests", label: "Requests" },
   { value: "cost", label: "Cost" },
   { value: "latency", label: "Latency" },
+  { value: "breakdown", label: "Breakdown" },
 ];
 
 const VIEW_CONFIG = {
@@ -213,14 +216,13 @@ export default function UsageChart({
     <Card className="flex min-w-0 flex-col gap-3 p-3 sm:p-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div
-          className="grid w-full items-center gap-1 rounded-lg border border-border bg-bg-subtle p-1 sm:w-auto"
-          style={{ gridTemplateColumns: `repeat(${VIEW_MODES.length}, minmax(0, 1fr))` }}
+          className="flex w-full items-center gap-1 overflow-x-auto rounded-lg border border-border bg-bg-subtle p-1 sm:w-auto"
         >
           {VIEW_MODES.map((m) => (
             <button
               key={m.value}
               onClick={() => setViewMode(m.value)}
-              className={`px-3 py-1 rounded-md text-sm font-medium transition-colors ${viewMode === m.value ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-text hover:bg-bg-hover"}`}
+              className={`shrink-0 px-3 py-1 rounded-md text-sm font-medium transition-colors ${viewMode === m.value ? "bg-primary text-white shadow-sm" : "text-text-muted hover:text-text hover:bg-bg-hover"}`}
             >
               {m.label}
             </button>
@@ -399,6 +401,11 @@ export default function UsageChart({
             </div>
           )}
         </div>
+      ) : viewMode === "breakdown" ? (
+        <div className="flex flex-col gap-4">
+          <ProviderBarChart byProvider={stats?.byProvider} />
+          <TopModelsChart byModel={stats?.byModel} />
+        </div>
       ) : !hasData ? (
         <div className="h-48 flex items-center justify-center text-text-muted text-sm">
           No data for this period
@@ -442,7 +449,9 @@ export default function UsageChart({
                 borderRadius: "8px",
                 fontSize: "12px",
               }}
-formatter={(value) => [cfg.formatter(value), cfg.label]}
+              itemStyle={{ color: "var(--color-text-main)" }}
+              labelStyle={{ color: "var(--color-text-muted)" }}
+              formatter={(value) => [cfg.formatter(value), cfg.label]}
             />
             <Area
               type="monotone"
