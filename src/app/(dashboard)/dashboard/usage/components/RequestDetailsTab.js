@@ -51,7 +51,7 @@ function getProviderName(providerId, cache) {
   return providerConfig?.name || providerId;
 }
 
-const REDACTED_HINT = "Payloads hidden — enable 'Show request bodies' in Settings → Observability.";
+const REDACTED_HINT = "Payloads hidden — enable 'Show request bodies' in Usage → Settings → Observability.";
 
 function RedactedHint({ show }) {
   if (!show) return null;

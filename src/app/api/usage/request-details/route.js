@@ -54,7 +54,7 @@ export async function GET(request) {
     // them wholesale lets any dashboard-authenticated user (or, if requireLogin
     // is disabled, anyone) read every user's conversation history. Keep the
     // metadata (model, tokens, latency, status) and drop message content unless
-    // the owner opted in via Settings -> Observability -> "Show request bodies"
+    // the owner opted in via Usage -> Settings -> Observability -> "Show request bodies"
     // (single-user instances that never share the dashboard).
     let observabilityShowBodies = false;
     try {
