@@ -79,6 +79,7 @@ export default function CombosPage() {
   const [comboStrategies, setComboStrategies] = useState({});
   const [comboNameInResponse, setComboNameInResponse] = useState(false);
   const [comboLimitStrategy, setComboLimitStrategy] = useState("max");
+  const [comboContextFit, setComboContextFit] = useState(false);
   const [comboEffortStrategy, setComboEffortStrategy] = useState("union");
   const [capacityAdapter, setCapacityAdapter] = useState(EMPTY_CAPACITY_ADAPTER);
   const { getCaps } = useModelCaps();
@@ -212,6 +213,7 @@ export default function CombosPage() {
       setComboStrategies(settingsData.comboStrategies || {});
       setComboNameInResponse(!!settingsData.comboNameInResponse);
       setComboLimitStrategy(settingsData.comboLimitStrategy === "min" ? "min" : "max");
+      setComboContextFit(!!settingsData.comboContextFit);
       setComboEffortStrategy(settingsData.comboEffortStrategy === "intersection" ? "intersection" : "union");
       const rawAdapter = settingsData.capacityAdapter || {};
       const normalized = {};
@@ -254,6 +256,19 @@ export default function CombosPage() {
       });
     } catch (error) {
       console.log("Error updating combo limit strategy:", error);
+    }
+  };
+
+  const handleSetComboContextFit = async (next) => {
+    setComboContextFit(next);
+    try {
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comboContextFit: next }),
+      });
+    } catch (error) {
+      console.log("Error updating combo context fit:", error);
     }
   };
 
@@ -486,6 +501,24 @@ export default function CombosPage() {
               aria-label="Combo advertised limits strategy"
             />
           </div>
+        </div>
+        <div className="mt-4 pt-4 border-t border-border flex items-start sm:items-center justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">Auto-switch by context size</p>
+            <p className="text-xs text-text-muted mt-0.5">
+              Route each request to the first member whose context window can hold it
+              (estimated from the prompt, plus headroom). A prompt over a 200K member&apos;s
+              window starts on a 1M member instead of wasting an upstream call on an
+              overflow error. Members that don&apos;t fit stay at the end as a last resort,
+              and capability needs (vision, audio) still take priority over size. Off
+              keeps the configured member order.
+            </p>
+          </div>
+          <Toggle
+            checked={comboContextFit}
+            onChange={handleSetComboContextFit}
+            aria-label="Auto-switch combo members by context size"
+          />
         </div>
         <div className="mt-4 pt-4 border-t border-border flex items-start sm:items-center justify-between gap-4">
           <div className="flex-1 min-w-0">

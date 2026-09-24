@@ -7,6 +7,7 @@ import { unavailableResponse } from "../utils/error.js";
 import { isRetryableStatus, MAX_RETRY_WAIT_MS, RETRY_MODE_PER_KEY } from "../config/retries.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
+import { estimateRequestTokens, contextFitBudget } from "../utils/tokenEstimate.js";
 
 // Hard capabilities = input modalities; missing one drops request data (e.g. image
 // stripped). Must be prioritized. Soft (e.g. search) only degrades a feature.
@@ -61,12 +62,21 @@ function flattenToolHistory(messages) {
 
 // Reorder combo models by capability fit. Stable; never drops a model (fallback intact).
 // Tier 0: satisfies all hard + all soft. Tier 1: all hard only. Tier 2: rest.
-export function reorderByCapabilities(models, required) {
-  if (!required || required.size === 0 || !Array.isArray(models) || models.length <= 1) return models;
-  const hard = [...required].filter((c) => HARD_CAPS.has(c));
-  const soft = [...required].filter((c) => !HARD_CAPS.has(c));
+// Optional `fits(member)` predicate breaks ties WITHIN a tier: members whose
+// context window can hold the request float above the rest of their tier, but
+// never above a better capability tier (a no-vision 1M model must not leapfrog
+// a vision 200K one). Non-fitting members stay in the list, just later — they
+// remain as a last resort. Unknown/unresolvable members count as fitting so
+// their position is preserved.
+export function reorderByCapabilities(models, required, fits = null) {
+  if (!Array.isArray(models) || models.length <= 1) return models;
+  const hasRequired = required && required.size > 0;
+  if (!hasRequired && !fits) return models;
+  const hard = hasRequired ? [...required].filter((c) => HARD_CAPS.has(c)) : [];
+  const soft = hasRequired ? [...required].filter((c) => !HARD_CAPS.has(c)) : [];
 
   const tierOf = (m) => {
+    if (!hasRequired) return 0;
     const slash = typeof m === "string" ? m.indexOf("/") : -1;
     const provider = slash > 0 ? m.slice(0, slash) : "";
     const model = slash > 0 ? m.slice(slash + 1) : m;
@@ -75,10 +85,20 @@ export function reorderByCapabilities(models, required) {
     return soft.every((c) => caps[c] === true) ? 0 : 1;
   };
 
-  // Stable sort by tier (Array.prototype.sort is stable in modern engines).
+  const fitOf = (m) => {
+    if (!fits) return 0;
+    try {
+      return fits(m) ? 0 : 1;
+    } catch {
+      return 0; // a resolver failure must never reorder members
+    }
+  };
+
+  // Stable sort by tier, then fit, then original index (Array.prototype.sort is
+  // stable in modern engines; the explicit index keeps intent visible).
   return models
-    .map((m, i) => ({ m, i, t: tierOf(m) }))
-    .sort((a, b) => a.t - b.t || a.i - b.i)
+    .map((m, i) => ({ m, i, t: tierOf(m), f: fitOf(m) }))
+    .sort((a, b) => a.t - b.t || a.f - b.f || a.i - b.i)
     .map((x) => x.m);
 }
 
@@ -333,19 +353,37 @@ export function getComboModelsFromData(modelStr, combosData) {
  *   comes from the failure response's in-process `retrySignal` (set by the app's
  *   single-model handler), never from the member string, so aliases and nested
  *   combos resolve to the provider that actually served the attempt.
+ * @param {boolean} [options.contextFit=false] - When true, float members whose
+ *   context window can hold the request (estimate + headroom) above the rest of
+ *   their capability tier. Non-fitting members stay as last resort.
+ * @param {Function} [options.resolveMemberContext] - (member) => contextWindow|0.
+ *   Required for contextFit; a member that resolves to 0/undefined counts as
+ *   fitting so unknown members keep their position.
  * @returns {Promise<Response>}
  */
-export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true, resolveMemberRetries = null }) {
+export async function handleComboChat({ body, models, handleSingleModel, log, comboName, comboStrategy, comboStickyLimit = 1, autoSwitch = true, resolveMemberRetries = null, contextFit = false, resolveMemberContext = null }) {
   // Apply rotation strategy if enabled
   let rotatedModels = getRotatedModels(models, comboName, comboStrategy, comboStickyLimit);
 
-  // Auto-switch: float models that satisfy the request's required capabilities to the front.
+  // Auto-switch: float models that satisfy the request's required capabilities to
+  // the front, and (when contextFit is on) members whose context window can hold
+  // the request above the rest of their tier. Both ride one reorder so a member
+  // can never be floated past a better capability tier.
   if (autoSwitch) {
     const required = detectRequiredCapabilities(body);
-    if (required.size > 0) {
-      const reordered = reorderByCapabilities(rotatedModels, required);
+    let fits = null;
+    if (contextFit && resolveMemberContext) {
+      const need = contextFitBudget(estimateRequestTokens(body));
+      fits = (member) => {
+        const window = resolveMemberContext(member);
+        return !window || window >= need; // unknown window -> keep position
+      };
+    }
+    if (required.size > 0 || fits) {
+      const reordered = reorderByCapabilities(rotatedModels, required, fits);
       if (reordered[0] !== rotatedModels[0]) {
-        log.info("COMBO", `auto-switch for [${[...required].join(",")}] → ${reordered[0]}`);
+        const reason = required.size > 0 ? `[${[...required].join(",")}]` : "context-fit";
+        log.info("COMBO", `auto-switch for ${reason} → ${reordered[0]}`);
       }
       rotatedModels = reordered;
     }
