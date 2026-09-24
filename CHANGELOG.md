@@ -1,3 +1,28 @@
+# v0.5.86-2 (2026-09-24)
+
+## Features
+- **Combos**: new "Auto-switch by context size" toggle (off by default) routes each
+  request to the first member whose context window can hold it. A combo with a 200K
+  first member and a 1M second sent every prompt to the first regardless of size, so
+  a 210K request burned an upstream 400 before advancing. Estimates the prompt
+  (CJK-aware, base64 payloads collapsed so a large image isn't counted as text, +15%
+  headroom); capability tiers still dominate, non-fitting members stay as last resort
+
+## Fixes
+- **Usage**: the Breakdown tab's By Provider chart shows the connection prefix
+  instead of the raw generated node id (`openai-compatible-chat-<uuid>`); the
+  bucket key stays the raw id so byModel joins keep working
+- **Combos**: the Add Model picker lists only a provider's configured models —
+  Cline no longer offers its entire account-wide live catalog (hundreds of ids),
+  matching the provider page
+- **Dashboard**: the Model List card lives on the endpoint page only (the profile
+  copy was a leftover from the original move); Local Mode uses the standard card
+  header; the provider page drops its duplicate inline Add Model / Fetch Qoder
+  Models / Import from /models chips, resurrected by the v0.5.85 merge — the
+  Available Models header already carries all three
+- **Icons**: card-header icon tiles are centered — the inline-block glyph sat on
+  the text baseline, so the line-box strut added ~5px of space below it
+
 # v0.5.86-1 (2026-09-23)
 
 Merged upstream v0.5.86 into the fork. This section includes the full upstream
