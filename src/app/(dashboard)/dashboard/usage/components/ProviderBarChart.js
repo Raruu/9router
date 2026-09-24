@@ -36,12 +36,18 @@ export default function ProviderBarChart({ byProvider }) {
   const chartData = useMemo(() => {
     if (!byProvider) return [];
     return Object.entries(byProvider)
-      .map(([id, data]) => ({
-        fullName: id,
-        name: truncate(id, 20),
-        tokens: (data.promptTokens || 0) + (data.completionTokens || 0),
-        requests: data.requests || 0,
-      }))
+      .map(([id, data]) => {
+        // `label` (server-derived from the node prefix) is display-only; the
+        // raw id stays the row identity so two nodes sharing one prefix don't
+        // collapse into a single bar.
+        const display = data.label || id;
+        return {
+          fullName: display,
+          name: truncate(display, 20),
+          tokens: (data.promptTokens || 0) + (data.completionTokens || 0),
+          requests: data.requests || 0,
+        };
+      })
       .filter((d) => d[viewMode] > 0)
       .sort((a, b) => b[viewMode] - a[viewMode]);
   }, [byProvider, viewMode]);
