@@ -112,15 +112,13 @@ export default function CombosPage() {
   };
 
 
-  // Drop stale selection when the combo list changes (delete / refresh).
-  useEffect(() => {
-    const alive = new Set(combos.map((c) => c.id));
-    setSelectedIds((prev) => prev.filter((id) => alive.has(id)));
-  }, [combos]);
-
+  // Selection is derived, not pruned: a deleted combo's id may linger in
+  // selectedIds, but every consumer reads the live list (selectedCombos), so a
+  // stale id is invisible. Deriving during render replaces a prune effect that
+  // called setState synchronously (react-hooks/set-state-in-effect).
   const selectedCombos = combos.filter((c) => selectedIds.includes(c.id));
-  const allSelected = combos.length > 0 && selectedIds.length === combos.length;
-  const someSelected = selectedIds.length > 0;
+  const allSelected = combos.length > 0 && selectedCombos.length === combos.length;
+  const someSelected = selectedCombos.length > 0;
 
   const toggleSelect = (id) => {
     setSelectedIds((prev) => (
@@ -229,7 +227,6 @@ export default function CombosPage() {
   };
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
   }, []); 
 
@@ -649,7 +646,7 @@ export default function CombosPage() {
               />
               <span>
                 {someSelected
-                  ? `${selectedIds.length} selected`
+                  ? `${selectedCombos.length} selected`
                   : `Select all (${combos.length})`}
               </span>
             </label>
@@ -679,7 +676,7 @@ export default function CombosPage() {
                     onClick={handleBulkDelete}
                     className="whitespace-nowrap"
                   >
-                    Delete ({selectedIds.length})
+                    Delete ({selectedCombos.length})
                   </Button>
                   <Button
                     size="sm"
@@ -1187,19 +1184,16 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
     }
   };
 
-  const fetchModalData = async () => {
-    try {
-      const aliasesRes = await fetch("/api/models/alias");
-      if (!aliasesRes.ok) return;
-      const aliasesData = await aliasesRes.json();
-      setModelAliases(aliasesData.aliases || {});
-    } catch (error) {
-      console.error("Error fetching modal data:", error);
-    }
-  };
-
+  // Inline .then chain rather than an async function called from the effect:
+  // the rule flags a synchronous-looking call whose body setStates, and this
+  // shape (guarded fetch, state only in the promise callback) is the lint-clean
+  // pattern already used by the shared ComboFormModal.
   useEffect(() => {
-    if (isOpen) fetchModalData();
+    if (!isOpen) return;
+    fetch("/api/models/alias")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => data && setModelAliases(data.aliases || {}))
+      .catch((error) => console.error("Error fetching modal data:", error));
   }, [isOpen]);
 
   const validateName = (value) => {
