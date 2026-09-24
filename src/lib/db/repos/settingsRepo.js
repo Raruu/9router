@@ -25,6 +25,12 @@ export const DEFAULT_SETTINGS = {
   // smallest. Advertised only — routing/clamping always use the member that
   // actually served the request.
   comboLimitStrategy: "max",
+  // Routing (not advertising): when true, a combo floats members whose context
+  // window can hold the request (estimate + headroom) above the rest of their
+  // capability tier, so a >200K prompt skips a 200K member for a 1M one instead
+  // of wasting an upstream 400 on it. Non-fitting members stay as last resort.
+  // Off = the pre-existing order, which is also the default.
+  comboContextFit: false,
   // Which member thinking levels a combo advertises as capabilities.effort_tiers:
   // "union" (default) = every level any member supports (routing clamps the
   // request to what the serving member accepts); "intersection" = only levels

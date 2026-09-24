@@ -339,7 +339,7 @@ export default function SettingsTab() {
       {/* Observability */}
       <Card>
         <div className="flex items-center gap-3 mb-4">
-          <div className="p-2 rounded-lg bg-orange-500/10 text-orange-500 shrink-0">
+          <div className="size-10 rounded-lg bg-orange-500/10 text-orange-500 flex items-center justify-center shrink-0">
             <span className="material-symbols-outlined text-[20px]">monitoring</span>
           </div>
           <div>
@@ -383,7 +383,7 @@ export default function SettingsTab() {
       {/* Retention */}
       <Card>
         <div className="flex items-center gap-3 mb-4">
-          <div className="p-2 rounded-lg bg-blue-500/10 text-blue-500 shrink-0">
+          <div className="size-10 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center shrink-0">
             <span className="material-symbols-outlined text-[20px]">schedule</span>
           </div>
           <div>
@@ -431,7 +431,7 @@ export default function SettingsTab() {
       {/* Data management */}
       <Card className="border-red-500/30">
         <div className="flex items-center gap-3 mb-4">
-          <div className="p-2 rounded-lg bg-red-500/10 text-red-500 shrink-0">
+          <div className="size-10 rounded-lg bg-red-500/10 text-red-500 flex items-center justify-center shrink-0">
             <span className="material-symbols-outlined text-[20px]">delete_forever</span>
           </div>
           <div>

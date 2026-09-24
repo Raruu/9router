@@ -79,6 +79,7 @@ export default function CombosPage() {
   const [comboStrategies, setComboStrategies] = useState({});
   const [comboNameInResponse, setComboNameInResponse] = useState(false);
   const [comboLimitStrategy, setComboLimitStrategy] = useState("max");
+  const [comboContextFit, setComboContextFit] = useState(false);
   const [comboEffortStrategy, setComboEffortStrategy] = useState("union");
   const [capacityAdapter, setCapacityAdapter] = useState(EMPTY_CAPACITY_ADAPTER);
   const { getCaps } = useModelCaps();
@@ -111,15 +112,13 @@ export default function CombosPage() {
   };
 
 
-  // Drop stale selection when the combo list changes (delete / refresh).
-  useEffect(() => {
-    const alive = new Set(combos.map((c) => c.id));
-    setSelectedIds((prev) => prev.filter((id) => alive.has(id)));
-  }, [combos]);
-
+  // Selection is derived, not pruned: a deleted combo's id may linger in
+  // selectedIds, but every consumer reads the live list (selectedCombos), so a
+  // stale id is invisible. Deriving during render replaces a prune effect that
+  // called setState synchronously (react-hooks/set-state-in-effect).
   const selectedCombos = combos.filter((c) => selectedIds.includes(c.id));
-  const allSelected = combos.length > 0 && selectedIds.length === combos.length;
-  const someSelected = selectedIds.length > 0;
+  const allSelected = combos.length > 0 && selectedCombos.length === combos.length;
+  const someSelected = selectedCombos.length > 0;
 
   const toggleSelect = (id) => {
     setSelectedIds((prev) => (
@@ -212,6 +211,7 @@ export default function CombosPage() {
       setComboStrategies(settingsData.comboStrategies || {});
       setComboNameInResponse(!!settingsData.comboNameInResponse);
       setComboLimitStrategy(settingsData.comboLimitStrategy === "min" ? "min" : "max");
+      setComboContextFit(!!settingsData.comboContextFit);
       setComboEffortStrategy(settingsData.comboEffortStrategy === "intersection" ? "intersection" : "union");
       const rawAdapter = settingsData.capacityAdapter || {};
       const normalized = {};
@@ -227,7 +227,6 @@ export default function CombosPage() {
   };
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchData();
   }, []); 
 
@@ -254,6 +253,19 @@ export default function CombosPage() {
       });
     } catch (error) {
       console.log("Error updating combo limit strategy:", error);
+    }
+  };
+
+  const handleSetComboContextFit = async (next) => {
+    setComboContextFit(next);
+    try {
+      await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comboContextFit: next }),
+      });
+    } catch (error) {
+      console.log("Error updating combo context fit:", error);
     }
   };
 
@@ -489,6 +501,24 @@ export default function CombosPage() {
         </div>
         <div className="mt-4 pt-4 border-t border-border flex items-start sm:items-center justify-between gap-4">
           <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">Auto-switch by context size</p>
+            <p className="text-xs text-text-muted mt-0.5">
+              Route each request to the first member whose context window can hold it
+              (estimated from the prompt, plus headroom). A prompt over a 200K member&apos;s
+              window starts on a 1M member instead of wasting an upstream call on an
+              overflow error. Members that don&apos;t fit stay at the end as a last resort,
+              and capability needs (vision, audio) still take priority over size. Off
+              keeps the configured member order.
+            </p>
+          </div>
+          <Toggle
+            checked={comboContextFit}
+            onChange={handleSetComboContextFit}
+            aria-label="Auto-switch combo members by context size"
+          />
+        </div>
+        <div className="mt-4 pt-4 border-t border-border flex items-start sm:items-center justify-between gap-4">
+          <div className="flex-1 min-w-0">
             <p className="text-sm font-medium">Combo thinking levels</p>
             <p className="text-xs text-text-muted mt-0.5">
               Which member thinking levels a combo advertises as{" "}
@@ -616,7 +646,7 @@ export default function CombosPage() {
               />
               <span>
                 {someSelected
-                  ? `${selectedIds.length} selected`
+                  ? `${selectedCombos.length} selected`
                   : `Select all (${combos.length})`}
               </span>
             </label>
@@ -646,7 +676,7 @@ export default function CombosPage() {
                     onClick={handleBulkDelete}
                     className="whitespace-nowrap"
                   >
-                    Delete ({selectedIds.length})
+                    Delete ({selectedCombos.length})
                   </Button>
                   <Button
                     size="sm"
@@ -1154,19 +1184,16 @@ function ComboFormModal({ isOpen, combo, onClose, onSave, activeProviders, kindF
     }
   };
 
-  const fetchModalData = async () => {
-    try {
-      const aliasesRes = await fetch("/api/models/alias");
-      if (!aliasesRes.ok) return;
-      const aliasesData = await aliasesRes.json();
-      setModelAliases(aliasesData.aliases || {});
-    } catch (error) {
-      console.error("Error fetching modal data:", error);
-    }
-  };
-
+  // Inline .then chain rather than an async function called from the effect:
+  // the rule flags a synchronous-looking call whose body setStates, and this
+  // shape (guarded fetch, state only in the promise callback) is the lint-clean
+  // pattern already used by the shared ComboFormModal.
   useEffect(() => {
-    if (isOpen) fetchModalData();
+    if (!isOpen) return;
+    fetch("/api/models/alias")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => data && setModelAliases(data.aliases || {}))
+      .catch((error) => console.error("Error fetching modal data:", error));
   }, [isOpen]);
 
   const validateName = (value) => {

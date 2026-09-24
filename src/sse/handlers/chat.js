@@ -9,7 +9,7 @@ import {
   validateApiKeyWithRules,
 } from "../services/auth.js";
 import { handleAntigravityQuotaError, clearAntigravityStrikes } from "../services/antigravityQuota.js";
-import { getSettings } from "@/lib/localDb";
+import { getSettings, getProviderConnections, getCombos, getModelAliases } from "@/lib/localDb";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleChatCore } from "open-sse/handlers/chatCore.js";
 import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
@@ -17,6 +17,8 @@ import { getTransform as getPxpipeTransform } from "@/lib/pxpipe/loader.js";
 import { appendPxpipeEvent } from "@/lib/pxpipe/events.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { handleComboChat, handleFusionChat, detectRequiredCapabilities } from "open-sse/services/combo.js";
+import { comboMemberCapabilities } from "open-sse/providers/comboCapabilities.js";
+import { buildProviderIdByPrefix } from "@/lib/providerPrefixMap.js";
 import { checkFallbackError } from "open-sse/services/accountFallback.js";
 import { augmentModelsWithCapacityAdapter, withCapacityAdapterStripping, getActiveAdapterStrategy } from "open-sse/services/capacityAdapter.js";
 import { handleBypassRequest } from "open-sse/utils/bypassHandler.js";
@@ -128,6 +130,7 @@ export async function handleChat(request, clientRawRequest = null) {
     }
 
     const comboStickyLimit = settings.comboStickyRoundRobinLimit;
+    const resolveMemberContext = await memberContextResolver(settings);
     log.info("CHAT", `Combo "${modelStr}" with ${augmentedModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
     return handleComboChat({
       body,
@@ -140,7 +143,9 @@ export async function handleChat(request, clientRawRequest = null) {
       comboName: modelStr,
       comboStrategy,
       comboStickyLimit,
-      resolveMemberRetries: memberRetryResolver(settings)
+      resolveMemberRetries: memberRetryResolver(settings),
+      contextFit: !!settings.comboContextFit,
+      resolveMemberContext
     });
   }
 
@@ -214,6 +219,39 @@ function memberRetryResolver(settings) {
   const providerRetries = (settings && settings.providerRetries) || {};
   return (providerId) => resolveProviderRetries(providerRetries[providerId]);
 }
+
+// Context-window resolver for combo context-fit routing, built once per request.
+// Reads the same capability context the /v1/models route uses, so a member's
+// window matches what the dashboard advertises: custom node prefixes, model
+// aliases and nested combos all resolve, and getCapabilitiesForModel floors at
+// the 200K default for unknown models (identical to every other consumer).
+// Returns null when the feature is off or nothing resolves, so handleComboChat
+// keeps its exact current behavior.
+async function memberContextResolver(settings) {
+  if (!settings?.comboContextFit) return null;
+  try {
+    const [connections, combos, modelAliases] = await Promise.all([
+      getProviderConnections(),
+      getCombos(),
+      getModelAliases(),
+    ]);
+    const comboByName = new Map();
+    for (const combo of combos || []) {
+      if (typeof combo?.name === "string" && !comboByName.has(combo.name)) comboByName.set(combo.name, combo);
+    }
+    const ctx = { providerIdByPrefix: buildProviderIdByPrefix(connections), modelAliases, comboByName };
+    return (member) => {
+      try {
+        return comboMemberCapabilities(member, ctx, 0, new Set())?.contextWindow || 0;
+      } catch {
+        return 0; // unresolvable member -> treated as fitting, position preserved
+      }
+    };
+  } catch (error) {
+    log.warn("CHAT", `context-fit resolver unavailable: ${error.message}`);
+    return null;
+  }
+}
 async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, responseModelOverride = null, comboRetryContext = false) {
   const modelInfo = await getModelInfo(modelStr);
 
@@ -252,6 +290,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       }
 
       const comboStickyLimit = chatSettings.comboStickyRoundRobinLimit;
+      const resolveMemberContext = await memberContextResolver(chatSettings);
       log.info("CHAT", `Combo "${modelStr}" with ${augmentedModels.length} models (strategy: ${comboStrategy}, sticky: ${comboStickyLimit})`);
       return handleComboChat({
         body,
@@ -264,7 +303,9 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         comboName: modelStr,
         comboStrategy,
         comboStickyLimit,
-        resolveMemberRetries: memberRetryResolver(chatSettings)
+        resolveMemberRetries: memberRetryResolver(chatSettings),
+        contextFit: !!chatSettings.comboContextFit,
+        resolveMemberContext
       });
     }
     log.warn("CHAT", "Invalid model format", { model: modelStr });
