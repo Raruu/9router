@@ -70,6 +70,8 @@ export default function APIPageClient({ machineId }) {
   const [tunnelDashboardAccess, setTunnelDashboardAccess] = useState(false);
   const [modelsExposure, setModelsExposure] = useState(null);
   const [modelsExposureSaving, setModelsExposureSaving] = useState(false);
+  const [exposeNonLlmModels, setExposeNonLlmModels] = useState(false);
+  const [exposeNonLlmSaving, setExposeNonLlmSaving] = useState(false);
 
  // Cloudflare Tunnel state
   const [tunnelChecking, setTunnelChecking] = useState(true);
@@ -245,6 +247,7 @@ export default function APIPageClient({ machineId }) {
         setHasPassword(settingsData.hasPassword || false);
         setTunnelDashboardAccess(settingsData.tunnelDashboardAccess || false);
         setModelsExposure(settingsData.modelsExposure || "all");
+        setExposeNonLlmModels(settingsData.exposeNonLlmModels === true);
       }
       if (statusRes.ok) {
         const data = await statusRes.json();
@@ -299,6 +302,22 @@ export default function APIPageClient({ machineId }) {
       console.log("Error updating modelsExposure:", error);
     } finally {
       setModelsExposureSaving(false);
+    }
+  };
+
+  const handleExposeNonLlm = async (value) => {
+    setExposeNonLlmSaving(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ exposeNonLlmModels: value }),
+      });
+      if (res.ok) setExposeNonLlmModels(value);
+    } catch (error) {
+      console.log("Error updating exposeNonLlmModels:", error);
+    } finally {
+      setExposeNonLlmSaving(false);
     }
   };
 
@@ -1142,8 +1161,10 @@ export default function APIPageClient({ machineId }) {
 
       <ModelsExposureCard
         value={modelsExposure || "all"}
-        disabled={modelsExposure === null || modelsExposureSaving}
+        exposeNonLlm={exposeNonLlmModels}
+        disabled={modelsExposure === null || modelsExposureSaving || exposeNonLlmSaving}
         onChange={handleModelsExposure}
+        onToggleNonLlm={handleExposeNonLlm}
         variant="endpoint"
       />
 

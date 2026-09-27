@@ -181,6 +181,82 @@ describe("GET /v1/models exposure resolution", () => {
   });
 });
 
+describe("exposeNonLlmModels", () => {
+  const request = (headers = {}) => ({ headers: new Headers(headers) });
+  const listIds = async (res) => ids((await res.json()).data);
+  const listEntries = async (res) => (await res.json()).data;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // One LLM connection plus one media provider with an explicit model list.
+    mocks.getProviderConnections.mockResolvedValue([
+      { id: "conn-1", provider: "glm", isActive: true, providerSpecificData: { enabledModels: ["glm-5.2"] } },
+      { id: "conn-2", provider: "openai", isActive: true, providerSpecificData: { enabledModels: ["gpt-image-1"] } },
+    ]);
+    mocks.getCombos.mockResolvedValue([
+      { name: "my-combo", models: ["glm/glm-5.2"] },
+      { name: "image-combo", models: ["openai/gpt-image-1"], kind: "image" },
+    ]);
+    mocks.getCustomModels.mockResolvedValue([
+      { providerAlias: "glm", id: "listen", type: "stt" },
+    ]);
+    mocks.getModelAliases.mockResolvedValue({});
+    mocks.getDisabledModels.mockResolvedValue({});
+    mocks.hasValidCliToken.mockResolvedValue(false);
+    mocks.getSettings.mockResolvedValue({ modelsExposure: "all", exposeNonLlmModels: false });
+  });
+
+  it("is off by default: the list stays chat-only", async () => {
+    const data = await listEntries(await GET(request()));
+    const idList = ids(data);
+    expect(idList).toContain("my-combo");
+    expect(idList).not.toContain("image-combo");
+    expect(idList).not.toContain("glm/listen");
+    expect(data.every((e) => !e.kind || e.kind === "llm")).toBe(true);
+  });
+
+  it("adds non-LLM models, custom media models and media combos when enabled", async () => {
+    mocks.getSettings.mockResolvedValue({ modelsExposure: "all", exposeNonLlmModels: true });
+    const data = await listEntries(await GET(request()));
+    const idList = ids(data);
+
+    expect(idList).toContain("my-combo");        // LLM entries survive
+    expect(idList).toContain("image-combo");     // media combo joins
+    expect(idList).toContain("glm/listen");      // custom stt model joins
+    const stt = data.find((e) => e.id === "glm/listen");
+    expect(stt.kind).toBe("stt");
+  });
+
+  it("dedupes ids across kinds, keeping the LLM entry", async () => {
+    // gemini-2.5-pro exists as both an LLM and an STT registry entry.
+    mocks.getProviderConnections.mockResolvedValue([
+      { id: "conn-1", provider: "gemini", isActive: true, providerSpecificData: { enabledModels: ["gemini-2.5-pro"] } },
+    ]);
+    mocks.getCombos.mockResolvedValue([]);
+    mocks.getCustomModels.mockResolvedValue([]);
+    mocks.getSettings.mockResolvedValue({ modelsExposure: "all", exposeNonLlmModels: true });
+
+    const data = await listEntries(await GET(request()));
+    const matches = data.filter((e) => e.id === "gemini/gemini-2.5-pro");
+    expect(matches).toHaveLength(1);
+    expect(matches[0].kind).toBeUndefined(); // the LLM entry carries no kind
+  });
+
+  it("does not widen CLI-token requests", async () => {
+    mocks.getSettings.mockResolvedValue({ modelsExposure: "all", exposeNonLlmModels: true });
+    mocks.hasValidCliToken.mockResolvedValue(true);
+    const idList = await listIds(await GET(request({ "x-9r-cli-token": "token" })));
+    expect(idList).toContain("my-combo");
+    expect(idList).not.toContain("image-combo");
+  });
+
+  it("keeps the per-kind lists independent of the flag", async () => {
+    const imageIds = ids(await buildModelsList(["image"], { exposure: "all" }));
+    expect(imageIds).toContain("openai/gpt-image-1");
+    expect(imageIds).toContain("image-combo");
+  });
+});
+
 describe("modelsExposure default", () => {
   it("backfills existing installs with all", () => {
     expect(mergeWithDefaults({ comboStrategy: "fallback" }).modelsExposure).toBe("all");
@@ -188,5 +264,10 @@ describe("modelsExposure default", () => {
 
   it("keeps a stored value", () => {
     expect(mergeWithDefaults({ modelsExposure: "combos" }).modelsExposure).toBe("combos");
+  });
+
+  it("defaults exposeNonLlmModels to off and keeps a stored true", () => {
+    expect(mergeWithDefaults({}).exposeNonLlmModels).toBe(false);
+    expect(mergeWithDefaults({ exposeNonLlmModels: true }).exposeNonLlmModels).toBe(true);
   });
 });

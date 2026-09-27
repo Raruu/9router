@@ -367,6 +367,10 @@ export async function buildModelsList(kindFilter, options = {}) {
     };
     if (combo.kind === "webSearch" || combo.kind === "webFetch") {
       entry.kind = combo.kind;
+    } else if ((combo.kind || LLM_KIND) !== LLM_KIND) {
+      // Media combos (image/tts/…) advertise their kind so a merged list can
+      // tell them apart from chat combos.
+      entry.kind = combo.kind;
     } else if ((combo.kind || LLM_KIND) === LLM_KIND) {
       // Inherit from the members: without this a combo is an id with no limits,
       // so clients guess its window from the name and guess high.
@@ -424,9 +428,11 @@ export async function buildModelsList(kindFilter, options = {}) {
     }
 
     for (const customModel of customModels) {
-      if (!customModel?.id || (customModel.type && customModel.type !== "llm")) continue;
-      // Custom models without active connection are LLM-only by current schema
-      if (!kindFilter.includes(LLM_KIND)) continue;
+      if (!customModel?.id) continue;
+      // Custom models carry their service kind as `type` (LLM when absent).
+      // The pass's kindFilter decides which ones belong here.
+      const customKind = customModel.type || LLM_KIND;
+      if (!kindFilter.includes(customKind)) continue;
       const providerAlias = customModel.providerAlias;
       if (!providerAlias) continue;
 
@@ -441,6 +447,7 @@ export async function buildModelsList(kindFilter, options = {}) {
         owned_by: providerAlias,
         capabilities: caps,
       };
+      if (customKind !== LLM_KIND) entry.kind = customKind;
       if (Number.isFinite(caps.contextWindow)) {
         entry.context_length = caps.contextWindow;
         entry.max_input_tokens = caps.contextWindow;
@@ -452,15 +459,31 @@ export async function buildModelsList(kindFilter, options = {}) {
       models.push(entry);
     }
   } else {
-    for (const [providerId, conn] of activeConnectionByProvider.entries()) {
-      if (!providerMatchesKinds(providerId, kindFilter)) continue;
+    // A provider's static/registry models gate the loop by serviceKinds, but a
+    // chat provider can still carry a custom media model (e.g. a custom stt id
+    // on glm), so such providers must be visited in the matching kind pass too.
+    const customKindsByProvider = new Map();
+    for (const m of customModels) {
+      const alias = m?.providerAlias;
+      if (!alias) continue;
+      const kind = m.type || LLM_KIND;
+      if (!customKindsByProvider.has(alias)) customKindsByProvider.set(alias, new Set());
+      customKindsByProvider.get(alias).add(kind);
+    }
+    const hasCustomKind = (providerId, staticAlias, outputAlias) =>
+      [providerId, staticAlias, outputAlias].some((alias) => {
+        const kinds = customKindsByProvider.get(alias);
+        return kinds && [...kinds].some((kind) => kindFilter.includes(kind));
+      });
 
+    for (const [providerId, conn] of activeConnectionByProvider.entries()) {
       const staticAlias = PROVIDER_ID_TO_ALIAS[providerId] || providerId;
       const outputAlias = (
         conn?.providerSpecificData?.prefix
         || getProviderAlias(providerId)
         || staticAlias
       ).trim();
+      if (!providerMatchesKinds(providerId, kindFilter) && !hasCustomKind(providerId, staticAlias, outputAlias)) continue;
       const providerModels = PROVIDER_MODELS[staticAlias] || [];
       const enabledModels = conn?.providerSpecificData?.enabledModels;
       const hasExplicitEnabledModels =
@@ -468,10 +491,25 @@ export async function buildModelsList(kindFilter, options = {}) {
       const isCompatibleProvider =
         isOpenAICompatibleProvider(providerId) || isAnthropicCompatibleProvider(providerId);
 
-      // Build kind lookup for static models so we can filter even when only IDs are exposed
-      const staticModelKindById = new Map(
-        providerModels.map((m) => [m.id, modelKind(m)])
-      );
+      // Build kind lookup for static models so we can filter even when only IDs
+      // are exposed. Ids may repeat across kinds (gemini-2.5-pro is both an LLM
+      // and an STT entry), so a plain last-wins Map would resolve the chat id as
+      // STT. Keep the LLM entry when the pass wants LLM, else the first match.
+      const staticModelKindById = new Map();
+      const staticModelKindSets = new Map();
+      for (const m of providerModels) {
+        const kind = modelKind(m);
+        if (!staticModelKindById.has(m.id)) staticModelKindById.set(m.id, kind);
+        if (!staticModelKindSets.has(m.id)) staticModelKindSets.set(m.id, new Set());
+        staticModelKindSets.get(m.id).add(kind);
+        if (kind === LLM_KIND) staticModelKindById.set(m.id, kind);
+      }
+      const resolveStaticKind = (modelId) => {
+        const kinds = staticModelKindSets.get(modelId);
+        if (!kinds) return staticModelKindById.get(modelId);
+        for (const k of kindFilter) if (kinds.has(k)) return k;
+        return staticModelKindById.get(modelId);
+      };
       let liveModelKindById = new Map();
       let liveCapabilitiesById = new Map();
 
@@ -576,7 +614,7 @@ export async function buildModelsList(kindFilter, options = {}) {
         // Resolve kind: prefer custom/live metadata, then static, then ID heuristics.
         const customKind = customModelKindById.get(modelId);
         const liveKind = liveModelKindById.get(modelId);
-        const kind = customKind || liveKind || staticModelKindById.get(modelId) || inferKindFromUnknownModelId(modelId);
+        const kind = customKind || liveKind || resolveStaticKind(modelId) || inferKindFromUnknownModelId(modelId);
         // imageToText custom models stay in the LLM list (vision-capable chat models)
         const allowAsLlm = kind === "imageToText" && kindFilter.includes(LLM_KIND);
         if (!kindFilter.includes(kind) && !allowAsLlm) continue;
@@ -587,6 +625,9 @@ export async function buildModelsList(kindFilter, options = {}) {
           object: "model",
           owned_by: outputAlias,
         };
+        // Media entries advertise their kind so a merged /v1/models list can be
+        // told apart from chat ids (the LLM kind stays implicit).
+        if (kind !== LLM_KIND) model.kind = kind;
         // Live-catalog resolvers (kiro/qoder/github/clinepass) mostly only return
         // { id, name } — no per-model capability data. Fall back to the same
         // pattern-matched capabilities the dashboard uses (useModelCaps.js) so
@@ -689,7 +730,8 @@ async function resolveCatalogOptions(request) {
   }
   try {
     if (await hasValidCliToken(request)) {
-      return { exposure: "all", comboLimitStrategy: settings.comboLimitStrategy, comboEffortStrategy: settings.comboEffortStrategy };
+      // CLI pickers list chat targets only — never widen them with media ids.
+      return { exposure: "all", comboLimitStrategy: settings.comboLimitStrategy, comboEffortStrategy: settings.comboEffortStrategy, exposeNonLlmModels: false };
     }
   } catch {
     // Token check failed (no machine-id file yet) — fall through to the setting.
@@ -698,19 +740,35 @@ async function resolveCatalogOptions(request) {
     exposure: settings.modelsExposure,
     comboLimitStrategy: settings.comboLimitStrategy,
     comboEffortStrategy: settings.comboEffortStrategy,
+    exposeNonLlmModels: settings.exposeNonLlmModels === true,
   };
 }
 
+// Non-LLM kinds the default list can additionally advertise. webSearch/webFetch
+// are provider-as-model entries, not routable chat/media ids, so they stay out.
+const NON_LLM_KINDS = ["image", "imageToText", "video", "stt", "tts", "embedding", "systemone"];
+
 /**
- * GET /v1/models - OpenAI compatible models list (LLM/chat models only by default).
- * For other capabilities use /v1/models/{kind} (image, tts, stt, embedding, image-to-text, web).
+ * GET /v1/models - OpenAI compatible models list (LLM/chat models by default).
+ * With the `exposeNonLlmModels` setting, non-LLM models (and media combos) are
+ * appended too; /v1/models/{kind} always lists everything regardless.
  */
 export async function GET(request) {
   try {
     // Detect cross-instance recursive /models fetch (another 9router fetching our /models)
     const skipDynamicFetch = request?.headers?.get(INTERNAL_MODELS_FETCH_HEADER) === "1";
-    const { exposure, comboLimitStrategy, comboEffortStrategy } = await resolveCatalogOptions(request);
-    const data = await buildModelsList([LLM_KIND], { skipDynamicFetch, exposure, comboLimitStrategy, comboEffortStrategy });
+    const { exposure, comboLimitStrategy, comboEffortStrategy, exposeNonLlmModels } = await resolveCatalogOptions(request);
+    const listOptions = { skipDynamicFetch, exposure, comboLimitStrategy, comboEffortStrategy };
+    const llmModels = await buildModelsList([LLM_KIND], listOptions);
+    let data = llmModels;
+    if (exposeNonLlmModels) {
+      // Second pass for the media kinds, merged by id with the LLM entry winning:
+      // ids like gemini-2.5-pro exist in several kinds, and the chat entry is
+      // the one a default-list client expects to resolve.
+      const nonLlmModels = await buildModelsList(NON_LLM_KINDS, listOptions);
+      const seen = new Set(llmModels.map((entry) => entry.id));
+      data = [...llmModels, ...nonLlmModels.filter((entry) => !seen.has(entry.id))];
+    }
     const { filterModelsForKey } = await import("@/sse/services/auth.js");
     return Response.json({ object: "list", data: await filterModelsForKey(request, data) }, {
       headers: { "Access-Control-Allow-Origin": "*" },

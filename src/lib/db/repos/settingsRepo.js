@@ -38,6 +38,12 @@ export const DEFAULT_SETTINGS = {
   comboEffortStrategy: "union",
   // What GET /v1/models advertises: "all" | "combos" | "models".
   modelsExposure: "all",
+  // Also list non-LLM models (image/tts/stt/embedding/video/systemone) in the
+  // default GET /v1/models list. Off by default: the per-kind lists
+  // (/v1/models/image, /tts, …) always expose everything, and most clients
+  // calling the default list only want chat models. Media combos follow the
+  // same flag; webSearch/webFetch stay out either way (provider-as-model ids).
+  exposeNonLlmModels: false,
   capacityAdapter: {
     vision: { enabled: true, roundRobin: false, models: [] },
     pdf: { enabled: false, roundRobin: false, models: [] },

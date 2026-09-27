@@ -3,6 +3,7 @@
 import PropTypes from "prop-types";
 import Card from "./Card";
 import Select from "./Select";
+import Toggle from "./Toggle";
 
 const OPTIONS = [
   { value: "all", label: "Combos + Models" },
@@ -16,7 +17,7 @@ function exposureSummary(value) {
   return "Clients see every combo and provider model.";
 }
 
-export default function ModelsExposureCard({ value = "all", disabled = false, onChange, variant = "profile" }) {
+export default function ModelsExposureCard({ value = "all", exposeNonLlm = false, disabled = false, onChange, onToggleNonLlm, variant = "profile" }) {
   const endpoint = variant === "endpoint";
 
   return (
@@ -44,6 +45,22 @@ export default function ModelsExposureCard({ value = "all", disabled = false, on
           options={OPTIONS}
           hint="Applies to GET /v1/models only. The per-kind lists (/v1/models/image, /tts, /stt, /embedding, /web) always expose everything, and the CLI Tools model pickers are unaffected."
         />
+        {onToggleNonLlm && (
+          <div className="border-t border-border/50 pt-3">
+            <Toggle
+              checked={exposeNonLlm}
+              onChange={onToggleNonLlm}
+              disabled={disabled}
+              label="Also expose non-LLM models"
+              description="Adds image, video, speech, embeddings and classifier models (plus their combos) to GET /v1/models."
+            />
+            <p className="mt-2 text-xs italic text-text-muted">
+              {exposeNonLlm
+                ? "Clients discover media models from the default list too."
+                : "The default list stays chat-only; media models remain reachable via /v1/models/{kind}."}
+            </p>
+          </div>
+        )}
         <p className="border-t border-border/50 pt-2 text-xs italic text-text-muted">
           {exposureSummary(value)}
         </p>
@@ -54,7 +71,9 @@ export default function ModelsExposureCard({ value = "all", disabled = false, on
 
 ModelsExposureCard.propTypes = {
   value: PropTypes.oneOf(["all", "combos", "models"]),
+  exposeNonLlm: PropTypes.bool,
   disabled: PropTypes.bool,
   onChange: PropTypes.func.isRequired,
+  onToggleNonLlm: PropTypes.func,
   variant: PropTypes.oneOf(["profile", "endpoint"]),
 };
