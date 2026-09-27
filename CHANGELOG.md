@@ -1,3 +1,96 @@
+# v0.5.91-1 (2026-09-27)
+
+Merged upstream v0.5.91 into the fork. This section includes the full upstream
+release notes and the fork-side merge work.
+
+## Features
+- **Providers**: add Token Harbor provider and four OpenAI-compatible aggregator providers (dahl, atria, agnes, bai)
+- **Claude**: forward `x-claude-code-session-id` on OAuth requests; merge client `anthropic-beta` flags and forward rate-limit headers; return thinking text to OpenAI-format clients
+- **Codex**: add GPT-6 Sol and Luna support
+- **CLI Tools**: support multiple model profiles for Codex CLI
+- **Hermes**: multi-role model config (delegation + auxiliary slots)
+- **OpenCode Go**: complete the Go catalog (40 models) with auto-fetch + family endpoint regex
+- **Usage**: show and redeem free limit resets for cc accounts
+- **Cline**: expose the `cline-free/*` tier and price it at zero
+- **Combos**: display vision adapter models in an ordered table view
+
+## Fixes
+- **Claude**: decloak tool names when `toolNameMap` misses (#4342); update spoofed cli version to 2.1.280 to support Opus 5.5
+- **Providers API**: make POST `/api/providers` O(1) and refuse silent key overwrite (#4350)
+- **Capabilities**: stop caching the catalog source per module copy (#4351)
+- **OAuth**: stop Zed paste-token crash and add IDE auto-import (#4359)
+- **Dashboard**: resolve combo limits with the server's capabilities (#4360); lazy-load charts and `marked`, preload in background on idle
+- **Responses**: carry the streamed output items in `response.completed` (#4307)
+- **STT**: dispatch live-API-only Gemini models over the Live WebSocket transport (#4006)
+- **Gemini**: guard terminal model turns and unresponded functionCalls in `normalizeGeminiContents`
+- **Command Code**: replay raw byte chunks to preserve all NDJSON lines
+- **Translator**: stop emitting empty `<think>` markers into OpenAI content
+- **CLI Tools**: refresh Codex settings after apply (#4347); keep existing `ANTHROPIC_AUTH_TOKEN` when applying Claude settings
+- **Tray**: native arm64 macOS menubar binary, no Rosetta required
+- **CLI**: filter model selector by active connections and noAuth providers
+- **Usage**: key live byApiKey stats by full api key to prevent team-key collision and preserve API key usage attribution
+- **Tailscale**: cap enable-flow health wait at 20s
+
+## Fork merge notes
+- Conflict resolutions kept both sides: `package.json` / `cli/package.json`
+  stay on the fork version (`0.5.91-1`), `CHANGELOG.md` keeps the fork section
+  layout (upstream's notes folded into this entry), and the new cli tray
+  script/comments were taken from upstream wholesale.
+- **Combos adapter editor kept the fork's modal.** Upstream v0.5.91 reworked
+  the capacity-adapter pool into an inline ordered table (`handleAdd` /
+  `handleDeselect` / `handleRemove` on the card). The fork had already replaced
+  that same section with a modal editor (`fd01860b`) plus the context-fit
+  toggle; upstream's `getCaps` threading into `aggregateComboCapabilities`
+  (server-resolved combo limits, #4360) is kept everywhere it applies, and the
+  fork's modal editing wins for the pool UI itself.
+- **Add-custom-model dialog merged feature-wise.** The fork's modal is a
+  catalog-pattern picker with edit support; upstream's added the STT transport
+  select. The merged dialog keeps the pattern picker and gains the
+  "Speech to text" toggle + transport select, now derived from the model being
+  edited (`existingModel.type`/`transport`) rather than set from an effect, so
+  the dialog stays lint-clean. `handleAddCustomModel` takes both `catalogRef`
+  (pattern pin) and `caps`/`transport` (STT) and forwards them together; the
+  same path serves compatible nodes through `handleSaveCompatModel`.
+- `open-sse/providers/thinkingLevels.js` auto-merged: upstream's per-model
+  Codex registry lookup (`getProviderModels("cx")`) and the new
+  `*mimo*v2.5-pro*` pattern land inside the fork's precedence chain
+  (explicit user-catalog list → format override → registry/pattern table →
+  capability format → default). The v0.5.86 regression test was updated: the
+  sibling v2.5-pro now carries upstream's explicit no-`max` entry, so only
+  plain `mimo-v2.5` still falls through to the deepseek default.
+- `open-sse/providers/pricing.js` keeps the fork's catalog-overlay resolver;
+  upstream's free-namespace step (`cline-free/*` → `ZERO_PRICING`) is folded
+  into `getHardcodedPricing` as step 2, so a user-catalog price override still
+  wins over the hardcoded $0.
+- `src/lib/db/repos/usageRepo.js` reconciled: the fork's mask keeps the keyId
+  (`sk-***-{keyId}-***`), which hides the machineId while keeping same-instance
+  keys in separate buckets — both the fork's #4191 attribution test and
+  upstream's new `usage-api-key-attribution` test pass against the single
+  masked-key scheme used by the live path, the daily rollup and the lastUsed
+  overlay.
+- `src/sse/handlers/chat.js` keeps the fork's retry-signal wrapper
+  (`withRetrySignal`) and provider-prefix labels while taking upstream's
+  `upstreamResponseHeaders` forwarding on the terminal error paths.
+- `src/shared/components/UsageStats.js` keeps the fork's Breakdown-tab
+  structure (the charts render inside `UsageChart`), so only `UsageChart` got
+  upstream's dynamic import; the fork's separate `usage/page.js` Settings tab
+  survives.
+- `EditCompatibleNodeModal` stays on the fork's explicit type select (which
+  covers the anthropic-compatible case) instead of upstream's `isAnthropic`
+  prop; upstream's new `ZedAuthModal` branch was added to the provider page.
+- Upstream bumped `CODEX_CLI_VERSION` to 0.155.0 (GPT-6 Sol/Luna commit) but
+  left `0.154.0` pinned in its own `image-generation` assertions; the constant
+  is now exported and the test derives from it, matching the `CLAUDE_CLI_VERSION`
+  treatment from v0.5.86.
+- Upstream's #4350 name-collision guard (409 on a silent key overwrite) is
+  kept; the fork's named-test-key update test now opts in via `overwrite: true`
+  and pins the 409 for the unguarded call.
+- `tests/__baseline__/providers-baseline.json` regenerated: 88 providers (5 new),
+  Codex CLI identity headers now carry `version: 0.155.0`. Upstream test data
+  that predates fork changes was realigned: Meta Muse pricing patterns
+  (fork `a4465d35`) and the 1M GLM-5.3 window (fork `7807999a`) are the fork's
+  intentional values.
+
 # v0.5.86-2 (2026-09-24)
 
 ## Features
