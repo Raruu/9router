@@ -259,9 +259,67 @@ function stripAll(body) {
 // Apply unified thinking config to body in the resolved provider-native format.
 function applyFormat(fmt, body, cfg, caps, supportedLevels, display) {
   const none = cfg.mode === "none";
+  // Enforce (user catalog rule): write the requested level verbatim — no
+  // canDisable clamp, no format remap (deepseek low→high, kimi xhigh→max, zai
+  // 3-value, openai max/ultra→xhigh). "none" stays "none" on wires that carry a
+  // level string; budget/binary wires have no such field and keep their
+  // canonical disable below. Verbatim means the upstream may reject the value —
+  // that is the opt-in's purpose.
+  const enforce = caps.thinkingEnforce === true;
   const canDisable = caps.thinkingCanDisable !== false;
   // Model cannot disable thinking → clamp "none" to minimal effort instead.
+  // The enforce branch above returns before this matters for level-carrying
+  // wires; budget/binary wires keep the canonical clamp.
   const eff = none && !canDisable ? { mode: "level", level: "minimal" } : cfg;
+
+  if (enforce) {
+    // Under enforcement "none" is a level like any other: the rule's author
+    // asserts the endpoint accepts it verbatim, so it takes the same path as
+    // an explicit level instead of the canonical disable.
+    const level = cfg.mode === "none" ? "none" : cfg.mode === "level" ? cfg.level : null;
+    if (level !== null) {
+      switch (fmt) {
+        case "openai":
+        case "tokenrouter":
+        case "step":
+        case "kimi":
+        case "deepseek":
+          // Effort-only wires: the raw level is the whole payload. No remap
+          // (deepseek low→high, kimi xhigh→max) and no max/ultra→xhigh clamp.
+          body.reasoning_effort = level;
+          return;
+        case "zai":
+          // Keep the enable switch the canonical path writes; the level itself
+          // goes out verbatim (no low/medium→high, xhigh→max 3-value map).
+          body.thinking = { type: "enabled" };
+          body.reasoning_effort = level;
+          return;
+        case "claude-adaptive": {
+          // Adaptive scaffolding only makes sense for an active level; "none"
+          // goes out as effort alone.
+          if (level !== "none" && canDisable) body.thinking = { type: "adaptive", ...(display ? { display } : {}) };
+          else delete body.thinking;
+          body.output_config = { effort: level };
+          return;
+        }
+        case "gemini-level": {
+          setGeminiThinking(body, { thinkingLevel: level, includeThoughts: level !== "minimal" && level !== "none" });
+          if (level !== "none") ensureGeminiOutputFloor(body, geminiLevelOutputFloor(level), caps);
+          return;
+        }
+        case "commandcode": {
+          if (!body.params || typeof body.params !== "object") body.params = {};
+          body.params.reasoning_effort = level;
+          return;
+        }
+        default:
+          // Budget/binary wires (claude-budget, gemini-budget, qwen, minimax,
+          // hunyuan) have no level string to carry — fall through to their
+          // canonical handling below.
+          break;
+      }
+    }
+  }
 
   switch (fmt) {
     case "openai": {
@@ -441,7 +499,8 @@ export function applyThinking(targetFormat, model, body, provider = null, intent
   // wire. Mapping formats (kimi xhigh→max, deepseek, zai, claude-adaptive,
   // step, gemini-level, …) translate deliberately — clamping first would
   // destroy those mappings — and budget formats already clamp to thinkingRange.
-  const effectiveCfg = fmt === "openai" || fmt === "tokenrouter"
+  // An enforced rule opts out: the level is written verbatim on purpose.
+  const effectiveCfg = (fmt === "openai" || fmt === "tokenrouter") && caps.thinkingEnforce !== true
     ? clampLevelToSupport(cfg, supportedLevels)
     : cfg;
   // Anthropic's `display` (summarized | omitted) decides whether thinking text

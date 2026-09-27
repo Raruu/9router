@@ -31,6 +31,11 @@ describe("thinking capability sanitization", () => {
     expect(sanitizeCapabilities({ thinkingLevels: "high" })).toEqual({});
   });
 
+  it("keeps the thinkingEnforce boolean and drops non-boolean values", () => {
+    expect(sanitizeCapabilities({ thinkingEnforce: true })).toEqual({ thinkingEnforce: true });
+    expect(sanitizeCapabilities({ thinkingEnforce: "yes" })).toEqual({});
+  });
+
   it("bounds the level list and exports the translator's format enum", () => {
     expect(sanitizeThinkingLevels(Array.from({ length: 40 }, (_, i) => `l${i}`))).toHaveLength(16);
     expect(THINKING_FORMATS).toEqual([
@@ -83,5 +88,103 @@ describe("catalog-driven thinking wire format", () => {
 
     expect(body.reasoning_effort).toBe("high");
     expect(body.thinking).toBeUndefined();
+  });
+});
+
+describe("enforced thinking level (thinkingEnforce)", () => {
+  // A user rule may assert its endpoint accepts the level verbatim. Without it,
+  // "none" is clamped to minimal when thinkingCanDisable:false, and format
+  // maps rewrite levels (deepseek low→high, kimi xhigh→max, …).
+
+  it("sends none verbatim on effort wires instead of clamping to minimal", () => {
+    setCatalogSource(sourceFor({
+      reasoning: true,
+      thinkingFormatOverride: "openai",
+      thinkingCanDisable: false,
+      thinkingEnforce: true,
+    }));
+    const body = { model: "glm-5.3-flash", messages: [] };
+
+    applyThinking("openai", "glm-5.3-flash", body, "openrouter", { mode: "none" });
+
+    expect(body.reasoning_effort).toBe("none");
+  });
+
+  it("keeps clamping when the rule does not enforce", () => {
+    setCatalogSource(sourceFor({
+      reasoning: true,
+      thinkingFormatOverride: "openai",
+      thinkingCanDisable: false,
+    }));
+    const body = { model: "glm-5.3-flash", messages: [] };
+
+    applyThinking("openai", "glm-5.3-flash", body, "openrouter", { mode: "none" });
+
+    expect(body.reasoning_effort).toBe("minimal");
+  });
+
+  it("passes levels through without the format's own remap", () => {
+    setCatalogSource(sourceFor({
+      reasoning: true,
+      thinkingFormatOverride: "deepseek",
+      thinkingEnforce: true,
+    }));
+    const body = { model: "glm-5.3-flash", messages: [] };
+
+    // Canonical deepseek would rewrite low→high and xhigh→max.
+    applyThinking("openai", "glm-5.3-flash", body, "openrouter", { mode: "level", level: "low" });
+    expect(body.reasoning_effort).toBe("low");
+  });
+
+  it("writes none verbatim to the claude-adaptive effort field", () => {
+    setCatalogSource(sourceFor({
+      reasoning: true,
+      thinkingFormatOverride: "claude-adaptive",
+      thinkingCanDisable: false,
+      thinkingEnforce: true,
+    }));
+    const body = { model: "glm-5.3-flash", messages: [] };
+
+    applyThinking("openai", "glm-5.3-flash", body, "openrouter", { mode: "none" });
+
+    expect(body.output_config).toEqual({ effort: "none" });
+  });
+
+  it("writes none verbatim to the gemini-level field", () => {
+    setCatalogSource(sourceFor({
+      reasoning: true,
+      thinkingFormatOverride: "gemini-level",
+      thinkingEnforce: true,
+    }));
+    const body = { model: "glm-5.3-flash", messages: [] };
+
+    applyThinking("openai", "glm-5.3-flash", body, "openrouter", { mode: "none" });
+
+    expect(body.generationConfig.thinkingConfig).toEqual({ thinkingLevel: "none", includeThoughts: false });
+  });
+
+  it("leaves budget wires on their canonical disable (no level string exists)", () => {
+    setCatalogSource(sourceFor({
+      reasoning: true,
+      thinkingFormatOverride: "claude-budget",
+      thinkingCanDisable: true,
+      thinkingEnforce: true,
+    }));
+    const body = { model: "glm-5.3-flash", messages: [] };
+
+    applyThinking("openai", "glm-5.3-flash", body, "openrouter", { mode: "none" });
+
+    expect(body.thinking).toEqual({ type: "disabled" });
+  });
+
+  it("keeps none in the advertised levels even when thinking cannot be disabled", () => {
+    setCatalogSource(sourceFor({
+      reasoning: true,
+      thinkingLevels: ["none", "low", "high"],
+      thinkingCanDisable: false,
+      thinkingEnforce: true,
+    }));
+
+    expect(getThinkingLevels("openrouter", "glm-5.3-flash")).toEqual(["none", "low", "high"]);
   });
 });

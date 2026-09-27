@@ -35,6 +35,7 @@ const BOOLEAN_CAPABILITIES = [
   "tools",
   "reasoning",
   "thinkingCanDisable",
+  "thinkingEnforce",
 ];
 
 const PRICING_FIELDS = [

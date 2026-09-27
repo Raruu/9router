@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import PropTypes from "prop-types";
-import { Button, Input, Modal, Select } from "@/shared/components";
+import { Button, Input, Modal, Select, Toggle } from "@/shared/components";
 import { THINKING_FORMATS } from "@/lib/modelCatalog/validation.js";
 
 const BOOLEAN_FIELDS = [
@@ -52,6 +52,7 @@ function emptyForm() {
     thinkingFormatOverride: "",
     thinkingLevels: "",
     thinkingCanDisable: "inherit",
+    thinkingEnforce: false,
   };
 }
 
@@ -76,6 +77,7 @@ function editForm(entry) {
     thinkingFormatOverride: capabilities.thinkingFormatOverride ?? "",
     thinkingLevels: Array.isArray(capabilities.thinkingLevels) ? capabilities.thinkingLevels.join(", ") : "",
     thinkingCanDisable: capabilities.thinkingCanDisable === true ? "yes" : capabilities.thinkingCanDisable === false ? "no" : "inherit",
+    thinkingEnforce: capabilities.thinkingEnforce === true,
   };
 }
 
@@ -132,6 +134,9 @@ export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSa
         ])),
         thinkingFormatOverride: form.thinkingFormatOverride || null,
         thinkingCanDisable: form.thinkingCanDisable === "inherit" ? null : form.thinkingCanDisable === "yes",
+        // Only sent when on: an explicit false would override a broader rule
+        // that enforces, so "off" means inherit here like the other optional keys.
+        ...(form.thinkingEnforce ? { thinkingEnforce: true } : {}),
         ...(levels.length ? { thinkingLevels: levels } : {}),
       },
       contextWindow: toNumber(form.contextWindow),
@@ -177,6 +182,14 @@ export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSa
             <Select label="Format" value={form.thinkingFormatOverride} onChange={(event) => update("thinkingFormatOverride", event.target.value)} options={THINKING_FORMAT_OPTIONS} />
             <Select label="Can be disabled" value={form.thinkingCanDisable} onChange={(event) => update("thinkingCanDisable", event.target.value)} options={TRI_STATE_OPTIONS} />
             <Input label="Levels" value={form.thinkingLevels} onChange={(event) => update("thinkingLevels", event.target.value)} placeholder="low, medium, high" />
+          </div>
+          <div className="mt-3">
+            <Toggle
+              checked={form.thinkingEnforce}
+              onChange={(value) => update("thinkingEnforce", value)}
+              label="Enforce level"
+              description="Send the requested level as-is for matching models: none stays none instead of being mapped to off/low or clamped to the model's minimum."
+            />
           </div>
         </fieldset>
 
