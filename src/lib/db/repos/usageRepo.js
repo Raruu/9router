@@ -812,6 +812,10 @@ export async function getUsageStats(period = "all") {
       if (r.apiKey && typeof r.apiKey === "string") {
         const keyInfo = apiKeyMap[r.apiKey];
         const apiKeyMasked = maskApiKey(r.apiKey);
+        // Key by the mask (never the raw key): the fork's mask keeps keyId, so
+        // keys sharing a machineId stay in separate buckets, and the raw key
+        // never reaches the client payload. The daily rollup and the lastUsed
+        // overlay re-key on the same mask, so all three paths agree.
         const keyName = keyInfo?.name || apiKeyMasked;
         const akKey = `${apiKeyMasked}|${r.model}|${r.provider || "unknown"}`;
         if (!stats.byApiKey[akKey]) {

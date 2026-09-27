@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import PropTypes from "prop-types";
-import { Button, Modal } from "@/shared/components";
+import { Button, Modal, Select, Toggle } from "@/shared/components";
+import { STT_TRANSPORT_META, STT_TRANSPORTS } from "@/shared/constants/models";
 import {
   AUTOMATIC_PATTERN_OPTION,
   catalogPatternOptions,
@@ -23,6 +24,9 @@ export default function AddCustomModelModal({ isOpen, providerAlias = "", existi
   const [testStatus, setTestStatus] = useState(null); // null | "testing" | "ok" | "error"
   const [testError, setTestError] = useState("");
   const [saving, setSaving] = useState(false);
+  // Realtime dispatch marker for the transport select; "" = provider default REST.
+  const [transport, setTransport] = useState("");
+  const [isStt, setIsStt] = useState(() => (existingModel?.type || "llm") === "stt");
   const patternRef = useRef(null);
 
   const reset = () => {
@@ -32,10 +36,14 @@ export default function AddCustomModelModal({ isOpen, providerAlias = "", existi
     setPatternOpen(false);
     setTestStatus(null);
     setTestError("");
+    setTransport("");
+    setIsStt(false);
   };
 
   useEffect(() => {
     if (!isOpen) return;
+    setTransport(existingModel?.transport || "");
+    setIsStt((existingModel?.type || "llm") === "stt");
     let cancelled = false;
     fetch("/api/models/catalog", { cache: "no-store" })
       .then(async (response) => {
@@ -45,7 +53,7 @@ export default function AddCustomModelModal({ isOpen, providerAlias = "", existi
       })
       .catch((error) => { if (!cancelled) setCatalogError(error.message); });
     return () => { cancelled = true; };
-  }, [isOpen]);
+  }, [isOpen, existingModel]);
 
   useEffect(() => {
     if (!patternOpen) return;
@@ -122,7 +130,10 @@ export default function AddCustomModelModal({ isOpen, providerAlias = "", existi
     setSaving(true);
     try {
       const selected = options.find((option) => option.key === selectedKey);
-      await onSave(cleanId, selected?.ref || null);
+      // STT is a model TYPE, not a chat capability: the parent save flow turns
+      // this flag into type "stt" (the API honours a transport only on stt
+      // records) and forwards the pinned realtime dispatch marker.
+      await onSave(cleanId, selected?.ref || null, { stt: isStt }, isStt ? transport : null);
       reset();
     } finally {
       setSaving(false);
@@ -219,6 +230,32 @@ export default function AddCustomModelModal({ isOpen, providerAlias = "", existi
           {catalogError && <p className="mt-1 text-xs text-red-500">{catalogError}</p>}
         </div>
 
+        {/* STT is a model TYPE, not a chat capability: the save flow turns this
+            flag into type "stt" (the API honours a transport only on stt
+            records). The select pins the realtime dispatch marker persisted
+            with the model; the whitelist is the shared STT_TRANSPORT_META. */}
+        <div>
+          <Toggle
+            checked={isStt}
+            onChange={(v) => { setIsStt(v); if (!v) setTransport(""); }}
+            label="Speech to text"
+            description="Transcribes audio via /v1/audio/transcriptions"
+            size="sm"
+          />
+          {isStt && (
+            <div className="mt-3">
+              <Select
+                label="Transport"
+                value={transport}
+                onChange={(e) => setTransport(e.target.value)}
+                placeholder="Provider default (REST)"
+                options={STT_TRANSPORTS.map((t) => ({ value: t, label: STT_TRANSPORT_META[t].label }))}
+                hint="Realtime transport marker for the STT dispatcher. Empty keeps the provider's REST format."
+              />
+            </div>
+          )}
+        </div>
+
         {/* Test result */}
         {testStatus === "ok" && (
           <div className="flex items-center gap-2 text-sm text-green-600">
@@ -255,6 +292,8 @@ AddCustomModelModal.propTypes = {
   existingModel: PropTypes.shape({
     id: PropTypes.string.isRequired,
     name: PropTypes.string,
+    type: PropTypes.string,
+    transport: PropTypes.string,
     caps: PropTypes.object,
     catalogRef: PropTypes.shape({
       source: PropTypes.oneOf(["user", "openrouter", "hardcoded"]).isRequired,

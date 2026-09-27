@@ -32,13 +32,17 @@ describe("getThinkingLevels", () => {
   // Upstream v0.5.86 added the *mimo*v2.6* pattern while the fork was rewriting
   // getThinkingLevels' body to add explicit/override precedence. The pattern
   // table must still be reached from the fallback branch, or the v2.6 models
-  // silently fall back to their deepseek format levels (high|max).
+  // silently fall back to their deepseek format levels (high|max). Upstream
+  // v0.5.91 added the sibling *mimo*v2.5-pro* entry (max is a 400 on the Go
+  // lane there), which now shadows the deepseek default for v2.5-pro.
   it("keeps the MiMo v2.6 pattern reachable through the fallback branch", () => {
     const expected = ["low", "medium", "high", "xhigh"];
     for (const model of ["mimo-v2.6-pro", "mimo-v2.6-flash", "mimo-v2.6-pro-ultraspeed"]) {
       expect(getThinkingLevels("xiaomi-mimo", model)).toEqual(expected);
     }
-    // Sibling v2.5 has no pattern entry, so it keeps the deepseek default.
-    expect(getThinkingLevels("xiaomi-mimo", "mimo-v2.5-pro")).toEqual(["high", "max"]);
+    // v2.5-pro carries upstream's explicit pattern entry (no "max").
+    expect(getThinkingLevels("xiaomi-mimo", "mimo-v2.5-pro")).toEqual(expected);
+    // Plain v2.5 has no pattern entry, so it keeps the deepseek default.
+    expect(getThinkingLevels("xiaomi-mimo", "mimo-v2.5")).toEqual(["high", "max"]);
   });
 });

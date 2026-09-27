@@ -32,7 +32,9 @@ export async function getCustomModels() {
 // Atomic upsert inside transaction to prevent duplicate races.
 // Re-adding an existing model updates metadata without changing its identity.
 // `locked` is only overwritten when explicitly provided, so edits never drop it.
-export async function addCustomModel({ providerAlias, id, type = "llm", name, caps, catalogRef, clearCatalogMetadata = false, locked }) {
+// `transport` (STT realtime dispatch marker) is persisted when provided and
+// otherwise left untouched, matching caps/name semantics.
+export async function addCustomModel({ providerAlias, id, type = "llm", name, caps, catalogRef, clearCatalogMetadata = false, locked, transport }) {
   const k = customKey(providerAlias, id, type);
   const db = await getAdapter();
   let added = false;
@@ -50,6 +52,7 @@ export async function addCustomModel({ providerAlias, id, type = "llm", name, ca
         next.catalogRef = catalogRef;
         delete next.caps;
       }
+      if (transport) next.transport = transport;
       if (locked !== undefined) {
         if (locked) next.locked = true;
         else delete next.locked;
@@ -57,7 +60,7 @@ export async function addCustomModel({ providerAlias, id, type = "llm", name, ca
       db.run(`UPDATE kv SET value = ? WHERE scope = 'customModels' AND key = ?`, [stringifyJson(next), k]);
       return;
     }
-    const value = stringifyJson({ providerAlias, id, type, name: name || id, ...(caps ? { caps } : {}), ...(catalogRef ? { catalogRef } : {}), ...(locked ? { locked: true } : {}) });
+    const value = stringifyJson({ providerAlias, id, type, name: name || id, ...(caps ? { caps } : {}), ...(catalogRef ? { catalogRef } : {}), ...(transport ? { transport } : {}), ...(locked ? { locked: true } : {}) });
     db.run(`INSERT INTO kv(scope, key, value) VALUES('customModels', ?, ?)`, [k, value]);
     added = true;
   });

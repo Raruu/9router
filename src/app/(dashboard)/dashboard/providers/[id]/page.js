@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { getProviderIconSrcForNode } from "@/shared/utils/providerIcon";
-import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, XiaomiMimoAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal, ProviderIcon } from "@/shared/components";
+import { Card, Button, Badge, Input, Modal, CardSkeleton, OAuthModal, KiroOAuthWrapper, CursorAuthModal, ZedAuthModal, XiaomiMimoAuthModal, IFlowCookieModal, GitLabAuthModal, Toggle, Select, EditConnectionModal, NoAuthProxyCard, ConfirmModal, ProviderIcon } from "@/shared/components";
 import { OAUTH_PROVIDERS, APIKEY_PROVIDERS, FREE_PROVIDERS, FREE_TIER_PROVIDERS, WEB_COOKIE_PROVIDERS, getProviderAlias, isOpenAICompatibleProvider, isAnthropicCompatibleProvider, AI_PROVIDERS } from "@/shared/constants/providers";
 import { getModelsByProviderId, getModelKind } from "@/shared/constants/models";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
@@ -757,12 +757,16 @@ export default function ProviderDetailPage() {
     }
   };
 
-  const handleAddCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias, catalogRef, name, quiet = false, skipRefresh = false) => {
+  // `caps`/`transport` are the modal's capability toggles and the STT realtime
+  // dispatch marker (shared whitelist STT_TRANSPORT_META); the API only honours
+  // a transport on type "stt" records. `catalogRef` pins a provider-scoped
+  // capability snapshot (fork's unified add/edit dialog).
+  const handleAddCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias, catalogRef, name, quiet = false, skipRefresh = false, caps, transport) => {
     try {
       const res = await fetch("/api/models/custom", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ providerAlias: providerAliasOverride, id: modelId, type, catalogRef: catalogRef || null, ...(name ? { name } : {}) }),
+        body: JSON.stringify({ providerAlias: providerAliasOverride, id: modelId, type, catalogRef: catalogRef || null, ...(name ? { name } : {}), ...(caps ? { caps } : {}), ...(transport ? { transport } : {}) }),
       });
       if (res.ok) {
         // Batch callers (model import) skip the per-add refetch and refresh once
@@ -1105,12 +1109,13 @@ export default function ProviderDetailPage() {
     setShowAddCustomModel(true);
   };
 
-  const handleSaveCompatModel = async (modelId, catalogRef) => {
+  const handleSaveCompatModel = async (modelId, catalogRef, caps, transport) => {
     if (!editingCustomModel && compatModelRows.some((model) => model.id === modelId)) {
       alert("Model already exists for this provider.");
       return;
     }
-    await handleAddCustomModel(modelId, "llm", providerStorageAlias, catalogRef);
+    // caps.stt is a UI-only flag; the API accepts transports only on type "stt".
+    await handleAddCustomModel(modelId, caps?.stt ? "stt" : "llm", providerStorageAlias, catalogRef, undefined, false, false, caps, transport);
     setShowAddCustomModel(false);
     setEditingCustomModel(null);
   };
@@ -2505,6 +2510,13 @@ const ids = [];
           onSuccess={handleOAuthSuccess}
           onClose={() => setShowOAuthModal(false)}
         />
+      ) : providerId === "zed" ? (
+        <ZedAuthModal
+          isOpen={showOAuthModal}
+          providerInfo={providerInfo}
+          onSuccess={handleOAuthSuccess}
+          onClose={() => setShowOAuthModal(false)}
+        />
       ) : providerId === "gitlab" ? (
         <GitLabAuthModal
           isOpen={showOAuthModal}
@@ -2574,12 +2586,14 @@ const ids = [];
         isOpen={showAddCustomModel}
         providerAlias={providerStorageAlias}
         existingModel={editingCustomModel}
-        onSave={async (modelId, catalogRef) => {
+        onSave={async (modelId, catalogRef, caps, transport) => {
+          // caps.stt is a UI-only flag; the API accepts transports only on
+          // type "stt" records, so the save derives the type from it.
           if (isCompatible) {
-            await handleSaveCompatModel(modelId, catalogRef);
+            await handleSaveCompatModel(modelId, catalogRef, caps, transport);
             return;
           }
-          await handleAddCustomModel(modelId, "llm", providerStorageAlias, catalogRef);
+          await handleAddCustomModel(modelId, caps?.stt ? "stt" : "llm", providerStorageAlias, catalogRef, undefined, false, false, caps, transport);
           setShowAddCustomModel(false);
           setEditingCustomModel(null);
         }}

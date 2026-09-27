@@ -96,6 +96,8 @@ export function claudeToOpenAIResponse(chunk, state) {
       if (delta?.type === "text_delta" && delta.text) {
         results.push(createChunk(state, { content: delta.text }));
       } else if (delta?.type === "thinking_delta" && delta.thinking) {
+        // Thinking travels only in reasoning_content. No "<think>" markers in
+        // content: OpenAI-format clients render them as literal text.
         results.push(createChunk(state, reasoningDelta(delta.thinking)));
       } else if (delta?.type === "input_json_delta" && delta.partial_json) {
         const toolCall = state.toolCalls.get(chunk.index);

@@ -16,6 +16,7 @@ import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
 import { getTransform as getPxpipeTransform } from "@/lib/pxpipe/loader.js";
 import { appendPxpipeEvent } from "@/lib/pxpipe/events.js";
 import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
+import { upstreamResponseHeaders } from "open-sse/utils/upstreamHeaders.js";
 import { handleComboChat, handleFusionChat, detectRequiredCapabilities } from "open-sse/services/combo.js";
 import { comboMemberCapabilities } from "open-sse/providers/comboCapabilities.js";
 import { buildProviderIdByPrefix } from "@/lib/providerPrefixMap.js";
@@ -323,6 +324,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   const excludeConnectionIds = new Set();
   let lastError = null;
   let lastStatus = null;
+  let lastHeaders = null;
 
   while (true) {
     const credentials = await getProviderCredentials(provider, excludeConnectionIds, model);
@@ -335,7 +337,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         const tag = providerModelTag(provider, credentials.providerSpecificData, model);
         log.warn("CHAT", `[${tag}] ${errorMsg} (${credentials.retryAfterHuman})`);
         return withRetrySignal(
-          unavailableResponse(status, `[${tag}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman),
+          unavailableResponse(status, `[${tag}] ${errorMsg}`, credentials.retryAfter, credentials.retryAfterHuman, lastHeaders),
           provider,
           lastStatus,
           resolveRetryWaitMs(credentials.retryAfter, lastStatus, errorMsg)
@@ -348,7 +350,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       }
       log.warn("CHAT", "No more accounts available", { provider: await resolveProviderDisplayLabel(provider) });
       return withRetrySignal(
-        errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable"),
+        errorResponse(lastStatus || HTTP_STATUS.SERVICE_UNAVAILABLE, lastError || "All accounts unavailable", lastHeaders),
         provider,
         lastStatus,
         resolveRetryWaitMs(null, lastStatus, lastError)
@@ -480,6 +482,9 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
     excludeConnectionIds.add(credentials.connectionId);
     lastError = failedResult.error;
     lastStatus = failedResult.status;
+    // Forward upstream rate-limit headers on the terminal error response
+    // (same convention as the single-model path above).
+    lastHeaders = upstreamResponseHeaders(failedResult.response?.headers);
     continue;
   }
 }

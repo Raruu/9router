@@ -803,7 +803,7 @@ function ComboCard({ combo, getCaps, comboByName = {}, activeProviders = [], cop
                     <span>{model}</span>
                     <CapacityBadges caps={
                       comboByName[model]
-                        ? aggregateComboCapabilities(comboByName[model], comboByName)
+                        ? aggregateComboCapabilities(comboByName[model], comboByName, getCaps)
                         : getCaps?.(model)
                     } />
                   </code>
