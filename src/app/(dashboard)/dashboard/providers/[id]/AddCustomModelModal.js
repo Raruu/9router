@@ -25,7 +25,9 @@ export default function AddCustomModelModal({ isOpen, providerAlias = "", existi
   const [testError, setTestError] = useState("");
   const [saving, setSaving] = useState(false);
   // Realtime dispatch marker for the transport select; "" = provider default REST.
-  const [transport, setTransport] = useState("");
+  // The parent keys this modal by the edited model's id, so a remount re-derives
+  // both from props — no setState-in-effect needed.
+  const [transport, setTransport] = useState(() => existingModel?.transport || "");
   const [isStt, setIsStt] = useState(() => (existingModel?.type || "llm") === "stt");
   const patternRef = useRef(null);
 
@@ -42,8 +44,6 @@ export default function AddCustomModelModal({ isOpen, providerAlias = "", existi
 
   useEffect(() => {
     if (!isOpen) return;
-    setTransport(existingModel?.transport || "");
-    setIsStt((existingModel?.type || "llm") === "stt");
     let cancelled = false;
     fetch("/api/models/catalog", { cache: "no-store" })
       .then(async (response) => {

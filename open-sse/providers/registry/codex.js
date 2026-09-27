@@ -2,7 +2,9 @@ import { withCodexReviewModels } from "../models/helpers.js";
 
 // Codex CLI version seen by OpenAI's backend — single source for the Version /
 // User-Agent identity headers. Bump when the installed codex CLI is upgraded.
-const CODEX_CLI_VERSION = "0.155.0";
+// Exported so tests derive from it instead of pinning a literal that goes
+// stale on every bump (the 0.154→0.155 bump left one behind).
+export const CODEX_CLI_VERSION = "0.155.0";
 const GPT_6_LITE_THINKING_LEVELS = ["low", "medium", "high", "xhigh", "max"];
 
 export default {

@@ -205,7 +205,13 @@ describe("compatible provider connections API", () => {
     cleanup = ctx.cleanup;
 
     await ctx.POST(makeRequest(ctx.node.id, "test", { apiKey: "old-key", testStatus: "unknown" }));
-    const response = await ctx.POST(makeRequest(ctx.node.id, "test", { apiKey: "new-key", testStatus: "active" }));
+    // Upstream #4350 refuses a silent key overwrite on a name collision, so an
+    // intentional update must opt in. Without it the call is a 409 (see the
+    // dedicated collision test below).
+    const collision = await ctx.POST(makeRequest(ctx.node.id, "test", { apiKey: "new-key", testStatus: "active" }));
+    expect(collision.status).toBe(409);
+
+    const response = await ctx.POST(makeRequest(ctx.node.id, "test", { apiKey: "new-key", testStatus: "active", overwrite: true }));
     const stored = await ctx.getProviderConnections({ provider: ctx.node.id });
 
     expect(response.status).toBe(201);
