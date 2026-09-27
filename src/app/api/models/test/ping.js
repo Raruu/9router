@@ -132,6 +132,55 @@ export async function pingModelByKind(model, kind, baseUrl = `http://127.0.0.1:$
     return { ok: true, latencyMs, error: null, status: res.status };
   }
 
+  if (kind === "tts") {
+    // Speech returns audio bytes (or a JSON error). Any 2xx with a non-empty
+    // body counts as reachable; the content-type differs per provider.
+    const res = await fetch(`${baseUrl}/api/v1/audio/speech`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ model, input: "test", voice: "alloy" }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const latencyMs = Date.now() - start;
+    const buffer = await res.arrayBuffer().catch(() => new ArrayBuffer(0));
+    if (!res.ok) {
+      let detail = "";
+      try { detail = new TextDecoder().decode(buffer).slice(0, 240); } catch {}
+      return { ok: false, latencyMs, error: `HTTP ${res.status}${detail ? `: ${detail}` : ""}`, status: res.status };
+    }
+    if (!buffer.byteLength) {
+      return { ok: false, latencyMs, status: res.status, error: "Provider returned no audio data for this model" };
+    }
+    return { ok: true, latencyMs, error: null, status: res.status };
+  }
+
+  if (kind === "video") {
+    // Video generation is an async job: a 2xx with an id/status means the
+    // provider accepted the request. Long renders are expected — the probe
+    // only checks acceptance, not completion.
+    const res = await fetch(`${baseUrl}/api/v1/videos/generations`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ model, prompt: "test" }),
+      signal: AbortSignal.timeout(15000),
+    });
+    const latencyMs = Date.now() - start;
+    const rawText = await res.text().catch(() => "");
+    let parsed = null;
+    try { parsed = rawText ? JSON.parse(rawText) : null; } catch {}
+
+    if (!res.ok) {
+      const detail = parsed?.error?.message || parsed?.msg || parsed?.message || parsed?.error || rawText;
+      return { ok: false, latencyMs, error: `HTTP ${res.status}${detail ? `: ${String(detail).slice(0, 240)}` : ""}`, status: res.status };
+    }
+
+    const hasJob = typeof parsed?.id === "string" || typeof parsed?.jobId === "string" || typeof parsed?.status === "string";
+    if (!hasJob) {
+      return { ok: false, latencyMs, status: res.status, error: "Provider returned no video job for this model" };
+    }
+    return { ok: true, latencyMs, error: null, status: res.status };
+  }
+
   if (kind === "systemone") {
     const res = await fetch(`${baseUrl}/api/v1/systemone`, {
       method: "POST",

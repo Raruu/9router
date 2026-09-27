@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import PropTypes from "prop-types";
-import { Button, Modal, Select, Toggle } from "@/shared/components";
-import { STT_TRANSPORT_META, STT_TRANSPORTS } from "@/shared/constants/models";
+import { Button, Modal, Select } from "@/shared/components";
+import { CUSTOM_MODEL_TYPES, STT_TRANSPORT_META, STT_TRANSPORTS, normalizeCustomModelType } from "@/shared/constants/models";
 import {
   AUTOMATIC_PATTERN_OPTION,
   catalogPatternOptions,
@@ -26,9 +26,9 @@ export default function AddCustomModelModal({ isOpen, providerAlias = "", existi
   const [saving, setSaving] = useState(false);
   // Realtime dispatch marker for the transport select; "" = provider default REST.
   // The parent keys this modal by the edited model's id, so a remount re-derives
-  // both from props — no setState-in-effect needed.
+  // all three from props — no setState-in-effect needed.
   const [transport, setTransport] = useState(() => existingModel?.transport || "");
-  const [isStt, setIsStt] = useState(() => (existingModel?.type || "llm") === "stt");
+  const [type, setType] = useState(() => normalizeCustomModelType(existingModel?.type));
   const patternRef = useRef(null);
 
   const reset = () => {
@@ -39,7 +39,7 @@ export default function AddCustomModelModal({ isOpen, providerAlias = "", existi
     setTestStatus(null);
     setTestError("");
     setTransport("");
-    setIsStt(false);
+    setType("llm");
   };
 
   useEffect(() => {
@@ -113,7 +113,7 @@ export default function AddCustomModelModal({ isOpen, providerAlias = "", existi
       const res = await fetch("/api/models/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: `${providerAlias}/${cleanId}` }),
+        body: JSON.stringify({ model: `${providerAlias}/${cleanId}`, kind: type }),
       });
       const data = await res.json();
       setTestStatus(data.ok ? "ok" : "error");
@@ -130,10 +130,12 @@ export default function AddCustomModelModal({ isOpen, providerAlias = "", existi
     setSaving(true);
     try {
       const selected = options.find((option) => option.key === selectedKey);
-      // STT is a model TYPE, not a chat capability: the parent save flow turns
-      // this flag into type "stt" (the API honours a transport only on stt
-      // records) and forwards the pinned realtime dispatch marker.
-      await onSave(cleanId, selected?.ref || null, { stt: isStt }, isStt ? transport : null);
+      // `type` routes the model to its service handler (chat / image / stt / …)
+      // and drives /v1/models/{kind} membership. The transport marker is only
+      // honoured on type "stt" records (shared STT_TRANSPORT_META whitelist).
+      // `previousType` lets the API move the record when the kind changed on
+      // edit instead of leaving a duplicate behind under the old key.
+      await onSave(cleanId, selected?.ref || null, type, type === "stt" ? transport : null, existingModel?.type || null);
       reset();
     } finally {
       setSaving(false);
@@ -230,19 +232,18 @@ export default function AddCustomModelModal({ isOpen, providerAlias = "", existi
           {catalogError && <p className="mt-1 text-xs text-red-500">{catalogError}</p>}
         </div>
 
-        {/* STT is a model TYPE, not a chat capability: the save flow turns this
-            flag into type "stt" (the API honours a transport only on stt
-            records). The select pins the realtime dispatch marker persisted
-            with the model; the whitelist is the shared STT_TRANSPORT_META. */}
+        {/* Model kind: routes the entry to its service handler and drives
+            /v1/models/{kind} membership. The transport marker below only
+            applies to Speech to text (shared STT_TRANSPORT_META whitelist). */}
         <div>
-          <Toggle
-            checked={isStt}
-            onChange={(v) => { setIsStt(v); if (!v) setTransport(""); }}
-            label="Speech to text"
-            description="Transcribes audio via /v1/audio/transcriptions"
-            size="sm"
+          <Select
+            label="Model type"
+            value={type}
+            onChange={(e) => { setType(e.target.value); if (e.target.value !== "stt") setTransport(""); }}
+            options={CUSTOM_MODEL_TYPES.map((t) => ({ value: t.id, label: t.label }))}
+            hint="Which service the model answers: chat, image, speech, video, embeddings or the System One classifier."
           />
-          {isStt && (
+          {type === "stt" && (
             <div className="mt-3">
               <Select
                 label="Transport"
@@ -302,6 +303,7 @@ AddCustomModelModal.propTypes = {
     }),
   }),
   initialModelId: PropTypes.string,
+  // onSave(modelId, catalogRef, type, transport, previousType)
   onSave: PropTypes.func.isRequired,
   onClose: PropTypes.func.isRequired,
 };

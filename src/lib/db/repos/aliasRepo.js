@@ -34,15 +34,30 @@ export async function getCustomModels() {
 // `locked` is only overwritten when explicitly provided, so edits never drop it.
 // `transport` (STT realtime dispatch marker) is persisted when provided and
 // otherwise left untouched, matching caps/name semantics.
-export async function addCustomModel({ providerAlias, id, type = "llm", name, caps, catalogRef, clearCatalogMetadata = false, locked, transport }) {
+//
+// `previousType` (edit flow): the kind is part of the KV key, so changing it
+// would otherwise write a second record and orphan the old one. When it
+// differs from `type`, the old key is deleted inside the same transaction and
+// its metadata (name/caps/catalogRef/transport/locked) carries over to the new
+// key — a rename, not a duplicate.
+export async function addCustomModel({ providerAlias, id, type = "llm", name, caps, catalogRef, clearCatalogMetadata = false, locked, transport, previousType = null }) {
   const k = customKey(providerAlias, id, type);
+  const oldKey = previousType && previousType !== type ? customKey(providerAlias, id, previousType) : null;
   const db = await getAdapter();
   let added = false;
   db.transaction(() => {
-    const row = db.get(`SELECT value FROM kv WHERE scope = 'customModels' AND key = ?`, [k]);
-    if (row) {
-      const prev = parseJson(row.value) || {};
-      const next = { ...prev, ...(name ? { name } : {}) };
+    // A type change moves the record: read the old row first so its metadata
+    // survives, then drop the stale key before the upsert below.
+    let prevRow = db.get(`SELECT value FROM kv WHERE scope = 'customModels' AND key = ?`, [k]);
+    if (!prevRow && oldKey) {
+      prevRow = db.get(`SELECT value FROM kv WHERE scope = 'customModels' AND key = ?`, [oldKey]);
+      if (prevRow) db.run(`DELETE FROM kv WHERE scope = 'customModels' AND key = ?`, [oldKey]);
+    }
+    if (prevRow) {
+      const prev = parseJson(prevRow.value) || {};
+      // `type` is part of the record as well as the key — on a rename it must
+      // track the new key, or getModelKind() would still report the old kind.
+      const next = { ...prev, type, ...(name ? { name } : {}) };
       if (clearCatalogMetadata) {
         delete next.caps;
         delete next.catalogRef;
@@ -52,12 +67,28 @@ export async function addCustomModel({ providerAlias, id, type = "llm", name, ca
         next.catalogRef = catalogRef;
         delete next.caps;
       }
-      if (transport) next.transport = transport;
+      // Transport is only meaningful on type "stt". An explicit "" clears it
+      // (the modal's "provider default"); a string persists; anything else —
+      // including an omitted key from a caller that doesn't manage transports —
+      // leaves the stored marker untouched (T14: a dropped unknown value must
+      // not clobber a working one). A type change always drops it.
+      if (type !== "stt") {
+        delete next.transport;
+      } else if (transport === "") {
+        delete next.transport;
+      } else if (typeof transport === "string") {
+        next.transport = transport;
+      }
       if (locked !== undefined) {
         if (locked) next.locked = true;
         else delete next.locked;
       }
-      db.run(`UPDATE kv SET value = ? WHERE scope = 'customModels' AND key = ?`, [stringifyJson(next), k]);
+      // Upsert, not UPDATE: on a rename the target key does not exist yet
+      // (the stale key was just deleted), so an UPDATE would drop the record.
+      db.run(
+        `INSERT INTO kv(scope, key, value) VALUES('customModels', ?, ?) ON CONFLICT(scope, key) DO UPDATE SET value = excluded.value`,
+        [k, stringifyJson(next)]
+      );
       return;
     }
     const value = stringifyJson({ providerAlias, id, type, name: name || id, ...(caps ? { caps } : {}), ...(catalogRef ? { catalogRef } : {}), ...(transport ? { transport } : {}), ...(locked ? { locked: true } : {}) });

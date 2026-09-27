@@ -116,14 +116,14 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
   const [testingModelId, setTestingModelId] = useState(null);
   const [modelTestResults, setModelTestResults] = useState({});
 
-  const handleTestModel = async (modelId) => {
+  const handleTestModel = async (modelId, kind = "llm") => {
     if (testingModelId) return;
     setTestingModelId(modelId);
     try {
       const res = await fetch("/api/models/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: `${providerStorageAlias}/${modelId}` }),
+        body: JSON.stringify({ model: `${providerStorageAlias}/${modelId}`, kind }),
       });
       const data = await res.json();
       setModelTestResults((prev) => ({ ...prev, [modelId]: data.ok ? "ok" : "error" }));
@@ -134,11 +134,13 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
     }
   };
 
+  // Compatible nodes are chat providers by default; custom entries may carry a
+  // media kind, which is why the rows return every type here.
   const allModels = getProviderCustomModelRows({
     customModels,
     modelAliases,
     providerAlias: providerStorageAlias,
-    type: "llm",
+    type: null,
   });
 
   const canImport = connections.some((conn) => conn.isActive !== false);
@@ -157,7 +159,7 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
 
       {allModels.length > 0 && (
         <div className="flex flex-col gap-3">
-          {allModels.map(({ id, name, alias, source, catalogRef, locked }) => (
+          {allModels.map(({ id, name, alias, source, catalogRef, locked, type, transport }) => (
             <CompatibleModelRow
               key={`${source}-${providerStorageAlias}/${id}`}
               modelId={id}
@@ -166,10 +168,10 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
               locked={locked}
               copied={copied}
               onCopy={onCopy}
-              onDeleteAlias={() => source === "custom" ? onDeleteCustomModel(id) : onDeleteAlias(alias)}
-              onEdit={source === "custom" ? () => onEditModel({ id, name, catalogRef }) : undefined}
-              onToggleLock={source === "custom" ? () => onToggleLock(id, !locked) : undefined}
-              onTest={connections.length > 0 ? () => handleTestModel(id) : undefined}
+              onDeleteAlias={() => source === "custom" ? onDeleteCustomModel(id, type) : onDeleteAlias(alias)}
+              onEdit={source === "custom" ? () => onEditModel({ id, name, catalogRef, type, transport }) : undefined}
+              onToggleLock={source === "custom" ? () => onToggleLock(id, !locked, type) : undefined}
+              onTest={connections.length > 0 ? () => handleTestModel(id, type) : undefined}
               testStatus={modelTestResults[id]}
               isTesting={testingModelId === id}
               caps={getModelCaps?.(`${providerStorageAlias}/${id}`)}
