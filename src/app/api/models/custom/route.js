@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCustomModels, addCustomModel, deleteCustomModel, setCustomModelLocked, clearProviderModels } from "@/models";
-import { CAPACITY_META } from "@/shared/constants/models";
+import { CAPACITY_META, isSttTransport } from "@/shared/constants/models";
 import { THINKING_FORMATS, sanitizeThinkingLevels } from "@/lib/modelCatalog/validation.js";
 
 export const dynamic = "force-dynamic";
@@ -34,6 +34,16 @@ function sanitizeCatalogRef(ref) {
   return { source, provider, pattern };
 }
 
+// Accepted STT transport markers live in the shared whitelist
+// (src/shared/constants/models STT_TRANSPORT_META) — the dashboard transport
+// select and this validator must agree on one set, so neither owns a copy.
+// Unknown or mistyped values are silently dropped, the same policy
+// sanitizeCaps applies to capability keys.
+function sanitizeTransport(transport, type) {
+  if (type !== "stt" || !isSttTransport(transport)) return null;
+  return transport.trim();
+}
+
 // GET /api/models/custom - List all custom models
 export async function GET() {
   try {
@@ -49,11 +59,12 @@ export async function GET() {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { providerAlias, id, type, name, caps } = body;
+    const { providerAlias, id, type, name, caps, transport } = body;
     if (!providerAlias || !id) {
       return NextResponse.json({ error: "providerAlias and id required" }, { status: 400 });
     }
     const cleanCaps = sanitizeCaps(caps);
+    const cleanTransport = sanitizeTransport(transport, type || "llm");
     const catalogRef = sanitizeCatalogRef(body.catalogRef);
     const added = await addCustomModel({
       providerAlias,
@@ -61,6 +72,7 @@ export async function POST(request) {
       type: type || "llm",
       name,
       ...(cleanCaps ? { caps: cleanCaps } : {}),
+      ...(cleanTransport ? { transport: cleanTransport } : {}),
       ...(catalogRef ? { catalogRef } : {}),
       clearCatalogMetadata: Object.hasOwn(body, "catalogRef") && !catalogRef,
     });

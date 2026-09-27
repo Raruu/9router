@@ -11,6 +11,7 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { handleImageGenerationCore } from "../../open-sse/handlers/imageGenerationCore.js";
+import { CODEX_CLI_VERSION } from "../../open-sse/providers/registry/codex.js";
 
 const originalFetch = global.fetch;
 
@@ -351,7 +352,9 @@ describe("handleImageGenerationCore", () => {
         headers: expect.objectContaining({
           authorization: "Bearer codex-token",
           "chatgpt-account-id": "account-123",
-          version: "0.154.0",
+          // Derived, not pinned: the literal went stale when upstream bumped
+          // CODEX_CLI_VERSION to 0.155.0 in the GPT-6 Sol/Luna commit.
+          version: CODEX_CLI_VERSION,
         }),
       })
     );
