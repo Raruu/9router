@@ -112,6 +112,36 @@ describe("groupCustomModelRowsByKind", () => {
     const groups = groupCustomModelRowsByKind([{ id: "a", type: "systemone" }]);
     expect(groups[0].label).toBe("System One");
   });
+
+  it("groups legacy alias rows (type defaults to LLM) alongside custom rows", () => {
+    // Both provider pages render one grouped list now, so alias rows must land
+    // in the LLM section rather than a separate or missing bucket.
+    const rows = getProviderCustomModelRows({
+      customModels: [{ providerAlias: "p", id: "custom-a", type: "llm", name: "Custom A" }],
+      modelAliases: { "legacy-b": "p/legacy-b" },
+      providerAlias: "p",
+      type: null,
+    });
+    const groups = groupCustomModelRowsByKind(rows);
+    expect(groups.map((g) => g.id)).toEqual(["llm"]);
+    expect(groups[0].rows.map((r) => r.id)).toEqual(["custom-a", "legacy-b"]);
+  });
+});
+
+describe("getProviderCustomModelRows lock passthrough", () => {
+  it("carries the locked flag so both pages can render the lock button", () => {
+    const rows = getProviderCustomModelRows({
+      customModels: [
+        { providerAlias: "p", id: "kept", type: "stt", locked: true },
+        { providerAlias: "p", id: "free", type: "llm" },
+      ],
+      providerAlias: "p",
+      type: null,
+    });
+    const byId = Object.fromEntries(rows.map((r) => [r.id, r]));
+    expect(byId.kept.locked).toBe(true);
+    expect(byId.free.locked).toBeUndefined();
+  });
 });
 
 describe("groupBuiltInModelsByKind", () => {

@@ -1745,11 +1745,12 @@ const ids = [];
           customModels={customModels}
           copied={copied}
           onCopy={copy}
-          onSetAlias={handleSetAlias}
           onDeleteAlias={(alias) => handleDeleteAliasRow(alias)}
           onEditModel={(entry) => openCompatModelModal(entry)}
-          onDeleteCustomModel={(modelId) => handleDeleteCustomModelRow(modelId)}
-          onToggleLock={(modelId, locked) => handleToggleModelLock(modelId, locked)}
+          // Each row carries its own service kind — the KV key includes it, so a
+          // non-LLM custom model must be deleted/locked under its own type.
+          onDeleteCustomModel={(modelId, type) => handleDeleteCustomModelRow(modelId, type)}
+          onToggleLock={(modelId, locked, type) => handleToggleModelLock(modelId, locked, type)}
           getModelCaps={getCaps}
           connections={connections}
           isAnthropic={isAnthropicCompatible}
@@ -1803,6 +1804,11 @@ const ids = [];
           setEditingCustomModel(model);
           setShowAddCustomModel(true);
         } : undefined}
+        // Lock guards the bulk Clear ("keep on bulk clear") — same control the
+        // compatible-provider list shows.
+        onToggleLock={model.source === "custom" ? () => handleToggleModelLock(model.id, !model.locked, model.type) : undefined}
+        locked={model.locked}
+        removeTitle={model.source === "custom" ? undefined : "Remove alias"}
         testStatus={modelTestResults[model.id]}
         onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(model.id, model.type) : undefined}
         isTesting={testingModelIds.has(model.id)}
