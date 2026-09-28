@@ -62,6 +62,7 @@ describe("model catalog API backend", () => {
         thinkingCanDisable: false,
         thinkingFormatOverride: "zai",
         thinkingLevels: ["low", "high", "low"],
+        thinkingEnforce: true,
       },
     });
 
@@ -72,6 +73,7 @@ describe("model catalog API backend", () => {
       thinkingCanDisable: false,
       thinkingFormatOverride: "zai",
       thinkingLevels: ["low", "high"],
+      thinkingEnforce: true,
     });
 
     expect(() => backend.validateUserEntry({
@@ -80,6 +82,13 @@ describe("model catalog API backend", () => {
       matchType: "glob",
       capabilities: { thinkingFormatOverride: "not-a-format" },
     })).toThrow(/thinking format/i);
+
+    expect(() => backend.validateUserEntry({
+      provider: "acme",
+      pattern: "glm-*",
+      matchType: "glob",
+      capabilities: { thinkingEnforce: "yes" },
+    })).toThrow(/thinkingEnforce/i);
   });
 
   it("normalizes and atomically stores OpenRouter models", async () => {

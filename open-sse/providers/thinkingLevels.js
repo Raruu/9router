@@ -103,6 +103,11 @@ export function getThinkingLevels(provider, model, capsOverride = null) {
     levels = modelLevels || hit?.levels || FORMAT_LEVELS[caps.thinkingFormat] || L.base;
   }
 
-  if (caps.thinkingCanDisable === false) levels = levels.filter((l) => l !== "none");
+  // A rule that enforces the level sends it verbatim, so "none" stays
+  // selectable even on models that normally cannot disable thinking — the
+  // rule's author is asserting this endpoint accepts it.
+  if (caps.thinkingCanDisable === false && caps.thinkingEnforce !== true) {
+    levels = levels.filter((l) => l !== "none");
+  }
   return levels;
 }

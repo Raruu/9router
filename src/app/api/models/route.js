@@ -56,9 +56,11 @@ export async function GET() {
       });
 
     // Custom models ride along with capabilities resolved by the live catalog.
+    // Every kind is included: the dashboard's cap/badge lookups key by full
+    // model id, so a media custom model needs an entry here too.
     const seenFull = new Set(models.map((m) => m.fullModel));
     const customModels = (await getCustomModels()).filter((m) => {
-      if (!m?.id || (m.kind || m.type || "llm") !== "llm") return false;
+      if (!m?.id) return false;
       return !seenFull.has(`${m.providerAlias}/${m.id}`);
     });
     for (const m of customModels) {
@@ -71,6 +73,7 @@ export async function GET() {
         provider: m.providerAlias,
         model: m.id,
         name: m.name || m.id,
+        kind: m.kind || m.type || "llm",
         fullModel,
         routedModel: fullModel,
         ...(prefixModel && prefixModel !== fullModel ? { prefixModel } : {}),

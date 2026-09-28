@@ -7,7 +7,7 @@ export const DEFAULT_MODEL_CATALOG_PRIORITY = MODEL_CATALOG_PRIORITIES[0];
 
 export const CAPABILITY_KEYS = [
   "vision", "pdf", "audioInput", "videoInput", "imageOutput", "audioOutput",
-  "tools", "reasoning", "thinkingCanDisable", "contextWindow", "maxOutput",
+  "tools", "reasoning", "thinkingCanDisable", "thinkingEnforce", "contextWindow", "maxOutput",
 ];
 
 // Thinking wire formats a user rule may force. Mirrors the formats understood

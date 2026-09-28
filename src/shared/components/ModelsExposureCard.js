@@ -3,6 +3,7 @@
 import PropTypes from "prop-types";
 import Card from "./Card";
 import Select from "./Select";
+import { EXPOSABLE_NON_LLM_KINDS } from "@/shared/constants/models";
 
 const OPTIONS = [
   { value: "all", label: "Combos + Models" },
@@ -16,8 +17,9 @@ function exposureSummary(value) {
   return "Clients see every combo and provider model.";
 }
 
-export default function ModelsExposureCard({ value = "all", disabled = false, onChange, variant = "profile" }) {
+export default function ModelsExposureCard({ value = "all", exposeKinds = [], disabled = false, onChange, onToggleNonLlmKind, variant = "profile" }) {
   const endpoint = variant === "endpoint";
+  const checked = new Set(exposeKinds);
 
   return (
     <Card>
@@ -44,6 +46,34 @@ export default function ModelsExposureCard({ value = "all", disabled = false, on
           options={OPTIONS}
           hint="Applies to GET /v1/models only. The per-kind lists (/v1/models/image, /tts, /stt, /embedding, /web) always expose everything, and the CLI Tools model pickers are unaffected."
         />
+        {onToggleNonLlmKind && (
+          <div className="border-t border-border/50 pt-3">
+            <p className="text-sm font-medium text-text-main">Also expose in /v1/models</p>
+            <p className="mb-3 mt-0.5 text-xs text-text-muted">
+              Pick the non-LLM kinds the default list should advertise, alongside chat models.
+            </p>
+            <div className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2 lg:grid-cols-3">
+              {EXPOSABLE_NON_LLM_KINDS.map((kind) => (
+                <label key={kind.id} className="flex cursor-pointer select-none items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={checked.has(kind.id)}
+                    onChange={() => onToggleNonLlmKind(kind.id)}
+                    disabled={disabled}
+                    className="h-3.5 w-3.5 cursor-pointer accent-primary disabled:cursor-not-allowed"
+                  />
+                  <span className="material-symbols-outlined text-[16px] text-text-muted">{kind.icon}</span>
+                  <span className="text-xs text-text-muted">{kind.label}</span>
+                </label>
+              ))}
+            </div>
+            <p className="mt-3 text-xs italic text-text-muted">
+              {checked.size > 0
+                ? `Clients also discover: ${EXPOSABLE_NON_LLM_KINDS.filter((k) => checked.has(k.id)).map((k) => k.label).join(", ")}.`
+                : "The default list stays chat-only; media models remain reachable via /v1/models/{kind}."}
+            </p>
+          </div>
+        )}
         <p className="border-t border-border/50 pt-2 text-xs italic text-text-muted">
           {exposureSummary(value)}
         </p>
@@ -54,7 +84,9 @@ export default function ModelsExposureCard({ value = "all", disabled = false, on
 
 ModelsExposureCard.propTypes = {
   value: PropTypes.oneOf(["all", "combos", "models"]),
+  exposeKinds: PropTypes.arrayOf(PropTypes.string),
   disabled: PropTypes.bool,
   onChange: PropTypes.func.isRequired,
+  onToggleNonLlmKind: PropTypes.func,
   variant: PropTypes.oneOf(["profile", "endpoint"]),
 };

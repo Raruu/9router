@@ -2,128 +2,21 @@
 
 import { useState } from "react";
 import PropTypes from "prop-types";
-import { CapacityBadges, ModelDetailModal } from "@/shared/components";
-import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
-
-function CompatibleModelRow({ modelId, modelName, fullModel, locked, copied, onCopy, onDeleteAlias, onEdit, onToggleLock, onTest, testStatus, isTesting, caps }) {
-  const [showDetail, setShowDetail] = useState(false);
-  const borderColor = testStatus === "ok"
-    ? "border-green-500/40"
-    : testStatus === "error"
-    ? "border-red-500/40"
-    : "border-border";
-
-  const iconColor = testStatus === "ok"
-    ? "#22c55e"
-    : testStatus === "error"
-    ? "#ef4444"
-    : undefined;
-
-  return (
-    <div className={`group flex items-center gap-3 p-3 rounded-lg border ${borderColor} hover:bg-sidebar/50`}>
-      <span
-        className="material-symbols-outlined text-base text-text-muted"
-        style={iconColor ? { color: iconColor } : undefined}
-      >
-        {testStatus === "ok" ? "check_circle" : testStatus === "error" ? "cancel" : "smart_toy"}
-      </span>
-      <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate">{modelName || modelId}</p>
-        <div className="flex items-center gap-1 mt-1">
-          <code className="text-xs text-text-muted font-mono bg-sidebar px-1.5 py-0.5 rounded">{fullModel}</code>
-          <div className="relative group/btn">
-            <button
-              onClick={() => onCopy(fullModel, `model-${modelId}`)}
-              className="rounded p-0.5 text-text-muted opacity-50 transition-opacity hover:bg-sidebar hover:text-primary group-hover:opacity-100"
-            >
-              <span className="material-symbols-outlined text-sm">
-                {copied === `model-${modelId}` ? "check" : "content_copy"}
-              </span>
-            </button>
-            <span className="pointer-events-none absolute top-5 left-1/2 -translate-x-1/2 text-[10px] text-text-muted whitespace-nowrap opacity-0 group-hover/btn:opacity-100 transition-opacity">
-              {copied === `model-${modelId}` ? "Copied!" : "Copy"}
-            </span>
-          </div>
-          <div className="relative group/btn">
-            <button
-              onClick={() => setShowDetail(true)}
-              className="rounded p-0.5 text-text-muted opacity-50 transition-opacity hover:bg-sidebar hover:text-primary group-hover:opacity-100"
-              aria-label="View model info"
-            >
-              <span className="material-symbols-outlined text-sm">visibility</span>
-            </button>
-            <span className="pointer-events-none absolute top-5 left-1/2 -translate-x-1/2 text-[10px] text-text-muted whitespace-nowrap opacity-0 group-hover/btn:opacity-100 transition-opacity">
-              Info
-            </span>
-          </div>
-          {onTest && (
-            <div className="relative group/btn">
-              <button
-                onClick={onTest}
-                disabled={isTesting}
-                className={`rounded p-0.5 text-text-muted transition-opacity hover:bg-sidebar hover:text-primary ${isTesting ? "opacity-100" : "opacity-50 group-hover:opacity-100"}`}
-              >
-                <span className="material-symbols-outlined text-sm" style={isTesting ? { animation: "spin 1s linear infinite" } : undefined}>
-                  {isTesting ? "progress_activity" : "science"}
-                </span>
-              </button>
-              <span className="pointer-events-none absolute top-5 left-1/2 -translate-x-1/2 text-[10px] text-text-muted whitespace-nowrap opacity-0 group-hover/btn:opacity-100 transition-opacity">
-                {isTesting ? "Testing..." : "Test"}
-              </span>
-            </div>
-          )}
-          <CapacityBadges caps={caps} size={13} />
-        </div>
-      </div>
-      {onEdit && (
-        <button
-          onClick={onEdit}
-          className="rounded p-1 text-text-muted opacity-50 transition-opacity hover:bg-sidebar hover:text-primary group-hover:opacity-100"
-          title="Edit custom model"
-        >
-          <span className="material-symbols-outlined text-sm">edit</span>
-        </button>
-      )}
-      {onToggleLock && (
-        <button
-          onClick={onToggleLock}
-          className={`rounded p-1 transition-opacity hover:bg-sidebar group-hover:opacity-100 ${locked ? "text-amber-500 opacity-100" : "text-text-muted opacity-50 hover:text-primary"}`}
-          title={locked ? "Unlock model (allow bulk clear)" : "Lock model (keep on bulk clear)"}
-        >
-          <span className="material-symbols-outlined text-sm">{locked ? "lock" : "lock_open"}</span>
-        </button>
-      )}
-      <button
-        onClick={onDeleteAlias}
-        className="rounded p-1 text-red-500 opacity-50 transition-opacity hover:bg-red-50 group-hover:opacity-100"
-        title="Remove model"
-      >
-        <span className="material-symbols-outlined text-sm">delete</span>
-      </button>
-
-      {showDetail && (
-        <ModelDetailModal
-          isOpen={showDetail}
-          onClose={() => setShowDetail(false)}
-          modelId={fullModel}
-        />
-      )}
-    </div>
-  );
-}
+import ModelRow from "./ModelRow";
+import { getProviderCustomModelRows, groupCustomModelRowsByKind } from "@/shared/utils/providerCustomModels";
 
 export default function CompatibleModelsSection({ providerStorageAlias, providerDisplayAlias, modelAliases, customModels, copied, onCopy, onDeleteAlias, onEditModel, onDeleteCustomModel, onToggleLock, getModelCaps, connections, isAnthropic }) {
   const [testingModelId, setTestingModelId] = useState(null);
   const [modelTestResults, setModelTestResults] = useState({});
 
-  const handleTestModel = async (modelId) => {
+  const handleTestModel = async (modelId, kind = "llm") => {
     if (testingModelId) return;
     setTestingModelId(modelId);
     try {
       const res = await fetch("/api/models/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: `${providerStorageAlias}/${modelId}` }),
+        body: JSON.stringify({ model: `${providerStorageAlias}/${modelId}`, kind }),
       });
       const data = await res.json();
       setModelTestResults((prev) => ({ ...prev, [modelId]: data.ok ? "ok" : "error" }));
@@ -134,12 +27,18 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
     }
   };
 
+  // Compatible nodes are chat providers by default; custom entries may carry a
+  // media kind, which is why the rows return every type here. The list renders
+  // exactly like the built-in provider page: one section per service kind,
+  // header only when there is more than one group.
   const allModels = getProviderCustomModelRows({
     customModels,
     modelAliases,
     providerAlias: providerStorageAlias,
-    type: "llm",
+    type: null,
   });
+  const groups = groupCustomModelRowsByKind(allModels);
+  const showHeaders = groups.length > 1;
 
   const canImport = connections.some((conn) => conn.isActive !== false);
 
@@ -155,28 +54,41 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
         </p>
       )}
 
-      {allModels.length > 0 && (
-        <div className="flex flex-col gap-3">
-          {allModels.map(({ id, name, alias, source, catalogRef, locked }) => (
-            <CompatibleModelRow
-              key={`${source}-${providerStorageAlias}/${id}`}
-              modelId={id}
-              modelName={name}
-              fullModel={`${providerDisplayAlias}/${id}`}
-              locked={locked}
-              copied={copied}
-              onCopy={onCopy}
-              onDeleteAlias={() => source === "custom" ? onDeleteCustomModel(id) : onDeleteAlias(alias)}
-              onEdit={source === "custom" ? () => onEditModel({ id, name, catalogRef }) : undefined}
-              onToggleLock={source === "custom" ? () => onToggleLock(id, !locked) : undefined}
-              onTest={connections.length > 0 ? () => handleTestModel(id) : undefined}
-              testStatus={modelTestResults[id]}
-              isTesting={testingModelId === id}
-              caps={getModelCaps?.(`${providerStorageAlias}/${id}`)}
-            />
-          ))}
+      {groups.map((group) => (
+        <div key={group.id} className="flex flex-col gap-2">
+          {showHeaders && (
+            <p className="text-xs font-medium text-text-muted">
+              {group.label} ({group.rows.length})
+            </p>
+          )}
+          <div className="flex flex-wrap gap-3">
+            {group.rows.map(({ id, name, alias, source, type, locked, transport, catalogRef }) => {
+              const isCustom = source === "custom";
+              return (
+                <ModelRow
+                  key={`${source}-${providerStorageAlias}/${id}`}
+                  model={{ id, name }}
+                  fullModel={`${providerDisplayAlias}/${id}`}
+                  alias={alias}
+                  copied={copied}
+                  onCopy={onCopy}
+                  onDeleteAlias={() => isCustom ? onDeleteCustomModel(id, type) : onDeleteAlias(alias)}
+                  onEdit={isCustom ? () => onEditModel({ id, name, catalogRef, type, transport }) : undefined}
+                  onToggleLock={isCustom ? () => onToggleLock(id, !locked, type) : undefined}
+                  locked={locked}
+                  removeTitle={isCustom ? undefined : "Remove alias"}
+                  testStatus={modelTestResults[id]}
+                  onTest={connections.length > 0 ? () => handleTestModel(id, type) : undefined}
+                  isTesting={testingModelId === id}
+                  isCustom
+                  isFree={false}
+                  caps={getModelCaps?.(`${providerStorageAlias}/${id}`)}
+                />
+              );
+            })}
+          </div>
         </div>
-      )}
+      ))}
     </div>
   );
 }

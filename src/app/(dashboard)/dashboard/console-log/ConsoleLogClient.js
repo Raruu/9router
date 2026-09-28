@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Card, Button, SegmentedControl } from "@/shared/components";
 import { CONSOLE_LOG_CONFIG } from "@/shared/constants/config";
+import { isPinnedToBottom } from "@/shared/utils/scrollFollow";
 import { LOG_CATEGORIES, buildConsoleLogFilename, buildConsoleLogText } from "./logCategories";
 
 const LOG_LEVEL_COLORS = {
@@ -64,9 +65,25 @@ export default function ConsoleLogClient() {
     return () => es.close();
   }, []);
 
-  // Auto-scroll to bottom on new logs
+  // Follow the tail only while the reader is already at it. Recorded on
+  // scroll rather than read inside the effect: by the time the effect runs the
+  // new lines are already laid out, so the element no longer reports where the
+  // reader was before they arrived.
+  const followTailRef = useRef(true);
+
+  const handleLogScroll = () => {
+    followTailRef.current = isPinnedToBottom(logRef.current);
+  };
+
+  // A tab switch replaces the visible list, so the reader's old position is
+  // meaningless — re-pin to the newest line of the tab they just opened.
   useEffect(() => {
-    if (!logRef.current) return;
+    followTailRef.current = true;
+  }, [activeTab]);
+
+  // Auto-scroll to bottom on new logs (only while already at the bottom)
+  useEffect(() => {
+    if (!logRef.current || !followTailRef.current) return;
     logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [logs, activeTab]);
 
@@ -117,6 +134,7 @@ export default function ConsoleLogClient() {
         </div>
         <div
           ref={logRef}
+          onScroll={handleLogScroll}
           className="bg-black rounded-b-lg p-4 text-xs font-mono h-[calc(100vh-220px)] overflow-y-auto"
         >
           {visibleLogs.length === 0 ? (

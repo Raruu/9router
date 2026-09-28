@@ -2,7 +2,7 @@ import { useState } from "react";
 import PropTypes from "prop-types";
 import { CapacityBadges, ModelDetailModal } from "@/shared/components";
 
-export default function ModelRow({ model, fullModel, alias, copied, onCopy, testStatus, isCustom, isFree, onDeleteAlias, onEdit, onTest, isTesting, onDisable, caps, thinkingSuffix }) {
+export default function ModelRow({ model, fullModel, alias, copied, onCopy, testStatus, isCustom, isFree, onDeleteAlias, onEdit, onTest, isTesting, onDisable, onToggleLock, locked, removeTitle, caps, thinkingSuffix }) {
   const [showDetail, setShowDetail] = useState(false);
   const displayModel = thinkingSuffix ? `${fullModel}(${thinkingSuffix})` : fullModel;
   const borderColor = testStatus === "ok"
@@ -83,11 +83,20 @@ export default function ModelRow({ model, fullModel, alias, copied, onCopy, test
             <span className="material-symbols-outlined text-sm">edit</span>
           </button>
         )}
+        {onToggleLock && (
+          <button
+            onClick={onToggleLock}
+            className={`rounded p-0.5 transition-opacity hover:bg-sidebar group-hover:opacity-100 ${locked ? "text-amber-500 opacity-100" : "text-text-muted opacity-50 hover:text-primary"}`}
+            title={locked ? "Unlock model (allow bulk clear)" : "Lock model (keep on bulk clear)"}
+          >
+            <span className="material-symbols-outlined text-sm">{locked ? "lock" : "lock_open"}</span>
+          </button>
+        )}
         {isCustom ? (
           <button
             onClick={onDeleteAlias}
             className="ml-auto rounded p-0.5 text-text-muted opacity-50 transition-opacity hover:bg-red-500/10 hover:text-red-500 group-hover:opacity-100"
-            title="Remove custom model"
+            title={removeTitle || "Remove custom model"}
           >
             <span className="material-symbols-outlined text-sm">close</span>
           </button>
@@ -129,6 +138,9 @@ ModelRow.propTypes = {
   onTest: PropTypes.func,
   isTesting: PropTypes.bool,
   onDisable: PropTypes.func,
+  onToggleLock: PropTypes.func,
+  locked: PropTypes.bool,
+  removeTitle: PropTypes.string,
   caps: PropTypes.object,
   thinkingSuffix: PropTypes.string,
 };

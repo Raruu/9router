@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getCustomModels, addCustomModel, deleteCustomModel, setCustomModelLocked, clearProviderModels } from "@/models";
-import { CAPACITY_META, isSttTransport } from "@/shared/constants/models";
+import { CAPACITY_META, isSttTransport, normalizeCustomModelType, isCustomModelType } from "@/shared/constants/models";
 import { THINKING_FORMATS, sanitizeThinkingLevels } from "@/lib/modelCatalog/validation.js";
 
 export const dynamic = "force-dynamic";
@@ -63,18 +63,28 @@ export async function POST(request) {
     if (!providerAlias || !id) {
       return NextResponse.json({ error: "providerAlias and id required" }, { status: 400 });
     }
+    // Unknown kinds normalize to "llm" (the same silently-drop policy
+    // sanitizeCaps applies), so a stale client cannot mint an unroutable type.
+    const cleanType = isCustomModelType(type) ? type.trim() : normalizeCustomModelType(type);
     const cleanCaps = sanitizeCaps(caps);
-    const cleanTransport = sanitizeTransport(transport, type || "llm");
+    const cleanTransport = sanitizeTransport(transport, cleanType);
     const catalogRef = sanitizeCatalogRef(body.catalogRef);
+    // `previousType` moves the record on a kind change instead of duplicating it.
+    const previousType = isCustomModelType(body.previousType) ? body.previousType.trim() : null;
     const added = await addCustomModel({
       providerAlias,
       id,
-      type: type || "llm",
+      type: cleanType,
       name,
       ...(cleanCaps ? { caps: cleanCaps } : {}),
-      ...(cleanTransport ? { transport: cleanTransport } : {}),
+      // Transport semantics: a valid whitelisted marker persists; an explicit
+      // empty string clears (the modal's "provider default"); an unknown value
+      // is silently dropped and leaves the stored marker alone (T14 — a typo
+      // must not clobber a working transport). Non-stt types clear in the repo.
+      ...(cleanTransport ? { transport: cleanTransport } : transport === "" ? { transport: "" } : {}),
       ...(catalogRef ? { catalogRef } : {}),
       clearCatalogMetadata: Object.hasOwn(body, "catalogRef") && !catalogRef,
+      previousType: previousType && previousType !== cleanType ? previousType : null,
     });
     return NextResponse.json({ success: true, added });
   } catch (error) {

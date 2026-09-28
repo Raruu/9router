@@ -12,7 +12,7 @@ import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { translate } from "@/i18n/runtime";
 import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
-import { getProviderCustomModelRows } from "@/shared/utils/providerCustomModels";
+import { getProviderCustomModelRows, groupProviderModelsByKind } from "@/shared/utils/providerCustomModels";
 import { filterCombosUsingModel, stripModelsFromComboMembers } from "@/shared/utils/comboMembers";
 import { buildUsedFormSet, flattenReferenceMap, pricingTableForms, capacityAdapterForms, partitionRowsByUsage } from "@/shared/utils/modelUsage";
 import { buildCatalogRuleBody, buildCatalogRuleBodyFromRaw, saveCatalogRule } from "@/shared/utils/importCatalogSnapshot";
@@ -757,16 +757,28 @@ export default function ProviderDetailPage() {
     }
   };
 
-  // `caps`/`transport` are the modal's capability toggles and the STT realtime
-  // dispatch marker (shared whitelist STT_TRANSPORT_META); the API only honours
-  // a transport on type "stt" records. `catalogRef` pins a provider-scoped
-  // capability snapshot (fork's unified add/edit dialog).
-  const handleAddCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias, catalogRef, name, quiet = false, skipRefresh = false, caps, transport) => {
+  // Add (or move) a custom model. `type` is the service kind the model answers
+  // (LLM/STT/image/video/…); `catalogRef` pins a provider-scoped capability
+  // snapshot; `transport` is the STT realtime dispatch marker (shared whitelist
+  // STT_TRANSPORT_META, honoured only on type "stt"); `previousType` moves the
+  // record on a kind change instead of leaving a duplicate under the old key.
+  const handleAddCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias, catalogRef, { name, quiet = false, skipRefresh = false, caps, transport, previousType } = {}) => {
     try {
       const res = await fetch("/api/models/custom", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ providerAlias: providerAliasOverride, id: modelId, type, catalogRef: catalogRef || null, ...(name ? { name } : {}), ...(caps ? { caps } : {}), ...(transport ? { transport } : {}) }),
+        body: JSON.stringify({
+          providerAlias: providerAliasOverride,
+          id: modelId,
+          type,
+          catalogRef: catalogRef || null,
+          ...(name ? { name } : {}),
+          ...(caps ? { caps } : {}),
+          // Always sent from the modal so a cleared marker clears; callers that
+          // pass nothing leave the stored transport untouched.
+          ...(transport !== undefined ? { transport } : {}),
+          ...(previousType ? { previousType } : {}),
+        }),
       });
       if (res.ok) {
         // Batch callers (model import) skip the per-add refetch and refresh once
@@ -867,11 +879,13 @@ export default function ProviderDetailPage() {
     return forms;
   };
 
-  const handleDeleteCustomModelRow = (modelId) =>
+  // `type` is the model's stored service kind — the KV key includes it, so a
+  // non-LLM custom model must be deleted under its own type.
+  const handleDeleteCustomModelRow = (modelId, type = "llm") =>
     handleRowDelete({
       forms: modelIdForms(modelId),
       label: `${providerDisplayAlias}/${modelId}`,
-      action: () => handleDeleteCustomModel(modelId, "llm", providerStorageAlias),
+      action: () => handleDeleteCustomModel(modelId, type, providerStorageAlias),
     });
 
   const handleDeleteAliasRow = (alias) => {
@@ -888,12 +902,12 @@ export default function ProviderDetailPage() {
     });
   };
 
-  const handleToggleModelLock = async (modelId, locked) => {
+  const handleToggleModelLock = async (modelId, locked, type = "llm") => {
     try {
       const res = await fetch("/api/models/custom", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ providerAlias: providerStorageAlias, id: modelId, type: "llm", locked }),
+        body: JSON.stringify({ providerAlias: providerStorageAlias, id: modelId, type, locked }),
       });
       if (res.ok) {
         await fetchCustomModels();
@@ -1086,12 +1100,13 @@ export default function ProviderDetailPage() {
     }
   };
 
-  // Rows for OpenAI/Anthropic compatible nodes (no built-in models).
+  // Rows for OpenAI/Anthropic compatible nodes (no built-in models). Every
+  // kind is included so a custom STT/image model is listed and Clear covers it.
   const compatModelRows = getProviderCustomModelRows({
     customModels,
     modelAliases,
     providerAlias: providerStorageAlias,
-    type: "llm",
+    type: null,
   });
   const canImportCompatModels = connections.some((conn) => conn.isActive !== false);
 
@@ -1109,13 +1124,15 @@ export default function ProviderDetailPage() {
     setShowAddCustomModel(true);
   };
 
-  const handleSaveCompatModel = async (modelId, catalogRef, caps, transport) => {
+  const handleSaveCompatModel = async (modelId, catalogRef, type, transport) => {
     if (!editingCustomModel && compatModelRows.some((model) => model.id === modelId)) {
       alert("Model already exists for this provider.");
       return;
     }
-    // caps.stt is a UI-only flag; the API accepts transports only on type "stt".
-    await handleAddCustomModel(modelId, caps?.stt ? "stt" : "llm", providerStorageAlias, catalogRef, undefined, false, false, caps, transport);
+    await handleAddCustomModel(modelId, type || "llm", providerStorageAlias, catalogRef, {
+      transport,
+      previousType: editingCustomModel?.type || null,
+    });
     setShowAddCustomModel(false);
     setEditingCustomModel(null);
   };
@@ -1241,7 +1258,7 @@ const ids = [];
         const catalogRef = fetchCapabilities
           ? await saveModelCatalogRule(modelId, { raw: importEntriesById[modelId], mapping, currencyRate })
           : null;
-        const added = await handleAddCustomModel(modelId, "llm", providerStorageAlias, catalogRef, undefined, true, true);
+        const added = await handleAddCustomModel(modelId, "llm", providerStorageAlias, catalogRef, { quiet: true, skipRefresh: true });
         if (!added) continue;
         importedCount += 1;
         if (catalogRef) catalogCount += 1;
@@ -1698,14 +1715,14 @@ const ids = [];
     </Modal>
   );
 
-  const handleTestModel = async (modelId) => {
+  const handleTestModel = async (modelId, kind = "llm") => {
     if (testingModelIds.has(modelId)) return;
     setTestingModelIds((prev) => new Set(prev).add(modelId));
     try {
       const res = await fetch("/api/models/test", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model: `${providerStorageAlias}/${modelId}` }),
+        body: JSON.stringify({ model: `${providerStorageAlias}/${modelId}`, kind }),
       });
       const data = await res.json();
       setModelTestResults((prev) => ({ ...prev, [modelId]: data.ok ? "ok" : "error" }));
@@ -1728,11 +1745,12 @@ const ids = [];
           customModels={customModels}
           copied={copied}
           onCopy={copy}
-          onSetAlias={handleSetAlias}
           onDeleteAlias={(alias) => handleDeleteAliasRow(alias)}
           onEditModel={(entry) => openCompatModelModal(entry)}
-          onDeleteCustomModel={(modelId) => handleDeleteCustomModelRow(modelId)}
-          onToggleLock={(modelId, locked) => handleToggleModelLock(modelId, locked)}
+          // Each row carries its own service kind — the KV key includes it, so a
+          // non-LLM custom model must be deleted/locked under its own type.
+          onDeleteCustomModel={(modelId, type) => handleDeleteCustomModelRow(modelId, type)}
+          onToggleLock={(modelId, locked, type) => handleToggleModelLock(modelId, locked, type)}
           getModelCaps={getCaps}
           connections={connections}
           isAnthropic={isAnthropicCompatible}
@@ -1740,86 +1758,116 @@ const ids = [];
       );
     }
     // Combine hardcoded models with Kilo free models (deduplicated)
-    // Exclude non-llm models (embedding, tts, etc.) — they have dedicated pages under media-providers
+    // Built-in registry models of every kind (LLM, image, stt, …) plus the
+    // Kilo free models; grouped per kind below so a provider's media models are
+    // visible here too, not only on the media-providers pages.
     const allModels = [
       ...models,
       ...kiloFreeModels.filter((fm) => !models.some((m) => m.id === fm.id)),
-    ].filter((m) => { const k = getModelKind(m); return !k || k === "llm"; });
+    ];
     const disabledSet = new Set(disabledModelIds);
-    const displayModels = allModels.filter((m) => !disabledSet.has(m.id));
-    const disabledDisplayModels = allModels.filter((m) => disabledSet.has(m.id));
     const customModelRows = getProviderCustomModelRows({
       customModels,
       modelAliases,
       providerAlias: providerStorageAlias,
       builtInModels: models,
-      type: "llm",
+      type: null,
     });
+    // Built-ins already covered by a custom row are skipped there, so the two
+    // lists never double-render the same id.
+    const customIds = new Set(customModelRows.map((row) => row.id));
+    const groups = groupProviderModelsByKind({
+      customRows: customModelRows,
+      builtInModels: allModels.filter((m) => !customIds.has(m.id)),
+    });
+    const showHeaders = groups.length > 1;
+    // Disabled built-ins are restorable from the footer strip below.
+    const disabledDisplayModels = allModels.filter((m) => disabledSet.has(m.id));
+
+    const renderCustomRow = (model) => (
+      <ModelRow
+        key={`${model.source}-${model.fullModel}`}
+        model={{ id: model.id, name: model.name }}
+        fullModel={`${providerDisplayAlias}/${model.id}`}
+        alias={model.alias}
+        copied={copied}
+        onCopy={copy}
+        onSetAlias={() => {}}
+        onDeleteAlias={() => {
+          if (model.source === "custom") {
+            handleDeleteCustomModelRow(model.id, model.type);
+          } else {
+            handleDeleteAliasRow(model.alias);
+          }
+        }}
+        onEdit={model.source === "custom" ? () => {
+          setEditingCustomModel(model);
+          setShowAddCustomModel(true);
+        } : undefined}
+        // Lock guards the bulk Clear ("keep on bulk clear") — same control the
+        // compatible-provider list shows.
+        onToggleLock={model.source === "custom" ? () => handleToggleModelLock(model.id, !model.locked, model.type) : undefined}
+        locked={model.locked}
+        removeTitle={model.source === "custom" ? undefined : "Remove alias"}
+        testStatus={modelTestResults[model.id]}
+        onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(model.id, model.type) : undefined}
+        isTesting={testingModelIds.has(model.id)}
+        isCustom
+        isFree={false}
+        caps={getCaps(`${providerId}/${model.id}`)}
+        thinkingSuffix={resolveThinkingSuffix(model.id)}
+      />
+    );
+
+    const renderBuiltInRow = (model, kind) => {
+      const fullModel = `${providerStorageAlias}/${model.id}`;
+      const oldFormatModel = `${providerId}/${model.id}`;
+      const existingAlias = Object.entries(modelAliases).find(
+        ([, m]) => m === fullModel || m === oldFormatModel
+      )?.[0];
+      const disabled = disabledSet.has(model.id);
+      if (disabled) return null;
+      return (
+        <ModelRow
+          key={model.id}
+          model={model}
+          fullModel={`${providerDisplayAlias}/${model.id}`}
+          alias={existingAlias}
+          copied={copied}
+          onCopy={copy}
+          onSetAlias={(alias) => handleSetAlias(model.id, alias, providerStorageAlias)}
+          onDeleteAlias={() => handleRowDelete({
+            forms: modelIdForms(model.id),
+            label: `${providerDisplayAlias}/${model.id}`,
+            verb: "Remove",
+            action: () => handleDeleteAlias(existingAlias),
+          })}
+          testStatus={modelTestResults[model.id]}
+          onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(model.id, kind) : undefined}
+          isTesting={testingModelIds.has(model.id)}
+          isFree={model.isFree}
+          onDisable={() => handleDisableModel(model.id)}
+          caps={getCaps(`${providerId}/${model.id}`)}
+          thinkingSuffix={resolveThinkingSuffix(model.id)}
+        />
+      );
+    };
 
     return (
-      <div className="flex flex-wrap gap-3">
-        {/* Custom models first */}
-        {customModelRows.map((model) => (
-          <ModelRow
-            key={`${model.source}-${model.fullModel}`}
-            model={{ id: model.id, name: model.name }}
-            fullModel={`${providerDisplayAlias}/${model.id}`}
-            alias={model.alias}
-            copied={copied}
-            onCopy={copy}
-            onSetAlias={() => {}}
-            onDeleteAlias={() => {
-              if (model.source === "custom") {
-                handleDeleteCustomModelRow(model.id);
-              } else {
-                handleDeleteAliasRow(model.alias);
-              }
-            }}
-            onEdit={model.source === "custom" ? () => {
-              setEditingCustomModel(model);
-              setShowAddCustomModel(true);
-            } : undefined}
-            testStatus={modelTestResults[model.id]}
-            onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(model.id) : undefined}
-            isTesting={testingModelIds.has(model.id)}
-            isCustom
-            isFree={false}
-            caps={getCaps(`${providerId}/${model.id}`)}
-            thinkingSuffix={resolveThinkingSuffix(model.id)}
-          />
+      <div className="flex flex-col gap-4">
+        {groups.map((group) => (
+          <div key={group.id} className="flex flex-col gap-2">
+            {showHeaders && (
+              <p className="text-xs font-medium text-text-muted">
+                {group.label} ({group.count})
+              </p>
+            )}
+            <div className="flex flex-wrap gap-3">
+              {group.customRows.map(renderCustomRow)}
+              {group.builtInModels.map((model) => renderBuiltInRow(model, group.id))}
+            </div>
+          </div>
         ))}
-
-        {displayModels.map((model) => {
-          const fullModel = `${providerStorageAlias}/${model.id}`;
-          const oldFormatModel = `${providerId}/${model.id}`;
-          const existingAlias = Object.entries(modelAliases).find(
-            ([, m]) => m === fullModel || m === oldFormatModel
-          )?.[0];
-          return (
-            <ModelRow
-              key={model.id}
-              model={model}
-              fullModel={`${providerDisplayAlias}/${model.id}`}
-              alias={existingAlias}
-              copied={copied}
-              onCopy={copy}
-              onSetAlias={(alias) => handleSetAlias(model.id, alias, providerStorageAlias)}
-              onDeleteAlias={() => handleRowDelete({
-                forms: modelIdForms(model.id),
-                label: `${providerDisplayAlias}/${model.id}`,
-                verb: "Remove",
-                action: () => handleDeleteAlias(existingAlias),
-              })}
-              testStatus={modelTestResults[model.id]}
-              onTest={connections.length > 0 || isFreeNoAuth ? () => handleTestModel(model.id) : undefined}
-              isTesting={testingModelIds.has(model.id)}
-              isFree={model.isFree}
-              onDisable={() => handleDisableModel(model.id)}
-              caps={getCaps(`${providerId}/${model.id}`)}
-              thinkingSuffix={resolveThinkingSuffix(model.id)}
-            />
-          );
-        })}
 
         {/* Suggested models from provider API — show only models not yet added */}
         {suggestedModels.length > 0 && (() => {
@@ -2586,14 +2634,15 @@ const ids = [];
         isOpen={showAddCustomModel}
         providerAlias={providerStorageAlias}
         existingModel={editingCustomModel}
-        onSave={async (modelId, catalogRef, caps, transport) => {
-          // caps.stt is a UI-only flag; the API accepts transports only on
-          // type "stt" records, so the save derives the type from it.
+        onSave={async (modelId, catalogRef, type, transport, previousType) => {
           if (isCompatible) {
-            await handleSaveCompatModel(modelId, catalogRef, caps, transport);
+            await handleSaveCompatModel(modelId, catalogRef, type, transport);
             return;
           }
-          await handleAddCustomModel(modelId, caps?.stt ? "stt" : "llm", providerStorageAlias, catalogRef, undefined, false, false, caps, transport);
+          await handleAddCustomModel(modelId, type || "llm", providerStorageAlias, catalogRef, {
+            transport,
+            previousType,
+          });
           setShowAddCustomModel(false);
           setEditingCustomModel(null);
         }}

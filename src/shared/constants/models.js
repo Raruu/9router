@@ -13,7 +13,7 @@ export {
   getModelQuotaFamily
 } from "open-sse/config/providerModels.js";
 
-import { AI_PROVIDERS, isOpenAICompatibleProvider } from "./providers.js";
+import { AI_PROVIDERS, isOpenAICompatibleProvider, MEDIA_PROVIDER_KINDS } from "./providers.js";
 import { PROVIDER_MODELS as MODELS } from "open-sse/config/providerModels.js";
 
 // Providers that accept any model (passthrough)
@@ -70,4 +70,74 @@ export const STT_TRANSPORTS = Object.freeze(Object.keys(STT_TRANSPORT_META));
 export function isSttTransport(transport) {
   if (typeof transport !== "string") return false;
   return Object.prototype.hasOwnProperty.call(STT_TRANSPORT_META, transport.trim());
+}
+
+// Selectable model kinds for a custom model — the persisted `type` that routes
+// the entry to its service handler (/v1/chat/completions, /v1/images/generations,
+// /v1/audio/transcriptions, …) and drives /v1/models/{kind} membership.
+//
+// Derived from MEDIA_PROVIDER_KINDS (single source for label/icon) so a kind
+// added there for a real route shows up here automatically. Deliberately
+// excludes:
+//  - "music": MEDIA_PROVIDER_KINDS declares it but no /v1/audio/music route or
+//    handler exists yet — the type would store but never dispatch.
+//  - webSearch/webFetch: provider-as-model kinds, not per-model selections.
+export const CUSTOM_MODEL_TYPES = Object.freeze([
+  { id: "llm", label: "LLM (chat)", icon: "chat", desc: "Chat / completions via /v1/chat/completions" },
+  ...MEDIA_PROVIDER_KINDS
+    .filter((kind) => kind.id !== "music" && kind.id !== "webSearch" && kind.id !== "webFetch")
+    .map((kind) => ({ id: kind.id, label: kind.label, icon: kind.icon })),
+]);
+
+const CUSTOM_MODEL_TYPE_IDS = new Set(CUSTOM_MODEL_TYPES.map((t) => t.id));
+
+/** True when `type` is one of the selectable custom-model kinds. */
+export function isCustomModelType(type) {
+  return typeof type === "string" && CUSTOM_MODEL_TYPE_IDS.has(type.trim());
+}
+
+/** Normalize a stored/custom type: unknown or missing values are LLM. */
+export function normalizeCustomModelType(type) {
+  return isCustomModelType(type) ? type.trim() : "llm";
+}
+
+/** Display label for a kind id (falls back to the raw id). */
+export function customModelTypeLabel(type) {
+  const id = typeof type === "string" ? type.trim() : "";
+  return CUSTOM_MODEL_TYPES.find((t) => t.id === id)?.label || id || "LLM (chat)";
+}
+
+// The non-LLM kinds the default GET /v1/models list can additionally advertise
+// (the "Also expose in /v1/models" checkboxes on the Model List card). Same
+// taxonomy as the custom-model type dropdown, minus LLM itself — labels/icons
+// stay one source. web kinds are provider-as-model entries, never listed here.
+export const EXPOSABLE_NON_LLM_KINDS = Object.freeze(
+  CUSTOM_MODEL_TYPES.filter((t) => t.id !== "llm"),
+);
+
+const EXPOSABLE_NON_LLM_KIND_IDS = new Set(EXPOSABLE_NON_LLM_KINDS.map((t) => t.id));
+
+/**
+ * Normalize the stored `exposeNonLlmModels` setting into a list of kinds.
+ *
+ * The setting used to be a boolean (one toggle for every kind), so a stored
+ * `true` keeps working: it means "all kinds", matching what that user had
+ * switched on. Anything unrecognized — including the legacy `false` — is "none".
+ *
+ * @returns {string[]} deduped kinds, in taxonomy order
+ */
+export function normalizeExposeNonLlmKinds(value) {
+  if (value === true) return EXPOSABLE_NON_LLM_KINDS.map((t) => t.id);
+  if (!Array.isArray(value)) return [];
+  const wanted = new Set(
+    value
+      .filter((kind) => typeof kind === "string" && EXPOSABLE_NON_LLM_KIND_IDS.has(kind.trim()))
+      .map((kind) => kind.trim()),
+  );
+  return EXPOSABLE_NON_LLM_KINDS.map((t) => t.id).filter((id) => wanted.has(id));
+}
+
+/** Display labels for a list of exposure kinds (for summaries). */
+export function exposeNonLlmKindLabels(kinds) {
+  return normalizeExposeNonLlmKinds(kinds).map((id) => customModelTypeLabel(id));
 }

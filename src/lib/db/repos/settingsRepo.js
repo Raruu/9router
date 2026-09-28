@@ -38,6 +38,14 @@ export const DEFAULT_SETTINGS = {
   comboEffortStrategy: "union",
   // What GET /v1/models advertises: "all" | "combos" | "models".
   modelsExposure: "all",
+  // Which non-LLM kinds (image/imageToText/video/stt/tts/embedding/systemone)
+  // the default GET /v1/models list additionally advertises — one checkbox per
+  // kind on the Model List card. Empty by default: the per-kind lists
+  // (/v1/models/image, /tts, …) always expose everything, and most clients
+  // calling the default list only want chat models. Media combos follow their
+  // kind. Legacy boolean `true` (the old single toggle) reads as "all kinds"
+  // via normalizeExposeNonLlmKinds; web kinds stay out either way.
+  exposeNonLlmModels: [],
   capacityAdapter: {
     vision: { enabled: true, roundRobin: false, models: [] },
     pdf: { enabled: false, roundRobin: false, models: [] },
