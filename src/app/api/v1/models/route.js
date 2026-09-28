@@ -1,4 +1,4 @@
-import { PROVIDER_MODELS, PROVIDER_ID_TO_ALIAS, getModelKind } from "@/shared/constants/models";
+import { PROVIDER_MODELS, PROVIDER_ID_TO_ALIAS, getModelKind, normalizeExposeNonLlmKinds } from "@/shared/constants/models";
 import {
   AI_PROVIDERS,
   getProviderAlias,
@@ -731,7 +731,7 @@ async function resolveCatalogOptions(request) {
   try {
     if (await hasValidCliToken(request)) {
       // CLI pickers list chat targets only — never widen them with media ids.
-      return { exposure: "all", comboLimitStrategy: settings.comboLimitStrategy, comboEffortStrategy: settings.comboEffortStrategy, exposeNonLlmModels: false };
+      return { exposure: "all", comboLimitStrategy: settings.comboLimitStrategy, comboEffortStrategy: settings.comboEffortStrategy, exposeNonLlmKinds: [] };
     }
   } catch {
     // Token check failed (no machine-id file yet) — fall through to the setting.
@@ -740,32 +740,29 @@ async function resolveCatalogOptions(request) {
     exposure: settings.modelsExposure,
     comboLimitStrategy: settings.comboLimitStrategy,
     comboEffortStrategy: settings.comboEffortStrategy,
-    exposeNonLlmModels: settings.exposeNonLlmModels === true,
+    exposeNonLlmKinds: normalizeExposeNonLlmKinds(settings.exposeNonLlmModels),
   };
 }
 
-// Non-LLM kinds the default list can additionally advertise. webSearch/webFetch
-// are provider-as-model entries, not routable chat/media ids, so they stay out.
-const NON_LLM_KINDS = ["image", "imageToText", "video", "stt", "tts", "embedding", "systemone"];
-
 /**
  * GET /v1/models - OpenAI compatible models list (LLM/chat models by default).
- * With the `exposeNonLlmModels` setting, non-LLM models (and media combos) are
- * appended too; /v1/models/{kind} always lists everything regardless.
+ * With the `exposeNonLlmModels` setting (a list of kinds), those non-LLM models
+ * and their combos are appended too; /v1/models/{kind} always lists everything
+ * regardless.
  */
 export async function GET(request) {
   try {
     // Detect cross-instance recursive /models fetch (another 9router fetching our /models)
     const skipDynamicFetch = request?.headers?.get(INTERNAL_MODELS_FETCH_HEADER) === "1";
-    const { exposure, comboLimitStrategy, comboEffortStrategy, exposeNonLlmModels } = await resolveCatalogOptions(request);
+    const { exposure, comboLimitStrategy, comboEffortStrategy, exposeNonLlmKinds } = await resolveCatalogOptions(request);
     const listOptions = { skipDynamicFetch, exposure, comboLimitStrategy, comboEffortStrategy };
     const llmModels = await buildModelsList([LLM_KIND], listOptions);
     let data = llmModels;
-    if (exposeNonLlmModels) {
-      // Second pass for the media kinds, merged by id with the LLM entry winning:
-      // ids like gemini-2.5-pro exist in several kinds, and the chat entry is
-      // the one a default-list client expects to resolve.
-      const nonLlmModels = await buildModelsList(NON_LLM_KINDS, listOptions);
+    if (exposeNonLlmKinds.length > 0) {
+      // Second pass for the checked kinds, merged by id with the LLM entry
+      // winning: ids like gemini-2.5-pro exist in several kinds, and the chat
+      // entry is the one a default-list client expects to resolve.
+      const nonLlmModels = await buildModelsList(exposeNonLlmKinds, listOptions);
       const seen = new Set(llmModels.map((entry) => entry.id));
       data = [...llmModels, ...nonLlmModels.filter((entry) => !seen.has(entry.id))];
     }

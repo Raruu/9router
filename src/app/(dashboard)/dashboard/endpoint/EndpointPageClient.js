@@ -19,6 +19,7 @@ import {
   REACHABLE_MISS_THRESHOLD,
   CLIENT_PING_FAST_MS,
 } from "./endpointConstants";
+import { normalizeExposeNonLlmKinds } from "@/shared/constants/models";
 import { clientPingUrl, clientPingAny } from "./endpointPing";
 import useSettingsStore from "@/store/settingsStore";
 import EndpointRow from "./components/EndpointRow";
@@ -70,8 +71,8 @@ export default function APIPageClient({ machineId }) {
   const [tunnelDashboardAccess, setTunnelDashboardAccess] = useState(false);
   const [modelsExposure, setModelsExposure] = useState(null);
   const [modelsExposureSaving, setModelsExposureSaving] = useState(false);
-  const [exposeNonLlmModels, setExposeNonLlmModels] = useState(false);
-  const [exposeNonLlmSaving, setExposeNonLlmSaving] = useState(false);
+  // Kinds the default /v1/models list also advertises (one checkbox per kind).
+  const [exposeNonLlmKinds, setExposeNonLlmKinds] = useState([]);
 
  // Cloudflare Tunnel state
   const [tunnelChecking, setTunnelChecking] = useState(true);
@@ -247,7 +248,7 @@ export default function APIPageClient({ machineId }) {
         setHasPassword(settingsData.hasPassword || false);
         setTunnelDashboardAccess(settingsData.tunnelDashboardAccess || false);
         setModelsExposure(settingsData.modelsExposure || "all");
-        setExposeNonLlmModels(settingsData.exposeNonLlmModels === true);
+        setExposeNonLlmKinds(normalizeExposeNonLlmKinds(settingsData.exposeNonLlmModels));
       }
       if (statusRes.ok) {
         const data = await statusRes.json();
@@ -305,19 +306,27 @@ export default function APIPageClient({ machineId }) {
     }
   };
 
-  const handleExposeNonLlm = async (value) => {
-    setExposeNonLlmSaving(true);
+  // Optimistic checkbox toggle: flip locally, PATCH the whole list, and revert
+  // only if this is still the latest request (a rapid second click must not be
+  // undone by a stale failure).
+  const exposeNonLlmRequestRef = useRef(0);
+  const handleToggleNonLlmKind = async (kind) => {
+    const previous = exposeNonLlmKinds;
+    const next = previous.includes(kind)
+      ? previous.filter((k) => k !== kind)
+      : [...previous, kind];
+    const requestId = ++exposeNonLlmRequestRef.current;
+    setExposeNonLlmKinds(next);
     try {
       const res = await fetch("/api/settings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ exposeNonLlmModels: value }),
+        body: JSON.stringify({ exposeNonLlmModels: next }),
       });
-      if (res.ok) setExposeNonLlmModels(value);
+      if (!res.ok && requestId === exposeNonLlmRequestRef.current) setExposeNonLlmKinds(previous);
     } catch (error) {
       console.log("Error updating exposeNonLlmModels:", error);
-    } finally {
-      setExposeNonLlmSaving(false);
+      if (requestId === exposeNonLlmRequestRef.current) setExposeNonLlmKinds(previous);
     }
   };
 
@@ -1161,10 +1170,10 @@ export default function APIPageClient({ machineId }) {
 
       <ModelsExposureCard
         value={modelsExposure || "all"}
-        exposeNonLlm={exposeNonLlmModels}
-        disabled={modelsExposure === null || modelsExposureSaving || exposeNonLlmSaving}
+        exposeKinds={exposeNonLlmKinds}
+        disabled={modelsExposure === null || modelsExposureSaving}
         onChange={handleModelsExposure}
-        onToggleNonLlm={handleExposeNonLlm}
+        onToggleNonLlmKind={handleToggleNonLlmKind}
         variant="endpoint"
       />
 

@@ -1,6 +1,7 @@
 import { afterEach, describe, it, expect, beforeEach, vi } from "vitest";
 import { createCatalogResolver } from "../../src/lib/modelCatalog/resolution.js";
 import { setCatalogSource } from "../../open-sse/providers/capabilities.js";
+import { normalizeExposeNonLlmKinds, EXPOSABLE_NON_LLM_KINDS } from "../../src/shared/constants/models.js";
 
 // `modelsExposure` decides what GET /v1/models advertises. Combos and provider
 // models stay routable either way — the setting only narrows the catalog, so a
@@ -203,7 +204,7 @@ describe("exposeNonLlmModels", () => {
     mocks.getModelAliases.mockResolvedValue({});
     mocks.getDisabledModels.mockResolvedValue({});
     mocks.hasValidCliToken.mockResolvedValue(false);
-    mocks.getSettings.mockResolvedValue({ modelsExposure: "all", exposeNonLlmModels: false });
+    mocks.getSettings.mockResolvedValue({ modelsExposure: "all", exposeNonLlmModels: [] });
   });
 
   it("is off by default: the list stays chat-only", async () => {
@@ -215,16 +216,42 @@ describe("exposeNonLlmModels", () => {
     expect(data.every((e) => !e.kind || e.kind === "llm")).toBe(true);
   });
 
-  it("adds non-LLM models, custom media models and media combos when enabled", async () => {
-    mocks.getSettings.mockResolvedValue({ modelsExposure: "all", exposeNonLlmModels: true });
+  it("adds only the checked kinds: image joins while an unchecked stt stays out", async () => {
+    mocks.getSettings.mockResolvedValue({ modelsExposure: "all", exposeNonLlmModels: ["image"] });
     const data = await listEntries(await GET(request()));
     const idList = ids(data);
 
     expect(idList).toContain("my-combo");        // LLM entries survive
-    expect(idList).toContain("image-combo");     // media combo joins
-    expect(idList).toContain("glm/listen");      // custom stt model joins
+    expect(idList).toContain("image-combo");     // checked kind's combo joins
+    expect(idList).toContain("openai/gpt-image-1");
+    expect(idList).not.toContain("glm/listen");  // stt was not checked
+  });
+
+  it("adds every checked kind", async () => {
+    mocks.getSettings.mockResolvedValue({ modelsExposure: "all", exposeNonLlmModels: ["image", "stt"] });
+    const data = await listEntries(await GET(request()));
+    const idList = ids(data);
+
+    expect(idList).toContain("image-combo");
+    expect(idList).toContain("glm/listen");
     const stt = data.find((e) => e.id === "glm/listen");
     expect(stt.kind).toBe("stt");
+  });
+
+  it("treats the legacy boolean true as all kinds (old single toggle)", async () => {
+    mocks.getSettings.mockResolvedValue({ modelsExposure: "all", exposeNonLlmModels: true });
+    const data = await listEntries(await GET(request()));
+    const idList = ids(data);
+
+    expect(idList).toContain("image-combo");
+    expect(idList).toContain("glm/listen");
+  });
+
+  it("filters unknown kind strings out of the stored list", async () => {
+    mocks.getSettings.mockResolvedValue({ modelsExposure: "all", exposeNonLlmModels: ["image", "not-a-kind"] });
+    const idList = await listIds(await GET(request()));
+    expect(idList).toContain("openai/gpt-image-1");
+    expect(idList).not.toContain("glm/listen");
   });
 
   it("dedupes ids across kinds, keeping the LLM entry", async () => {
@@ -234,7 +261,7 @@ describe("exposeNonLlmModels", () => {
     ]);
     mocks.getCombos.mockResolvedValue([]);
     mocks.getCustomModels.mockResolvedValue([]);
-    mocks.getSettings.mockResolvedValue({ modelsExposure: "all", exposeNonLlmModels: true });
+    mocks.getSettings.mockResolvedValue({ modelsExposure: "all", exposeNonLlmModels: ["stt"] });
 
     const data = await listEntries(await GET(request()));
     const matches = data.filter((e) => e.id === "gemini/gemini-2.5-pro");
@@ -250,10 +277,25 @@ describe("exposeNonLlmModels", () => {
     expect(idList).not.toContain("image-combo");
   });
 
-  it("keeps the per-kind lists independent of the flag", async () => {
+  it("keeps the per-kind lists independent of the setting", async () => {
     const imageIds = ids(await buildModelsList(["image"], { exposure: "all" }));
     expect(imageIds).toContain("openai/gpt-image-1");
     expect(imageIds).toContain("image-combo");
+  });
+});
+
+describe("exposeNonLlmModels default", () => {
+  it("defaults to no kinds and keeps a stored list", () => {
+    expect(mergeWithDefaults({}).exposeNonLlmModels).toEqual([]);
+    expect(mergeWithDefaults({ exposeNonLlmModels: ["image"] }).exposeNonLlmModels).toEqual(["image"]);
+  });
+
+  it("normalizes the legacy boolean and unknown values", () => {
+    expect(normalizeExposeNonLlmKinds(false)).toEqual([]);
+    expect(normalizeExposeNonLlmKinds("image")).toEqual([]);
+    expect(normalizeExposeNonLlmKinds(true)).toEqual(EXPOSABLE_NON_LLM_KINDS.map((k) => k.id));
+    // Unknown kinds dropped, duplicates collapsed, order follows the taxonomy.
+    expect(normalizeExposeNonLlmKinds(["stt", "bogus", "image", "stt"])).toEqual(["image", "stt"]);
   });
 });
 
@@ -264,10 +306,5 @@ describe("modelsExposure default", () => {
 
   it("keeps a stored value", () => {
     expect(mergeWithDefaults({ modelsExposure: "combos" }).modelsExposure).toBe("combos");
-  });
-
-  it("defaults exposeNonLlmModels to off and keeps a stored true", () => {
-    expect(mergeWithDefaults({}).exposeNonLlmModels).toBe(false);
-    expect(mergeWithDefaults({ exposeNonLlmModels: true }).exposeNonLlmModels).toBe(true);
   });
 });
