@@ -1,3 +1,29 @@
+# v0.5.91-2 (2026-09-28)
+
+## Features
+- **Providers**: custom models get a Model type dropdown (LLM, image generation,
+  image-to-text, video, speech-to-text, text-to-speech, embedding, System One
+  classifier) replacing the speech-to-text toggle — the kind routes the model to
+  its service handler and drives /v1/models/{kind}; changing it on edit moves the
+  record instead of leaving a duplicate behind
+- **Providers**: Available Models is grouped per service kind for built-in and
+  custom providers alike, so a provider's image/speech/embedding models (and
+  custom media entries) are visible on its page with per-kind counts; custom rows
+  gain the lock button on both page types
+- **Endpoint**: "Also expose in /v1/models" is one checkbox per non-LLM kind
+  (image, image-to-text, video, speech-to-text, text-to-speech, embedding,
+  System One) — the default list advertises exactly the checked kinds, their
+  models and combos; a legacy boolean setting reads as all kinds
+- **Model Catalog**: user rules gain "Enforce level" — the requested thinking
+  level (including none) is sent verbatim instead of being clamped to the
+  model's minimum or remapped by the format (deepseek low→high, kimi xhigh→max, …)
+
+## Fixes
+- **Console Log**: following the tail is conditional on where the reader is — at
+  the bottom keeps following new lines, scrolled up leaves the view alone
+  (previously every append forced a jump to the bottom, making older lines
+  unreadable during a combo fan-out or token refresh)
+
 # v0.5.91-1 (2026-09-27)
 
 Merged upstream v0.5.91 into the fork. This section includes the full upstream
