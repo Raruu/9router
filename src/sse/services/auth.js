@@ -470,6 +470,29 @@ export async function validateApiKeyWithRules(apiKey, requestedModel = null) {
 }
 
 /**
+ * TTS variant of validateApiKeyWithRules.
+ *
+ * TTS requests address a voice as a trailing segment ("openai/tts-1/alloy"),
+ * but a key's whitelist names the model ("openai/tts-1"). Validating the raw
+ * string would 403 a correctly-configured key, so a rejected value retries
+ * with the voice segment stripped — the voice is a request sub-parameter, not
+ * a model. Every other rule (limits, active state) is unchanged.
+ */
+export async function validateApiKeyWithVoiceFallback(apiKey, modelStr) {
+  const result = await validateApiKeyWithRules(apiKey, modelStr);
+  if (result.valid || result.status !== 403 || typeof modelStr !== "string") return result;
+
+  const lastSlash = modelStr.lastIndexOf("/");
+  if (lastSlash <= 0) return result;
+  const modelOnly = modelStr.slice(0, lastSlash);
+  // "provider/model" is the shortest valid form; below that there is no model.
+  if (!modelOnly.includes("/")) return result;
+
+  const retry = await validateApiKeyWithRules(apiKey, modelOnly);
+  return retry.valid ? retry : result;
+}
+
+/**
  * Filter a /v1/models payload for the key on the request. A key with an
  * `allowedModels` list only sees matching entries; a key without one — or no
  * key at all — keeps the exposure-driven catalog exactly as built.

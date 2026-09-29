@@ -1,5 +1,5 @@
 import {
-  extractApiKey, validateApiKeyWithRules,
+  extractApiKey, validateApiKeyWithVoiceFallback,
   getProviderCredentials, markAccountUnavailable,
   resolveProviderDisplayLabel,
 } from "../services/auth.js";
@@ -47,7 +47,9 @@ export async function handleTts(request) {
   const settings = await getSettings();
   const apiKey = extractApiKey(request);
   if (apiKey) {
-    const keyCheck = await validateApiKeyWithRules(apiKey, modelStr);
+    // TTS model strings carry a voice segment ("openai/tts-1/alloy"); the
+    // fallback validator matches whitelists that name only the model.
+    const keyCheck = await validateApiKeyWithVoiceFallback(apiKey, modelStr);
     if (!keyCheck.valid) {
       log.warn("AUTH", `${keyCheck.error} (key=${log.maskKey(apiKey)})`);
       return errorResponse(keyCheck.status || HTTP_STATUS.UNAUTHORIZED, keyCheck.error);
