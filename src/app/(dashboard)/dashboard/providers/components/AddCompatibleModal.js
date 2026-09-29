@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
-import { Badge, Button, Input, Modal, Select } from "@/shared/components";
+import { Badge, Button, Input, KindBaseUrlsEditor, Modal, Select } from "@/shared/components";
 import { COMPATIBLE_NODE_TYPES } from "@/shared/constants/providers";
 import ProviderIconUpload from "@/shared/components/ProviderIconUpload";
 
@@ -47,6 +47,7 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
   });
 
   const [formData, setFormData] = useState(initialFormData);
+  const [kindBaseUrls, setKindBaseUrls] = useState({});
   const [submitting, setSubmitting] = useState(false);
   const [checkKey, setCheckKey] = useState("");
   const [checkModelId, setCheckModelId] = useState("");
@@ -61,6 +62,7 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
     if (!isOpen) return;
     setNodeType("openai-compatible");
     setFormData({ name: "", prefix: "", apiType: "chat", baseUrl: VARIANT_CONFIG.openai.defaultBaseUrl });
+    setKindBaseUrls({});
     setValidationResult(null);
     setCheckKey("");
     setCheckModelId("");
@@ -95,6 +97,7 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
           prefix: formData.prefix,
           ...(config.hasApiType ? { apiType: formData.apiType } : {}),
           baseUrl: formData.baseUrl,
+          ...(Object.values(kindBaseUrls).some((v) => (v || "").trim()) ? { kindBaseUrls } : {}),
           type: config.type,
         }),
       });
@@ -235,6 +238,7 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
           placeholder={config.defaultBaseUrl}
           hint={config.baseUrlHint}
         />
+        <KindBaseUrlsEditor value={kindBaseUrls} onChange={setKindBaseUrls} disabled={submitting} />
         <details className="rounded-lg border border-border-subtle px-3 py-2">
           <summary className="cursor-pointer text-sm font-medium text-text-muted hover:text-primary">
             Test connection (optional)

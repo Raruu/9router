@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
-import { Button, Badge, Input, Modal, Select } from "@/shared/components";
+import { Button, Badge, Input, KindBaseUrlsEditor, Modal, Select } from "@/shared/components";
 import { COMPATIBLE_NODE_TYPES } from "@/shared/constants/providers";
 import ProviderIconUpload from "@/shared/components/ProviderIconUpload";
 
@@ -14,6 +14,7 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose 
     apiType: "chat",
     baseUrl: "https://api.openai.com/v1",
   });
+  const [kindBaseUrls, setKindBaseUrls] = useState({});
   const [saving, setSaving] = useState(false);
   const [checkKey, setCheckKey] = useState("");
   const [checkModelId, setCheckModelId] = useState("");
@@ -33,6 +34,7 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose 
         apiType: node.apiType || "chat",
         baseUrl: node.baseUrl || (nodeType === "anthropic-compatible" ? "https://api.anthropic.com/v1" : "https://api.openai.com/v1"),
       });
+      setKindBaseUrls(node.kindBaseUrls && typeof node.kindBaseUrls === "object" ? { ...node.kindBaseUrls } : {});
       setIconFile(null);
       setRemoveIcon(false);
       setIconError("");
@@ -56,6 +58,9 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose 
         prefix: formData.prefix,
         baseUrl: formData.baseUrl,
         type: formData.type,
+        // Always sent so clearing a field persists: the API treats an explicit
+        // empty map as "no overrides" and an omitted field as "leave as is".
+        kindBaseUrls,
       };
       if (!selectedIsAnthropic) {
         payload.apiType = formData.apiType;
@@ -165,6 +170,7 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose 
           placeholder={selectedIsAnthropic ? "https://api.anthropic.com/v1" : "https://api.openai.com/v1"}
           hint={`Use the base URL (ending in /v1) for your ${selectedIsAnthropic ? "Anthropic" : "OpenAI"}-compatible API.`}
         />
+        <KindBaseUrlsEditor value={kindBaseUrls} onChange={setKindBaseUrls} disabled={saving} />
         <details className="rounded-lg border border-border-subtle px-3 py-2">
           <summary className="cursor-pointer text-sm font-medium text-text-muted hover:text-primary">
             Test connection (optional)
@@ -212,6 +218,7 @@ EditCompatibleNodeModal.propTypes = {
     type: PropTypes.string,
     apiType: PropTypes.string,
     baseUrl: PropTypes.string,
+    kindBaseUrls: PropTypes.object,
     iconVersion: PropTypes.number,
   }),
   onSave: PropTypes.func.isRequired,

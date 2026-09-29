@@ -20,6 +20,13 @@ const CREDENTIALED_PROVIDERS = new Set(
     .map(([id]) => id)
 );
 
+// Custom OpenAI-compatible nodes carry their endpoint + key on the connection,
+// so they always take the credentialed path (their adapter reads
+// providerSpecificData.kindBaseUrls/baseUrl).
+function needsCredentials(provider) {
+  return CREDENTIALED_PROVIDERS.has(provider) || String(provider).startsWith("openai-compatible-");
+}
+
 export async function handleTts(request) {
   let body;
   try {
@@ -82,7 +89,7 @@ async function handleSingleModelTts(body, modelStr, responseFormat, language, st
   log.info("ROUTING", `Provider: ${provider}, Voice: ${model}`);
 
   // noAuth providers — no credential needed
-  if (!CREDENTIALED_PROVIDERS.has(provider)) {
+  if (!needsCredentials(provider)) {
     const result = await handleTtsCore({ provider, model, input: body.input, responseFormat, language, style });
     if (result.success) return result.response;
     return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "TTS failed");

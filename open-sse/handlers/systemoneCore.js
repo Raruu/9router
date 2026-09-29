@@ -2,10 +2,13 @@ import { createErrorResult, parseUpstreamError, formatProviderError } from "../u
 import { HTTP_STATUS, FETCH_CONNECT_TIMEOUT_MS } from "../config/runtimeConfig.js";
 import { PROVIDER_MEDIA } from "../providers/index.js";
 import { generateSessionId } from "../executors/opencode-zen.js";
+import { buildCompatKindUrl, isCompatNodeProvider } from "../config/kindEndpoints.js";
 
 /**
  * Core System One (Jev) handler — native decision payload pass-through.
- * URL/headers come from the registry's systemoneConfig; body and JSON response
+ * URL/headers come from the registry's systemoneConfig; for custom
+ * OpenAI-compatible nodes the URL is built from the connection
+ * (kindBaseUrls.systemone or the node's main baseUrl). Body and JSON response
  * are forwarded untouched (decision models have no chat translation layer).
  *
  * @returns {Promise<{ success: boolean, response: Response, usage?: object, status?: number, error?: string }>}
@@ -19,12 +22,14 @@ export async function handleSystemoneCore({
 }) {
   const { provider, model } = modelInfo;
   const cfg = PROVIDER_MEDIA[provider]?.systemoneConfig;
-  if (!cfg?.baseUrl) {
+  const compatUrl = isCompatNodeProvider(provider) ? buildCompatKindUrl(credentials, "systemone") : "";
+  if (!cfg?.baseUrl && !compatUrl) {
     return createErrorResult(
       HTTP_STATUS.BAD_REQUEST,
       `Provider '${provider}' does not support System One.`
     );
   }
+  const systemoneUrl = compatUrl || cfg.baseUrl;
 
   // Validate input at the trust boundary; question-level shape is upstream's job.
   if (body.state === undefined || body.state === null) {
@@ -39,7 +44,7 @@ export async function handleSystemoneCore({
   const headers = {
     "Content-Type": "application/json",
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...(cfg.headers || {}),
+    ...(cfg?.headers || {}),
     // Zen lanes expect the official client session header on every request.
     "x-opencode-session": generateSessionId(),
   };
@@ -49,7 +54,7 @@ export async function handleSystemoneCore({
 
   let providerResponse;
   try {
-    providerResponse = await fetch(cfg.baseUrl, {
+    providerResponse = await fetch(systemoneUrl, {
       method: "POST",
       headers,
       body: JSON.stringify(requestBody),

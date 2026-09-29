@@ -41,6 +41,7 @@ export { default as ProviderInfoCard } from "./ProviderInfoCard";
 export { default as ProviderIcon } from "./ProviderIcon";
 export { default as CapacityBadges } from "./CapacityBadges";
 export { default as ModelsExposureCard } from "./ModelsExposureCard";
+export { default as KindBaseUrlsEditor, KIND_ENDPOINT_FIELDS } from "./KindBaseUrlsEditor";
 
 // Layouts
 export * from "./layouts";

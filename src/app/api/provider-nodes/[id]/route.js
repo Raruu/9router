@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { convertProviderNodeType, deleteProviderConnectionsByProvider, deleteProviderNode, getProviderConnections, getProviderNodeById, updateProviderConnection, updateProviderNode } from "@/models";
+import { sanitizeKindBaseUrls } from "open-sse/config/kindEndpoints.js";
 
 // PUT /api/provider-nodes/[id] - Update provider node
 export async function PUT(request, { params }) {
   try {
     const { id } = await params;
     const body = await request.json();
-    const { name, prefix, apiType, baseUrl, type } = body;
+    const { name, prefix, apiType, baseUrl, type, kindBaseUrls } = body;
     const node = await getProviderNodeById(id);
 
     if (!node) {
@@ -20,6 +21,11 @@ export async function PUT(request, { params }) {
     if (!prefix?.trim()) {
       return NextResponse.json({ error: "Prefix is required" }, { status: 400 });
     }
+
+    // Only sent when the edit form includes the per-kind section — an update
+    // that omits the field must keep the stored overrides (and their
+    // connection copies) untouched. An explicitly empty map clears them.
+    const kindOverrides = "kindBaseUrls" in body ? sanitizeKindBaseUrls(kindBaseUrls) : null;
 
     // Switching between OpenAI and Anthropic compatible moves the node to a
     // new id (the kind is keyed off the id prefix) and migrates every
@@ -36,7 +42,14 @@ export async function PUT(request, { params }) {
       if (!baseUrl?.trim()) {
         return NextResponse.json({ error: "Base URL is required" }, { status: 400 });
       }
-      const converted = await convertProviderNodeType(id, { type, apiType, name, prefix, baseUrl });
+      const converted = await convertProviderNodeType(id, {
+        type,
+        apiType,
+        name,
+        prefix,
+        baseUrl,
+        ...(kindOverrides !== null ? { kindBaseUrls: kindOverrides } : {}),
+      });
       if (!converted) {
         return NextResponse.json({ error: "Provider node not found" }, { status: 404 });
       }
@@ -80,6 +93,10 @@ export async function PUT(request, { params }) {
       updates.apiType = apiType;
     }
 
+    if (kindOverrides !== null) {
+      updates.kindBaseUrls = kindOverrides;
+    }
+
     const updated = await updateProviderNode(id, updates);
 
     const connections = await getProviderConnections({ provider: id });
@@ -90,6 +107,9 @@ export async function PUT(request, { params }) {
           prefix: prefix.trim(),
           apiType: node.type === "openai-compatible" ? apiType : undefined,
           baseUrl: sanitizedBaseUrl,
+          ...(kindOverrides !== null
+            ? { kindBaseUrls: Object.keys(kindOverrides).length ? kindOverrides : undefined }
+            : {}),
           nodeName: updated.name,
         }
       })
