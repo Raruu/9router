@@ -1,3 +1,39 @@
+# v0.5.91-3 (2026-09-29)
+
+## Features
+- **Providers**: custom OpenAI-compatible nodes can split their base URL per
+  service kind (image, video, TTS, STT, embedding, System One) for providers
+  that serve media on another host — Nararouter-style gateways keep chat and
+  embeddings on one host, images and videos on another; a kind without an
+  override keeps the main baseUrl, and the Add/Edit dialogs expose the URLs as
+  one field per line
+- **Endpoint**: the Create/Edit API Key dialogs pick allowed models per kind —
+  one "Add <kind>" button per service (LLM, embedding, image, image-to-text,
+  TTS, STT, video, System One) with a count of the entries already picked, and
+  the picked values are listed as chips grouped by kind so LLM and media
+  entries never mix; the kind list is the same taxonomy as the "Also expose in
+  /v1/models" checkboxes, so exposure and key permissions cannot drift
+
+## Fixes
+- **API Keys**: a key whitelisted to a TTS model rejected every speech request
+  — requests address the voice as a trailing segment (`openai/tts-1/alloy`)
+  while the whitelist names the model (`openai/tts-1`); validation now retries
+  with the voice segment stripped and keeps the 403 when the model itself is
+  not allowed
+- **API Keys**: `/v1/systemone` only checked that the key existed, skipping
+  usage limits and allowed-model rules — a key restricted to chat models could
+  spend System One requests; it now goes through the same validator as every
+  other handler
+- **Endpoint**: in the key picker, filtering by video or System One returned
+  every model (LLM included) because the two kinds were missing from the typed
+  set, and custom provider nodes were skipped for typed kinds entirely, so
+  their registered media models never showed up
+
+## Improvements
+- **Tests**: the unit suite can no longer write into the real `~/.9router`
+  data dir — a vitest setupFile points `DATA_DIR` at a per-file temp dir
+  before any test import and cleans up even on crashes; two flaky tests fixed
+
 # v0.5.91-2 (2026-09-28)
 
 ## Features
