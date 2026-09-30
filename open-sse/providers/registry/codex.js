@@ -4,7 +4,7 @@ import { withCodexReviewModels } from "../models/helpers.js";
 // User-Agent identity headers. Bump when the installed codex CLI is upgraded.
 // Exported so tests derive from it instead of pinning a literal that goes
 // stale on every bump (the 0.154→0.155 bump left one behind).
-export const CODEX_CLI_VERSION = "0.155.0";
+export const CODEX_CLI_VERSION = "0.159.0";
 const GPT_6_LITE_THINKING_LEVELS = ["low", "medium", "high", "xhigh", "max"];
 
 export default {
