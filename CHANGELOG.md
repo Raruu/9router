@@ -1,3 +1,19 @@
+# v0.5.91-4 (2026-09-30)
+
+## Fixes
+- **Codex**: the CLI identity headers move to 0.159.0 for GPT-6.1 Sol
+  (`codex_cli_rs/0.159.0` in `version` / `User-Agent`), keeping the spoofed
+  client in step with the installed Codex CLI. Based on #4473 by @emi-ran
+- **Streaming**: OpenAI-format responses translated from other providers
+  (Gemini, Ollama, …) now end with the `data: [DONE]` sentinel — only
+  Responses passthrough streams emitted it, so strict OpenAI SDK clients hung
+  until timeout on a translated stream that closed without one. Based on #4375
+  by @semihisikman
+- **Cline**: `cline` / `clinepass` force upstream streaming — a non-streaming
+  request returns Cline's legacy `{"data":{...}}` envelope, which the client
+  received verbatim; the SSE is now accumulated and converted back to JSON
+  for `stream: false` callers. Based on #4267 by @flyfeel
+
 # v0.5.91-3 (2026-09-29)
 
 ## Features
