@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import PropTypes from "prop-types";
 import { Card, Button, Input, Modal, CardSkeleton, Toggle, ConfirmModal, ModelsExposureCard, ModelSelectModal, Select } from "@/shared/components";
 import {
@@ -19,10 +19,13 @@ import {
   REACHABLE_MISS_THRESHOLD,
   CLIENT_PING_FAST_MS,
 } from "./endpointConstants";
-import { normalizeExposeNonLlmKinds } from "@/shared/constants/models";
+import { normalizeExposeNonLlmKinds, customModelTypeLabel } from "@/shared/constants/models";
+import { createAllowedModelKindResolver, countAllowedModelsByKind } from "@/shared/utils/allowedModelKind";
 import { clientPingUrl, clientPingAny } from "./endpointPing";
 import useSettingsStore from "@/store/settingsStore";
 import EndpointRow from "./components/EndpointRow";
+import AllowedModelChips from "./components/AllowedModelChips";
+import AllowedModelKindButtons from "./components/AllowedModelKindButtons";
 import StatusAlert from "./components/StatusAlert";
 import Tooltip from "./components/Tooltip";
 import SecurityWarning from "./components/SecurityWarning";
@@ -38,6 +41,8 @@ export default function APIPageClient({ machineId }) {
   const [newKeyAllowedModels, setNewKeyAllowedModels] = useState([]);
   const [newKeyCustomPattern, setNewKeyCustomPattern] = useState("");
   const [showModelSelectForCreate, setShowModelSelectForCreate] = useState(false);
+  // Kind the create-key picker is open for ("llm" | media kind id).
+  const [newKeyPickerKind, setNewKeyPickerKind] = useState("llm");
 
   // Edit Key state
   const [editingKey, setEditingKey] = useState(null);
@@ -51,9 +56,15 @@ export default function APIPageClient({ machineId }) {
   const [editKeyAllowedModels, setEditKeyAllowedModels] = useState([]);
   const [editKeyCustomPattern, setEditKeyCustomPattern] = useState("");
   const [showModelSelectForEdit, setShowModelSelectForEdit] = useState(false);
+  // Kind the edit-key picker is open for ("llm" | media kind id).
+  const [editKeyPickerKind, setEditKeyPickerKind] = useState("llm");
   const [savingEdit, setSavingEdit] = useState(false);
 
   const [activeProvidersList, setActiveProvidersList] = useState([]);
+  // Custom provider nodes + registered custom models: the key editor resolves
+  // an allowed-model value back to its kind (LLM vs media) with these.
+  const [providerNodesList, setProviderNodesList] = useState([]);
+  const [customModelsList, setCustomModelsList] = useState([]);
   const [createdKey, setCreatedKey] = useState(null);
   const [createdKeyTitle, setCreatedKeyTitle] = useState("API Key Created");
 
@@ -129,6 +140,28 @@ export default function APIPageClient({ machineId }) {
   }, []);
 
   const { copied, copy } = useCopyToClipboard();
+
+  // Shared kind resolver for the allowed-models UI: the per-kind "Add" buttons
+  // count the current list by kind, and the chips group it by kind.
+  const allowedModelKindResolver = useMemo(
+    () => createAllowedModelKindResolver({
+      connections: activeProvidersList,
+      nodes: providerNodesList,
+      customModels: customModelsList,
+    }),
+    [activeProvidersList, providerNodesList, customModelsList],
+  );
+  const countNewKeyModelsByKind = useMemo(
+    () => countAllowedModelsByKind(newKeyAllowedModels, allowedModelKindResolver),
+    [newKeyAllowedModels, allowedModelKindResolver],
+  );
+  const countEditKeyModelsByKind = useMemo(
+    () => countAllowedModelsByKind(editKeyAllowedModels, allowedModelKindResolver),
+    [editKeyAllowedModels, allowedModelKindResolver],
+  );
+  // Modal titles name the kind being picked.
+  const newKeyPickerTitle = `Add ${customModelTypeLabel(newKeyPickerKind)} Models`;
+  const editKeyPickerTitle = `Add ${customModelTypeLabel(editKeyPickerKind)} Models`;
 
   // Security gate: block remote exposure while dashboard uses default password or login is off.
   const isLoginUnsafe = !requireLogin || !hasPassword;
@@ -350,6 +383,15 @@ export default function APIPageClient({ machineId }) {
 
       let [existing, providers] = await Promise.all([fetchKeys(), fetchProviders()]);
       setActiveProvidersList(providers);
+
+      // Kind resolution sources for the allowed-models chips (best effort).
+      Promise.all([
+        fetch("/api/provider-nodes", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+        fetch("/api/models/custom", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+      ]).then(([nodesData, customData]) => {
+        setProviderNodesList(nodesData?.nodes || []);
+        setCustomModelsList(customData?.models || []);
+      });
 
       // Auto-provision a default key for first-time users so the endpoint works out of the box.
       if (existing.length === 0) {
@@ -1472,17 +1514,13 @@ export default function APIPageClient({ machineId }) {
 
             {newKeyModelMode === "custom" && (
               <div className="flex flex-col gap-2.5 p-3 rounded-xl bg-surface-2/60 border border-border mt-1">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  icon="checklist"
-                  onClick={() => setShowModelSelectForCreate(true)}
-                  fullWidth
-                  className="justify-center h-9 font-medium text-xs rounded-lg shadow-2xs"
-                >
-                  Select Models from Catalog
-                </Button>
+                <AllowedModelKindButtons
+                  counts={countNewKeyModelsByKind}
+                  onPick={(kind) => {
+                    setNewKeyPickerKind(kind);
+                    setShowModelSelectForCreate(true);
+                  }}
+                />
 
                 <div className="relative flex items-center">
                   <span className="material-symbols-outlined absolute left-2.5 text-[16px] text-text-muted pointer-events-none">filter_alt</span>
@@ -1544,23 +1582,12 @@ export default function APIPageClient({ machineId }) {
                     </span>
                   </div>
                 ) : (
-                  <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-1.5 bg-surface rounded-lg border border-border/70">
-                    {newKeyAllowedModels.map((m) => (
-                      <span
-                        key={m}
-                        className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-primary/10 border border-primary/20 rounded-md text-xs font-mono text-primary"
-                      >
-                        <span>{m}</span>
-                        <button
-                          type="button"
-                          onClick={() => setNewKeyAllowedModels(newKeyAllowedModels.filter((x) => x !== m))}
-                          className="text-primary/60 hover:text-red-500 transition-colors cursor-pointer flex items-center justify-center w-3.5 h-3.5"
-                          title="Remove"
-                        >
-                          <span className="material-symbols-outlined text-[13px]">close</span>
-                        </button>
-                      </span>
-                    ))}
+                  <div className="max-h-40 overflow-y-auto p-1.5 bg-surface rounded-lg border border-border/70">
+                    <AllowedModelChips
+                      models={newKeyAllowedModels}
+                      resolver={allowedModelKindResolver}
+                      onRemove={(m) => setNewKeyAllowedModels(newKeyAllowedModels.filter((x) => x !== m))}
+                    />
                   </div>
                 )}
 
@@ -1692,17 +1719,13 @@ export default function APIPageClient({ machineId }) {
 
             {editKeyModelMode === "custom" && (
               <div className="flex flex-col gap-2.5 p-3 rounded-xl bg-surface-2/60 border border-border mt-1">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="secondary"
-                  icon="checklist"
-                  onClick={() => setShowModelSelectForEdit(true)}
-                  fullWidth
-                  className="justify-center h-9 font-medium text-xs rounded-lg shadow-2xs"
-                >
-                  Select Models from Catalog
-                </Button>
+                <AllowedModelKindButtons
+                  counts={countEditKeyModelsByKind}
+                  onPick={(kind) => {
+                    setEditKeyPickerKind(kind);
+                    setShowModelSelectForEdit(true);
+                  }}
+                />
 
                 <div className="relative flex items-center">
                   <span className="material-symbols-outlined absolute left-2.5 text-[16px] text-text-muted pointer-events-none">filter_alt</span>
@@ -1764,23 +1787,12 @@ export default function APIPageClient({ machineId }) {
                     </span>
                   </div>
                 ) : (
-                  <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto p-1.5 bg-surface rounded-lg border border-border/70">
-                    {editKeyAllowedModels.map((m) => (
-                      <span
-                        key={m}
-                        className="inline-flex items-center gap-1.5 px-2 py-0.5 bg-primary/10 border border-primary/20 rounded-md text-xs font-mono text-primary"
-                      >
-                        <span>{m}</span>
-                        <button
-                          type="button"
-                          onClick={() => setEditKeyAllowedModels(editKeyAllowedModels.filter((x) => x !== m))}
-                          className="text-primary/60 hover:text-red-500 transition-colors cursor-pointer flex items-center justify-center w-3.5 h-3.5"
-                          title="Remove"
-                        >
-                          <span className="material-symbols-outlined text-[13px]">close</span>
-                        </button>
-                      </span>
-                    ))}
+                  <div className="max-h-40 overflow-y-auto p-1.5 bg-surface rounded-lg border border-border/70">
+                    <AllowedModelChips
+                      models={editKeyAllowedModels}
+                      resolver={allowedModelKindResolver}
+                      onRemove={(m) => setEditKeyAllowedModels(editKeyAllowedModels.filter((x) => x !== m))}
+                    />
                   </div>
                 )}
 
@@ -1812,7 +1824,9 @@ export default function APIPageClient({ machineId }) {
         isOpen={showModelSelectForCreate}
         onClose={() => setShowModelSelectForCreate(false)}
         activeProviders={activeProvidersList}
-        title="Select Allowed Models for Key"
+        title={newKeyPickerTitle}
+        kindFilter={newKeyPickerKind === "llm" ? null : newKeyPickerKind}
+        strict
         closeOnSelect={false}
         addedModelValues={newKeyAllowedModels}
         onSelect={(model) => {
@@ -1832,7 +1846,9 @@ export default function APIPageClient({ machineId }) {
         isOpen={showModelSelectForEdit}
         onClose={() => setShowModelSelectForEdit(false)}
         activeProviders={activeProvidersList}
-        title="Select Allowed Models for Key"
+        title={editKeyPickerTitle}
+        kindFilter={editKeyPickerKind === "llm" ? null : editKeyPickerKind}
+        strict
         closeOnSelect={false}
         addedModelValues={editKeyAllowedModels}
         onSelect={(model) => {

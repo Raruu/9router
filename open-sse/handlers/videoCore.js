@@ -4,6 +4,7 @@ import { HTTP_STATUS } from "../config/runtimeConfig.js";
 import { refreshTokenByProvider } from "../services/tokenRefresh.js";
 import { PROVIDER_MEDIA } from "../providers/index.js";
 import { getVideoAdapter } from "./videoProviders/index.js";
+import { isCompatNodeProvider } from "../config/kindEndpoints.js";
 
 // Upstream fetch deadline for video job submission/polling (the job itself is
 // async upstream — this only bounds the HTTP round-trip, not video rendering).
@@ -17,6 +18,11 @@ export const VIDEO_ACTIONS = new Set(["generations", "edits", "extensions"]);
 
 export function getVideoConfig(provider) {
   return PROVIDER_MEDIA[provider]?.videoConfig || null;
+}
+
+/** Custom OpenAI-compatible nodes resolve their URL from the connection. */
+export function supportsVideo(provider) {
+  return !!getVideoConfig(provider) || isCompatNodeProvider(provider);
 }
 
 /** Strip bearer tokens / obvious secrets from text destined for clients or logs. */
@@ -92,7 +98,7 @@ export async function handleVideoProxyCore({
   // generated provider id, in client errors and logs.
   const displayProvider = providerDisplayLabel(provider, credentials?.providerSpecificData);
   const config = getVideoConfig(provider);
-  if (!config) {
+  if (!config && !isCompatNodeProvider(provider)) {
     return createErrorResult(HTTP_STATUS.BAD_REQUEST, `Provider '${displayProvider}' does not support video generation`);
   }
   if (!requestId && !VIDEO_ACTIONS.has(action)) {
@@ -118,14 +124,23 @@ export async function handleVideoProxyCore({
   };
 
   // Rebuilt per attempt so the auth retry below picks up the refreshed token.
-  const doFetch = async () => {
-    const plan = adapter
-      ? await adapter.buildRequest({
-          config, action, requestId, rawBody, contentType, idempotencyKey, credentials, log,
-          token: credentials?.accessToken || credentials?.apiKey,
-        })
-      : defaultPlan();
+  const buildPlan = async () => {
+    if (!adapter) return defaultPlan();
+    return adapter.buildRequest({
+      config, action, requestId, rawBody, contentType, idempotencyKey, credentials, log,
+      token: credentials?.accessToken || credentials?.apiKey,
+    });
+  };
+
+  // The plan behind the current `upstream` response. The auth retry reuses it
+  // (with rebuilt headers) so a request that fell back to an alternate URL
+  // shape is not retried against the primary one.
+  let activePlan = null;
+
+  const doFetch = async (planOverride = null) => {
+    const plan = planOverride || await buildPlan();
     if (plan.error) return { planError: plan.error };
+    activePlan = plan;
     return {
       response: await fetch(plan.url, {
         method: plan.method,
@@ -150,6 +165,28 @@ export async function handleVideoProxyCore({
     return createErrorResult(HTTP_STATUS.BAD_GATEWAY, sanitizeSecrets(`[${displayProvider}] video upstream fetch failed: ${error.message}`, credentials));
   }
 
+  // Alternate endpoint shapes (adapters may declare plan.fallbacks, e.g. a
+  // collection root vs an xAI-style /generations suffix). Only 404/405 trigger
+  // a fallback: those statuses mean the path does not exist, so no billable job
+  // can have been created — unlike a network error or a 5xx, where the first
+  // POST must never be re-sent.
+  if (method === "POST" && (upstream.status === 404 || upstream.status === 405)) {
+    const plan = await buildPlan();
+    const fallbacks = Array.isArray(plan?.fallbacks) ? plan.fallbacks : [];
+    for (const fallback of fallbacks) {
+      try { await upstream.body?.cancel?.(); } catch { /* noop */ }
+      let next;
+      try {
+        next = await doFetch(fallback);
+      } catch (error) {
+        return createErrorResult(HTTP_STATUS.BAD_GATEWAY, sanitizeSecrets(`[${displayProvider}] video upstream fetch failed: ${error.message}`, credentials));
+      }
+      if (next.planError) return createErrorResult(HTTP_STATUS.BAD_REQUEST, `[${displayProvider}] ${next.planError}`);
+      upstream = next.response;
+      if (upstream.status !== 404 && upstream.status !== 405) break;
+    }
+  }
+
   // 401/403 → refresh once → retry once (OAuth accounts only; API keys can't refresh)
   if (
     (upstream.status === HTTP_STATUS.UNAUTHORIZED || upstream.status === HTTP_STATUS.FORBIDDEN) &&
@@ -169,7 +206,11 @@ export async function handleVideoProxyCore({
         await upstream.body?.cancel?.();
       } catch { /* noop */ }
       try {
-        const retry = await doFetch();
+        // Rebuild headers from the refreshed credentials, but keep the URL the
+        // request actually used (a fallback shape must not be retried against
+        // the primary one).
+        const freshPlan = await buildPlan();
+        const retry = await doFetch(activePlan ? { ...activePlan, headers: freshPlan.headers } : null);
         if (retry.planError) return createErrorResult(HTTP_STATUS.BAD_REQUEST, `[${displayProvider}] ${retry.planError}`);
         upstream = retry.response;
       } catch (error) {

@@ -9,6 +9,9 @@ export default defineConfig({
     environment: "node",
     globals: true,
     include: ["**/*.test.js"],
+    // Point DATA_DIR at a per-file temp dir before any test import runs, so a
+    // test that forgets to isolate can never write to the real ~/.9router DB.
+    setupFiles: ["./setup/dataDirGuard.js"],
     // Don't scan into git worktrees nested under .claude/ — they carry their
     // own copies of the test files but lack an installed node_modules (open-sse,
     // etc.), which makes provider imports fail during collection.

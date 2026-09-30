@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { sanitizeKindBaseUrls } from "open-sse/config/kindEndpoints.js";
 
 function rowToNode(row) {
   if (!row) return null;
@@ -114,6 +115,13 @@ function sanitizeCompatBaseUrl(type, baseUrl) {
   return out;
 }
 
+// Optional per-kind endpoint overrides on a node (image on a different host
+// than chat, etc.). Absent/empty → the kind falls back to the main baseUrl.
+function normalizeKindBaseUrls(value) {
+  const sanitized = sanitizeKindBaseUrls(value);
+  return Object.keys(sanitized).length ? sanitized : undefined;
+}
+
 export async function getProviderNodes(filter = {}) {
   const db = await getAdapter();
   const where = [];
@@ -131,6 +139,7 @@ export async function getProviderNodeById(id) {
 export async function createProviderNode(data) {
   const db = await getAdapter();
   const now = new Date().toISOString();
+  const kindBaseUrls = normalizeKindBaseUrls(data.kindBaseUrls);
   const node = {
     id: data.id || uuidv4(),
     type: data.type,
@@ -138,6 +147,7 @@ export async function createProviderNode(data) {
     prefix: data.prefix,
     apiType: data.apiType,
     baseUrl: data.baseUrl,
+    ...(kindBaseUrls ? { kindBaseUrls } : {}),
     createdAt: now,
     updatedAt: now,
   };
@@ -152,6 +162,14 @@ export async function updateProviderNode(id, data) {
     const row = db.get(`SELECT * FROM providerNodes WHERE id = ?`, [id]);
     if (!row) return;
     const merged = { ...rowToNode(row), ...data, updatedAt: new Date().toISOString() };
+    // Only touch kindBaseUrls when the caller supplied the field — an update
+    // that omits it (e.g. rename) must not wipe the stored overrides. An
+    // explicitly empty map clears them.
+    if ("kindBaseUrls" in data) {
+      const kindBaseUrls = normalizeKindBaseUrls(data.kindBaseUrls);
+      if (kindBaseUrls) merged.kindBaseUrls = kindBaseUrls;
+      else delete merged.kindBaseUrls;
+    }
     upsert(db, merged);
     result = merged;
   });
@@ -183,7 +201,8 @@ export async function deleteProviderNode(id) {
 // capacity-adapter lists), and usage history (usageHistory, requestDetails,
 // usageDaily aggregates). Returns the new node, or null when
 // the source node does not exist. Throws on invalid input (rolls back).
-export async function convertProviderNodeType(id, { type, apiType, name, prefix, baseUrl }) {
+export async function convertProviderNodeType(id, payload) {
+  const { type, apiType, name, prefix, baseUrl } = payload;
   if (!CONVERTIBLE_NODE_TYPES.includes(type)) {
     throw new Error("Invalid provider node type");
   }
@@ -194,6 +213,7 @@ export async function convertProviderNodeType(id, { type, apiType, name, prefix,
   if (!prefix?.trim()) throw new Error("Prefix is required");
   if (!baseUrl?.trim()) throw new Error("Base URL is required");
 
+  const kindBaseUrlsProvided = "kindBaseUrls" in payload;
   const db = await getAdapter();
   let result = null;
   db.transaction(() => {
@@ -212,6 +232,11 @@ export async function convertProviderNodeType(id, { type, apiType, name, prefix,
     const sanitizedBaseUrl = sanitizeCompatBaseUrl(type, baseUrl);
     const trimmedName = name.trim();
     const trimmedPrefix = prefix.trim();
+    // Converted nodes keep their per-kind overrides unless the caller sends a
+    // new map; an explicitly empty map clears them.
+    const nextKindBaseUrls = kindBaseUrlsProvided
+      ? normalizeKindBaseUrls(payload.kindBaseUrls)
+      : normalizeKindBaseUrls(node.kindBaseUrls);
 
     const newNode = {
       id: newId,
@@ -220,6 +245,7 @@ export async function convertProviderNodeType(id, { type, apiType, name, prefix,
       prefix: trimmedPrefix,
       ...(type === COMPATIBLE_CHAT_NODE_TYPE ? { apiType } : {}),
       baseUrl: sanitizedBaseUrl,
+      ...(nextKindBaseUrls ? { kindBaseUrls: nextKindBaseUrls } : {}),
       ...(node.iconVersion ? { iconVersion: node.iconVersion } : {}),
       createdAt: row.createdAt,
       updatedAt: now,
@@ -232,6 +258,11 @@ export async function convertProviderNodeType(id, { type, apiType, name, prefix,
       specific.prefix = trimmedPrefix;
       specific.baseUrl = sanitizedBaseUrl;
       specific.nodeName = trimmedName;
+      if (nextKindBaseUrls) {
+        specific.kindBaseUrls = nextKindBaseUrls;
+      } else {
+        delete specific.kindBaseUrls;
+      }
       if (type === COMPATIBLE_CHAT_NODE_TYPE) {
         specific.apiType = apiType;
       } else {

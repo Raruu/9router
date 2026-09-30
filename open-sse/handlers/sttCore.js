@@ -4,6 +4,7 @@ import { providerDisplayLabel } from "../utils/providerLabel.js";
 import { transcribeGeminiLive } from "./geminiLiveStt.js";
 import { PROVIDER_MODELS, PROVIDER_ID_TO_ALIAS } from "../config/providerModels.js";
 import { HTTP_STATUS } from "../config/runtimeConfig.js";
+import { buildCompatKindUrl, isCompatNodeProvider } from "../config/kindEndpoints.js";
 
 // Build auth headers from sttConfig + token
 function buildAuthHeaders(cfg, token) {
@@ -197,7 +198,14 @@ export async function handleSttCore({ provider, model, formData, credentials, st
   // whose address only the operator knows. Opt-in: absent unless the connection
   // sets it, so cloud providers are untouched. Mirrors the custom embedding
   // providers, which already resolve baseUrl the same way.
-  const overrideUrl = credentials?.providerSpecificData?.baseUrl;
+  //
+  // Custom OpenAI-compatible nodes: their per-kind STT host
+  // (kindBaseUrls.stt) wins over the node's main baseUrl. Gated on the node
+  // prefix — for other providers a providerSpecificData.baseUrl is the full
+  // endpoint (selfhosted-stt), so appending the canonical path would double it.
+  const overrideUrl = isCompatNodeProvider(provider)
+    ? buildCompatKindUrl(credentials, "stt")
+    : credentials?.providerSpecificData?.baseUrl;
   if (overrideUrl) cfg = { ...cfg, baseUrl: String(overrideUrl).replace(/\/+$/, "") };
 
   const token = cfg.authType === "none" ? null : (credentials?.apiKey || credentials?.accessToken);

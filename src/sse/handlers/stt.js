@@ -10,6 +10,7 @@ import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { providerDisplayLabel, providerModelTag } from "open-sse/utils/providerLabel.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
+import { buildCompatKindUrl, isCompatNodeProvider } from "open-sse/config/kindEndpoints.js";
 import * as log from "../utils/logger.js";
 
 // Providers requiring credentials for STT
@@ -18,6 +19,30 @@ const CREDENTIALED_PROVIDERS = new Set(
     .filter(([, p]) => p.serviceKinds?.includes("stt") && !p.noAuth && p.sttConfig?.authType !== "none")
     .map(([id]) => id)
 );
+
+// Custom OpenAI-compatible nodes carry their endpoint + key on the connection,
+// so they always take the credentialed path.
+function needsCredentials(provider) {
+  return CREDENTIALED_PROVIDERS.has(provider) || isCompatNodeProvider(provider);
+}
+
+// STT config for the core: built-in providers read the registry entry; custom
+// nodes get a synthetic OpenAI-compatible config pointing at their per-kind
+// (kindBaseUrls.stt) or main baseUrl. The core's per-connection override
+// applies the same resolution for custom nodes, so both agree.
+function resolveSttConfig(provider, credentials) {
+  const builtin = AI_PROVIDERS[provider]?.sttConfig;
+  if (builtin) return builtin;
+  if (isCompatNodeProvider(provider)) {
+    return {
+      baseUrl: buildCompatKindUrl(credentials, "stt"),
+      authType: "apikey",
+      authHeader: "bearer",
+      format: "openai",
+    };
+  }
+  return undefined;
+}
 
 // Custom-model transport marker: models registered through
 // /api/models/custom may pin a specialized STT transport (e.g.
@@ -74,8 +99,8 @@ export async function handleStt(request) {
   const modelTransport = await resolveCustomModelTransport(provider, model);
 
   // noAuth providers
-  if (!CREDENTIALED_PROVIDERS.has(provider)) {
-    const result = await handleSttCore({ provider, model, formData, sttConfig: AI_PROVIDERS[provider]?.sttConfig, transport: modelTransport });
+  if (!needsCredentials(provider)) {
+    const result = await handleSttCore({ provider, model, formData, sttConfig: resolveSttConfig(provider, null), transport: modelTransport });
     if (result.success) return result.response;
     return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "STT failed");
   }
@@ -104,7 +129,7 @@ export async function handleStt(request) {
 
     log.info("AUTH", `\x1b[32mUsing ${providerDisplayLabel(provider, credentials.providerSpecificData)} account: ${credentials.connectionName}\x1b[0m`);
 
-    const result = await handleSttCore({ provider, model, formData, credentials, sttConfig: AI_PROVIDERS[provider]?.sttConfig, transport: modelTransport });
+    const result = await handleSttCore({ provider, model, formData, credentials, sttConfig: resolveSttConfig(provider, credentials), transport: modelTransport });
 
     if (result.success) return result.response;
 

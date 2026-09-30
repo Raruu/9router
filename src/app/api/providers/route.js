@@ -128,6 +128,8 @@ export async function POST(request) {
 
     // Compatible LLM nodes support multiple API-key connections (key pool); runtime
     // rotates/fails over via getProviderCredentials. Embedding nodes stay single-connection.
+    // Per-kind endpoint overrides (kindBaseUrls) ride along so media requests can
+    // reach a different host than chat.
     if (isOpenAICompatibleProvider(provider)) {
       const node = await getProviderNodeById(provider);
       if (!node) {
@@ -137,6 +139,7 @@ export async function POST(request) {
         prefix: node.prefix,
         apiType: node.apiType,
         baseUrl: node.baseUrl,
+        ...(node.kindBaseUrls ? { kindBaseUrls: node.kindBaseUrls } : {}),
         nodeName: node.name,
       };
     } else if (isAnthropicCompatibleProvider(provider)) {
@@ -147,6 +150,7 @@ export async function POST(request) {
       providerSpecificData = {
         prefix: node.prefix,
         baseUrl: node.baseUrl,
+        ...(node.kindBaseUrls ? { kindBaseUrls: node.kindBaseUrls } : {}),
         nodeName: node.name,
       };
     } else if (isCustomEmbeddingProvider(provider)) {
@@ -157,6 +161,7 @@ export async function POST(request) {
       providerSpecificData = {
         prefix: node.prefix,
         baseUrl: node.baseUrl,
+        ...(node.kindBaseUrls ? { kindBaseUrls: node.kindBaseUrls } : {}),
         nodeName: node.name,
       };
     }

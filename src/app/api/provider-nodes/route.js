@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { buildCompatibleNodeId, createProviderNode, getProviderNodes } from "@/models";
 import { CUSTOM_EMBEDDING_PREFIX } from "@/shared/constants/providers";
 import { generateId } from "@/shared/utils";
+import { sanitizeKindBaseUrls } from "open-sse/config/kindEndpoints.js";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +33,7 @@ export async function GET() {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { name, prefix, apiType, baseUrl, type } = body;
+    const { name, prefix, apiType, baseUrl, type, kindBaseUrls } = body;
 
     if (!name?.trim()) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -41,6 +42,9 @@ export async function POST(request) {
     if (!prefix?.trim()) {
       return NextResponse.json({ error: "Prefix is required" }, { status: 400 });
     }
+
+    // Optional per-kind endpoint overrides (image/video on a different host, …)
+    const kindOverrides = sanitizeKindBaseUrls(kindBaseUrls);
 
     // Determine type
     const nodeType = type || "openai-compatible";
@@ -56,6 +60,7 @@ export async function POST(request) {
         prefix: prefix.trim(),
         apiType,
         baseUrl: (baseUrl || OPENAI_COMPATIBLE_DEFAULTS.baseUrl).trim(),
+        ...(Object.keys(kindOverrides).length ? { kindBaseUrls: kindOverrides } : {}),
         name: name.trim(),
       });
       return NextResponse.json({ node }, { status: 201 });
