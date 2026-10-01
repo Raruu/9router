@@ -48,7 +48,7 @@ describe("deepseek-v4-1-flash capabilities (#4293)", () => {
 // directly — this is reliable and does not require a full React setup.
 
 import fs from "fs";
-import path from "path";
+import { LIVE_CATALOG_PROVIDERS } from "../../src/shared/utils/modelSelectCatalog.js";
 
 describe("ModelSelectModal LIVE_CATALOG_PROVIDERS includes zed (#4244)", () => {
   let src;
@@ -58,19 +58,13 @@ describe("ModelSelectModal LIVE_CATALOG_PROVIDERS includes zed (#4244)", () => {
   });
 
   it("includes zed in LIVE_CATALOG_PROVIDERS", () => {
-    // Match the const definition line and verify zed is present
-    const match = src.match(/const LIVE_CATALOG_PROVIDERS\s*=\s*\[([^\]]+)\]/);
-    expect(match).toBeTruthy();
-    const list = match[1];
-    expect(list).toContain('"zed"');
+    expect(LIVE_CATALOG_PROVIDERS).toContain("zed");
   });
 
-  it("still includes cursor, cline, clinepass", () => {
-    const match = src.match(/const LIVE_CATALOG_PROVIDERS\s*=\s*\[([^\]]+)\]/);
-    const list = match[1];
-    expect(list).toContain('"cursor"');
-    expect(list).toContain('"cline"');
-    expect(list).toContain('"clinepass"');
+  it("still includes cursor and drops cline/clinepass (configured list)", () => {
+    expect(LIVE_CATALOG_PROVIDERS).toContain("cursor");
+    expect(LIVE_CATALOG_PROVIDERS).not.toContain("cline");
+    expect(LIVE_CATALOG_PROVIDERS).not.toContain("clinepass");
   });
 
   it("zedModels hook call is present in the file", () => {

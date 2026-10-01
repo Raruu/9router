@@ -24,8 +24,8 @@ const staticCursor = [
 ];
 
 describe("LIVE_CATALOG_PROVIDERS", () => {
-  it("contains cursor only — cline/clinepass use the configured list", () => {
-    expect(LIVE_CATALOG_PROVIDERS).toEqual(["cursor"]);
+  it("contains cursor and zed — cline/clinepass use the configured list", () => {
+    expect(LIVE_CATALOG_PROVIDERS).toEqual(["cursor", "zed"]);
     expect(LIVE_CATALOG_PROVIDERS).not.toContain("cline");
     expect(LIVE_CATALOG_PROVIDERS).not.toContain("clinepass");
   });
