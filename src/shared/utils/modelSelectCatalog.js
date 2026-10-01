@@ -2,14 +2,16 @@
 //
 // Some providers expose a per-account live catalog that is the authoritative
 // list — Cursor's static registry carries no usable entitlement information,
-// so the live fetch wins there. Cline/ClinePass deliberately do NOT use their
-// live catalog here: api.cline.bot/api/v1/models returns the account-wide
-// catalog (hundreds of ids), while the provider page shows the configured
-// list (static registry + models the user imported via "Import from /models").
-// The combo picker must mirror that configured list — otherwise it offers
-// models the user never added, which is exactly the reported mismatch.
+// so the live fetch wins there. Zed's backend customResolver already returns
+// live models, and #4244 wired it up (it was hidden from the Combo picker).
+// Cline/ClinePass deliberately do NOT use their live catalog here:
+// api.cline.bot/api/v1/models returns the account-wide catalog (hundreds of
+// ids), while the provider page shows the configured list (static registry +
+// models the user imported via "Import from /models"). The combo picker must
+// mirror that configured list — otherwise it offers models the user never
+// added, which is exactly the reported mismatch.
 
-export const LIVE_CATALOG_PROVIDERS = ["cursor"];
+export const LIVE_CATALOG_PROVIDERS = ["cursor", "zed"];
 
 // Pick the model list a provider's picker group should render: the live
 // account catalog when the provider is opted in AND the fetch produced rows,

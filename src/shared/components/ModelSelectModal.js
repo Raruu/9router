@@ -27,7 +27,6 @@ const NO_AUTH_PROVIDER_IDS = Object.keys(FREE_PROVIDERS).filter(id => FREE_PROVI
 // Live per-account catalogs (see modelSelectCatalog.js). Cline/ClinePass are
 // deliberately excluded there: their live endpoint returns the account-wide
 // catalog, so the picker shows the configured list instead.
-//
 // Fetch a provider's account-scoped catalog for every active connection and merge
 // the results. Entries collapse by model id on purpose: two connections of the
 // same provider produce the same picker value (`alias/id`), so keeping the first
@@ -122,8 +121,10 @@ export default function ModelSelectModal({
     return map;
   }, [filteredActiveProviders]);
   const cursorConnectionIds = liveConnectionIdsByProvider.cursor;
+  const zedConnectionIds = liveConnectionIdsByProvider.zed;
 
   const cursorModels = useLiveProviderModels(isOpen, cursorConnectionIds, "Cursor");
+  const zedModels = useLiveProviderModels(isOpen, zedConnectionIds, "Zed");
 
   const fetchCombos = async () => {
     try {
@@ -385,7 +386,7 @@ export default function ModelSelectModal({
         // to match the provider page. See modelSelectCatalog.js.
         const hardcodedModels = pickProviderCatalog({
           providerId,
-          liveModelsByProvider: { cursor: cursorModels },
+          liveModelsByProvider: { cursor: cursorModels, zed: zedModels },
           staticModels: getModelsByProviderId(providerId),
         });
         const hardcodedIds = new Set(hardcodedModels.map((m) => m.id));
@@ -456,7 +457,7 @@ export default function ModelSelectModal({
     });
 
     return groups;
-  }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, disabledModels, effectiveKind, strict, activeProviders, cursorModels]);
+  }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, disabledModels, effectiveKind, strict, activeProviders, cursorModels, zedModels]);
 
   // Filter combos by search query (and hide combos when kindFilter is set — combos are LLM-only by design)
   const filteredCombos = useMemo(() => {
