@@ -1,3 +1,92 @@
+# v0.5.95-1 (2026-10-01)
+
+Merged upstream v0.5.95 into the fork. This section includes the full upstream
+release notes and the fork-side merge work.
+
+## Features
+- **Providers**: add Meta Muse provider with OAuth login and model catalog; add v1m System One provider
+- **GLM**: add Z.ai OAuth login to GLM Coding (dual-auth)
+- **Codex**: add GPT-6.1 Sol; expose 1M context variants for GPT-6 and GPT-5.6; add gpt-daybreak/reserve models and route bare `gpt-5.x`/`gpt-6.x` slugs to codex
+- **Claude**: add Claude Sonnet 5.5 (plus `claude-opus-5.5` models in the Kiro registry)
+- **CLI**: add `connect` command for remote 9Router servers
+- **Providers**: per-provider custom header overrides from the registry
+- **Agnes**: seed the 2.5/3.0 model ids in the registry
+- **Usage**: sync `?provider=` URL param with provider filter for bookmarkable deep links (#4395)
+- **Dashboard**: drop NEW badges in sidebar, mark 9Remote as HOT
+
+## Fixes
+- **Codex**: GPT-6.1 Sol publishes its real Codex OAuth window — the model was
+  registered and asserted at 272k upstream, but its `PROVIDER_CAPABILITIES` row
+  was missing, so the generic `*gpt-6*` pattern published the full 1.05M API
+  window instead (upstream's own test fails on a clean upstream checkout too)
+- **Codex**: the refresh lead drops from 5 days to 10 minutes — OpenAI rotates
+  the refresh token on every refresh and revokes the whole session on reuse, so
+  the old pre-rotation logged accounts out on auto-ping; the DB token snapshot
+  is re-read before refreshing so a stale copy cannot reuse a rotated token
+- **Claude**: preserve intentional prefill from non-messages[] source formats; keep a trailing user turn so cleanup never yields assistant prefill
+- **Claude**: cache a tool loop's final tool results with the 4th breakpoint
+- **Claude**: resolve Sonnet 5.x to adaptive thinking so no forged thinking placeholders are sent; inject unsigned thinking placeholders for opencode-go DeepSeek `/messages` (#4436)
+- **Thinking**: add `xhigh` to claude-adaptive thinking levels
+- **Claude**: keep a user turn whose only block is `container_upload`
+- **Capabilities**: publish real GPT-6/GPT-5.4+ context windows and combo token limits
+- **Responses**: wait for real usage before emitting `response.completed`, bounded by a 3s watchdog
+- **Codex**: stop refresh-token reuse that logs accounts out on auto-ping; preserve hosted web search on GPT-6 Sol/Luna; remove ghost models
+- **Grok CLI**: send Grok CLI 1.0.44 so proxy stops returning HTTP 426
+- **Proxy**: auto-fallback to insecure TLS on self-signed cert errors; hold strictProxy when no proxy resolves
+- **Translator**: strip `errorMessage` and other non-standard schema keywords from Gemini tool schemas; dedupe same-name tools for DeepSeek models (#3333)
+- **Codebuddy**: parse the 6004 rate limit error and extract `resetsAtMs`; forward `recurring` for codebuddy-intl quota packs (#4422)
+- **CLI Tools**: replace `sk_9router` placeholder with first active dashboard API key
+- **Dashboard**: exclude hidden providers from usage stats provider list
+- **Capabilities**: add deepseek-v4-1-flash vision alias; add zed to live catalog providers
+
+## Fork merge notes
+- Conflict resolutions kept both sides: `package.json` / `cli/package.json`
+  stay on the fork version (`0.5.95-1`) and keep the fork's `@raruu/9router`
+  name, and `CHANGELOG.md` keeps the fork section layout. The CLI gains
+  upstream's `connect` command and `confbox` dependency alongside the fork's
+  `BIN_NAME` / prerelease-aware `compareVersions` tweaks.
+- **Codex registry takes upstream wholesale** (per the fork's PR-adoption
+  policy for evidence-based model lists): `gpt-6.1-sol`, the `[1m]` extended
+  variants and `gpt-daybreak/reserve` land, and the dead `gpt-5.4` /
+  `gpt-5.4-mini` / `gpt-5.3-codex-spark` / `gpt-5.4-image` entries go. The
+  fork's exported `CODEX_CLI_VERSION` (tests derive from it) survives.
+- **`stream.js` carries both terminal paths**: the fork's
+  `responseModelOverride` rewrite and `data: [DONE]` sentinel for translated
+  OpenAI streams (#4375) inside upstream's deferred-completion watchdog
+  (`PENDING_COMPLETION_FLUSH_MS` / `flushPendingCompletion`).
+- **`chatCore` / `base` / `chat.js` merge feature-wise**: the fork's
+  per-provider `timeoutMs` override, `withRetrySignal` combo retries,
+  `responseModelOverride` and context marker sit beside upstream's
+  `providerOverrides` headers, `requestedModel` (Codex `enabledModels`
+  account filter) and the DeepSeek same-name `dedupeTools` call.
+- **`/v1/models` keeps the fork's combo resolver** — `comboCapabilities` /
+  `comboEffortTiers` / `comboCapabilityContext` (limit strategy, effort-tier
+  strategy, custom node prefixes, nested combos) supersede upstream's parallel
+  `aggregateComboCapabilities` / `comboSeatLimits` implementation, which is
+  dropped; upstream's `ALIAS_TO_PROVIDER_ID` map is taken for the static list.
+- **`ModelSelectModal` applies upstream's Zed fix through the fork's seam**:
+  `LIVE_CATALOG_PROVIDERS` is now `["cursor", "zed"]` in
+  `modelSelectCatalog.js`, while Cline/ClinePass stay configured-list-only
+  (the fork's live-catalog regression fix).
+- **Provider page keeps both cards**: the fork's Timeouts and Combo Retries
+  cards render alongside upstream's new per-provider overrides
+  (`CustomConfigCard`).
+- **`systemoneCore` URL precedence**: custom node kind endpoint
+  (`kindBaseUrls.systemone` or the node's baseUrl) → per-connection
+  `providerSpecificData.baseUrl` override → registry `systemoneConfig.baseUrl`.
+- **`capabilities.js` keeps the fork's catalog machinery**: the
+  `withCatalog` / `refine` seam and the hardcoded-catalog exports the sync
+  builder reads survive, with upstream's step-2 catalog-limit overlay and the
+  new Claude/GPT-6/Kiro entries landing inside it. `gpt-6.1-sol` was added to
+  the Codex provider table (see Fixes).
+- `tests/unit/provider-priority-insert-cost.test.js` is **kept**: upstream
+  deleted it for touching the real user DB, but the fork's per-file
+  `DATA_DIR` guard (`tests/setup/dataDirGuard.js`) makes it safe here.
+- Baselines re-verified after the merge: providers regenerated (89 providers
+  — Muse, TinyFish and v1m added), alias and OAuth URL snapshots unchanged.
+- `tests/unit/codex-refresh-token.test.js` expectations follow the new
+  10-minute Codex lead from the token-reuse fix.
+
 # v0.5.91-4 (2026-09-30)
 
 ## Fixes
@@ -80,40 +169,8 @@
 
 Merged upstream v0.5.91 into the fork. This section includes the full upstream
 release notes and the fork-side merge work.
-# v0.5.95 (2026-10-01)
 
 ## Features
-- **Providers**: add Meta Muse provider with OAuth login and model catalog; add v1m System One provider
-- **GLM**: add Z.ai OAuth login to GLM Coding (dual-auth)
-- **Codex**: add GPT-6.1 Sol; expose 1M context variants for GPT-6 and GPT-5.6; add gpt-daybreak/reserve models and route bare `gpt-5.x`/`gpt-6.x` slugs to codex
-- **Claude**: add Claude Sonnet 5.5 (plus `claude-opus-5.5` models in the Kiro registry)
-- **CLI**: add `connect` command for remote 9Router servers
-- **Providers**: per-provider custom header overrides from the registry
-- **Agnes**: seed the 2.5/3.0 model ids in the registry
-- **Usage**: sync `?provider=` URL param with provider filter for bookmarkable deep links (#4395)
-- **Dashboard**: drop NEW badges in sidebar, mark 9Remote as HOT
-
-## Fixes
-- **Claude**: preserve intentional prefill from non-messages[] source formats; keep a trailing user turn so cleanup never yields assistant prefill
-- **Claude**: cache a tool loop's final tool results with the 4th breakpoint
-- **Claude**: resolve Sonnet 5.x to adaptive thinking so no forged thinking placeholders are sent; inject unsigned thinking placeholders for opencode-go DeepSeek `/messages` (#4436)
-- **Thinking**: add `xhigh` to claude-adaptive thinking levels
-- **Claude**: keep a user turn whose only block is `container_upload`
-- **Capabilities**: publish real GPT-6/GPT-5.4+ context windows and combo token limits
-- **Responses**: wait for real usage before emitting `response.completed`, bounded by a 3s watchdog
-- **Codex**: stop refresh-token reuse that logs accounts out on auto-ping; preserve hosted web search on GPT-6 Sol/Luna; remove ghost models
-- **Grok CLI**: send Grok CLI 1.0.44 so proxy stops returning HTTP 426
-- **Proxy**: auto-fallback to insecure TLS on self-signed cert errors; hold strictProxy when no proxy resolves
-- **Translator**: strip `errorMessage` and other non-standard schema keywords from Gemini tool schemas; dedupe same-name tools for DeepSeek models (#3333)
-- **Codebuddy**: parse the 6004 rate limit error and extract `resetsAtMs`; forward `recurring` for codebuddy-intl quota packs (#4422)
-- **CLI Tools**: replace `sk_9router` placeholder with first active dashboard API key
-- **Dashboard**: exclude hidden providers from usage stats provider list
-- **Capabilities**: add deepseek-v4-1-flash vision alias; add zed to live catalog providers
-
-# v0.5.91 (2026-09-26)
-
-## Features
-- **Web Search & Fetch**: add TinyFish Search and Fetch with one API-key connection, normalized results, and official provider icon
 - **Providers**: add Token Harbor provider and four OpenAI-compatible aggregator providers (dahl, atria, agnes, bai)
 - **Claude**: forward `x-claude-code-session-id` on OAuth requests; merge client `anthropic-beta` flags and forward rate-limit headers; return thinking text to OpenAI-format clients
 - **Codex**: add GPT-6 Sol and Luna support
