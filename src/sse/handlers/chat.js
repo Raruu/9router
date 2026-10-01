@@ -170,7 +170,7 @@ export async function handleChat(request, clientRawRequest = null) {
     });
   }
 
-  return handleSingleModelChat(body, modelStr, clientRawRequest, request, apiKey);
+  return handleSingleModelChat(body, modelStr, clientRawRequest, request, apiKey, contextMarker ? `${modelStr.slice(modelStr.indexOf("/") + 1)}[${contextMarker}]` : null);
 }
 
 /**
@@ -179,6 +179,11 @@ export async function handleChat(request, clientRawRequest = null) {
  * @param {string|null} responseModelOverride - Combo name to echo back as the
  *   response `model` (opt-in via the comboNameInResponse setting). Set by the
  *   combo branches; an outer combo wins over a nested one via `??`.
+ * @param {string|null} requestedModel - The model string the client actually
+ *   asked for (with its context marker), used by account selection to filter
+ *   Codex connections by `enabledModels`. Combo members pass the member id.
+ * @param {boolean} comboRetryContext - True when called from the combo loop so
+ *   providerRetries apply to per-key retries.
  */
 
 // In-process retry signal for combo same-member retries. Attached as a plain
@@ -253,7 +258,7 @@ async function memberContextResolver(settings) {
     return null;
   }
 }
-async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, responseModelOverride = null, comboRetryContext = false) {
+async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, responseModelOverride = null, comboRetryContext = false, requestedModel = null) {
   const modelInfo = await getModelInfo(modelStr);
 
   // If provider is null, this might be a combo name - check and handle
@@ -327,7 +332,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   let lastHeaders = null;
 
   while (true) {
-    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model);
+    const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { requestedModel: requestedModel || model });
 
     // All accounts unavailable
     if (!credentials || credentials.allRateLimited) {
@@ -413,6 +418,8 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         pxpipeTransform: chatSettings.pxpipeEnabled ? await getPxpipeTransform() : null,
         onPxpipeEvent: appendPxpipeEvent,
         providerThinking,
+        // Per-provider user overrides (custom headers / connect timeout) from settings
+        providerOverrides: (chatSettings.providerOverrides || {})[provider] || null,
         // Per-provider timeout overrides (ms); empty object means global defaults.
         timeoutOverrides,
         // Detect source format by endpoint + body

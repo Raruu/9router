@@ -22,15 +22,17 @@ export async function handleSystemoneCore({
 }) {
   const { provider, model } = modelInfo;
   const cfg = PROVIDER_MEDIA[provider]?.systemoneConfig;
+  // URL precedence: a custom node's kind endpoint (kindBaseUrls.systemone or
+  // the node's main baseUrl) → an explicit per-connection baseUrl override →
+  // the registry's systemoneConfig.baseUrl.
   const compatUrl = isCompatNodeProvider(provider) ? buildCompatKindUrl(credentials, "systemone") : "";
-  if (!cfg?.baseUrl && !compatUrl) {
+  const targetUrl = compatUrl || credentials?.providerSpecificData?.baseUrl || cfg?.baseUrl;
+  if (!targetUrl) {
     return createErrorResult(
       HTTP_STATUS.BAD_REQUEST,
       `Provider '${provider}' does not support System One.`
     );
   }
-  const systemoneUrl = compatUrl || cfg.baseUrl;
-
   // Validate input at the trust boundary; question-level shape is upstream's job.
   if (body.state === undefined || body.state === null) {
     return createErrorResult(HTTP_STATUS.BAD_REQUEST, "Missing required field: state");
@@ -54,7 +56,7 @@ export async function handleSystemoneCore({
 
   let providerResponse;
   try {
-    providerResponse = await fetch(systemoneUrl, {
+    providerResponse = await fetch(targetUrl, {
       method: "POST",
       headers,
       body: JSON.stringify(requestBody),
