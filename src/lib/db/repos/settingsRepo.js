@@ -1,5 +1,6 @@
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
+import { DEFAULT_MODEL_CATALOG_PRIORITY, MODEL_CATALOG_PRIORITIES } from "../../modelCatalog/validation.js";
 
 const DEFAULT_MITM_ROUTER_BASE = "http://localhost:20128";
 const DEFAULT_HEADROOM_URL = process.env.HEADROOM_URL || "http://localhost:8787";
@@ -95,7 +96,7 @@ export const DEFAULT_SETTINGS = {
   pxpipeAutoInstall: true,
   pxpipeMinChars: 25000,
   pxpipeTimeoutMs: 15000,
-  modelCatalogPriority: "user-openrouter-hardcoded",
+  modelCatalogPriority: DEFAULT_MODEL_CATALOG_PRIORITY,
   // Per-provider user header overrides applied at dispatch: { [providerId]: { headers: {..} } }
   providerOverrides: {},
 };
@@ -147,8 +148,7 @@ export async function getSettings() {
 // Atomic read-merge-write inside transaction (prevents losing concurrent updates)
 export async function updateSettings(updates) {
   if (Object.prototype.hasOwnProperty.call(updates || {}, "modelCatalogPriority")) {
-    const allowed = ["user-openrouter-hardcoded", "user-hardcoded-openrouter"];
-    if (!allowed.includes(updates.modelCatalogPriority)) throw new Error("Invalid model catalog priority");
+    if (!MODEL_CATALOG_PRIORITIES.includes(updates.modelCatalogPriority)) throw new Error("Invalid model catalog priority");
   }
   const db = await getAdapter();
   let next;

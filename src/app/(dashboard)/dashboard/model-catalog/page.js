@@ -12,6 +12,7 @@ import { buildCatalogProviderLabel } from "@/shared/utils/catalogDisplay";
 const PRIORITY_OPTIONS = [
   { value: "user-openrouter-hardcoded", label: "user > openrouter > hardcoded" },
   { value: "user-hardcoded-openrouter", label: "user > hardcoded > openrouter" },
+  { value: "user-provider-exact-openrouter-hardcoded", label: "user > hardcoded (provider exact) > openrouter > hardcoded" },
 ];
 
 const CAPABILITY_OPTIONS = [

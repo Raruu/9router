@@ -1,6 +1,7 @@
 export const MODEL_CATALOG_PRIORITIES = [
   "user-openrouter-hardcoded",
   "user-hardcoded-openrouter",
+  "user-provider-exact-openrouter-hardcoded",
 ];
 
 export const DEFAULT_MODEL_CATALOG_PRIORITY = MODEL_CATALOG_PRIORITIES[0];

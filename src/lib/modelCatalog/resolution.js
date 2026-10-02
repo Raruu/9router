@@ -89,20 +89,37 @@ function compactSourceRules(rules) {
   }));
 }
 
+// "Provider exact" = a hardcoded row scoped to one provider (the catalog's
+// TypeBadge term). Used by the provider-exact-first priority, which re-applies
+// these rows over OpenRouter so a gateway's own numbers survive a fetched
+// catalog, while OpenRouter still refines the generic hardcoded layer.
+function isProviderScoped(rule) {
+  return rule.provider !== "*";
+}
+
 export function createCatalogResolver({ userRules = [], openRouterRules = [], hardcodedRules = [], customModels = [], priority = DEFAULT_MODEL_CATALOG_PRIORITY, normalizeProviderId = (provider) => provider } = {}) {
   const selectedPriority = normalizeCatalogPriority(priority);
   const normalizedUserRules = compactSourceRules(userRules);
   const normalizedOpenRouterRules = compactSourceRules(openRouterRules);
   const normalizedHardcodedRules = compactSourceRules(hardcodedRules);
+  const providerExactRules = normalizedHardcodedRules.filter(isProviderScoped);
   const sources = { user: normalizedUserRules, openrouter: normalizedOpenRouterRules, hardcoded: normalizedHardcodedRules };
 
   function resolveField(field, provider, model, hardcoded = {}) {
     const custom = customMetadata(customModels, sources, provider, model, field, normalizeProviderId);
     const user = resolveRules(normalizedUserRules, provider, model, field);
     const openrouter = custom.hasReference ? {} : resolveRules(normalizedOpenRouterRules, provider, model, field, true);
-    const lower = selectedPriority === "user-hardcoded-openrouter"
-      ? { ...openrouter, ...hardcoded }
-      : { ...hardcoded, ...openrouter };
+    let lower;
+    if (selectedPriority === "user-hardcoded-openrouter") {
+      lower = { ...openrouter, ...hardcoded };
+    } else if (selectedPriority === "user-provider-exact-openrouter-hardcoded") {
+      // Provider-exact rows win over OpenRouter; OpenRouter wins over the
+      // generic hardcoded layer (canonical exact, ordered globs, models.dev).
+      const providerExact = resolveRules(providerExactRules, provider, model, field);
+      lower = { ...hardcoded, ...openrouter, ...providerExact };
+    } else {
+      lower = { ...hardcoded, ...openrouter };
+    }
     return { ...(custom.hasReference ? {} : lower), ...custom.data, ...user };
   }
 
