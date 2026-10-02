@@ -9,7 +9,7 @@ function first(...values) {
   return values.find((value) => value !== undefined && value !== null && value !== "");
 }
 
-function rowCapabilities(row) {
+export function rowCapabilities(row) {
   const capabilities = row.capabilities ?? row.caps ?? row.data?.capabilities ?? row.data?.caps ?? {};
   const input = row.modalities?.input ?? capabilities.modalities?.input ?? [];
   const output = row.modalities?.output ?? capabilities.modalities?.output ?? [];
@@ -26,11 +26,11 @@ function rowCapabilities(row) {
   };
 }
 
-function rowPricing(row) {
+export function rowPricing(row) {
   return row.pricing ?? row.cost ?? row.data?.pricing ?? row.data?.cost ?? {};
 }
 
-function rowIdentity(row) {
+export function rowIdentity(row) {
   const pattern = first(row.pattern, row.model, row.modelId, row.id, "Unknown model");
   const provider = first(row.provider, row.providerId, row.provider_slug, "*");
   return { pattern: String(pattern), provider: String(provider) };
@@ -120,10 +120,15 @@ function TypeBadge({ row }) {
 
 TypeBadge.propTypes = { row: PropTypes.object.isRequired };
 
-function Actions({ row, onEdit, onDelete }) {
-  if (!onEdit && !onDelete) return null;
+function Actions({ row, onEdit, onDelete, onPreview }) {
+  if (!onEdit && !onDelete && !onPreview) return null;
   return (
     <div className="flex shrink-0 items-center justify-end gap-1">
+      {onPreview && (
+        <button type="button" onClick={() => onPreview(row)} className="rounded-lg p-1.5 text-text-muted hover:bg-surface-2 hover:text-primary" aria-label="Preview entry">
+          <span className="material-symbols-outlined text-[17px]">visibility</span>
+        </button>
+      )}
       {onEdit && (
         <button type="button" onClick={() => onEdit(row)} className="rounded-lg p-1.5 text-text-muted hover:bg-surface-2 hover:text-primary" aria-label="Edit entry">
           <span className="material-symbols-outlined text-[17px]">edit</span>
@@ -142,6 +147,7 @@ Actions.propTypes = {
   row: PropTypes.object.isRequired,
   onEdit: PropTypes.func,
   onDelete: PropTypes.func,
+  onPreview: PropTypes.func,
 };
 
 export function matchesCatalogRow(row, search, capability, providerLabel) {
@@ -155,7 +161,7 @@ export function matchesCatalogRow(row, search, capability, providerLabel) {
     .some((value) => String(value).toLowerCase().includes(query));
 }
 
-export default function CatalogTable({ rows, emptyText, onEdit, onDelete, providerLabel }) {
+export default function CatalogTable({ rows, emptyText, onEdit, onDelete, onPreview, providerLabel }) {
   const labelProvider = (provider) => (providerLabel ? providerLabel(provider) : provider);
   if (!rows.length) {
     return (
@@ -195,7 +201,7 @@ export default function CatalogTable({ rows, emptyText, onEdit, onDelete, provid
                   <td className="px-3 py-2.5 align-top"><CapabilityBadges row={row} /></td>
                   <td className="px-3 py-2.5 align-top"><Limits row={row} /></td>
                   <td className="px-3 py-2.5 align-top"><Pricing row={row} /></td>
-                  <td className="px-2 py-1.5 align-top"><Actions row={row} onEdit={onEdit} onDelete={onDelete} /></td>
+                  <td className="px-2 py-1.5 align-top"><Actions row={row} onEdit={onEdit} onDelete={onDelete} onPreview={onPreview} /></td>
                 </tr>
               );
             })}
@@ -218,7 +224,7 @@ export default function CatalogTable({ rows, emptyText, onEdit, onDelete, provid
                     {row.name || labelProvider(provider)}
                   </p>
                 </div>
-                <Actions row={row} onEdit={onEdit} onDelete={onDelete} />
+                <Actions row={row} onEdit={onEdit} onDelete={onDelete} onPreview={onPreview} />
               </div>
               <div className="mt-2"><CapabilityBadges row={row} /></div>
               <div className="mt-3 grid grid-cols-2 gap-3 border-t border-border-subtle pt-2">
@@ -238,4 +244,5 @@ CatalogTable.propTypes = {
   emptyText: PropTypes.string.isRequired,
   onEdit: PropTypes.func,
   onDelete: PropTypes.func,
+  onPreview: PropTypes.func,
 };

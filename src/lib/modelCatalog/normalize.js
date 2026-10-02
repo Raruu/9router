@@ -38,12 +38,40 @@ function normalizeCapabilities(model) {
     caps.tools = params.includes("tools") || params.includes("tool_choice");
     caps.reasoning = params.includes("reasoning") || params.includes("include_reasoning");
   }
+  // The reasoning object is the endpoint's effort contract: it is present for
+  // models that reason even when the parameter list omits the flag, it lists
+  // the effort vocabulary the model accepts, and `mandatory` pins thinking on.
+  if (model?.reasoning && typeof model.reasoning === "object") {
+    caps.reasoning = true;
+    const efforts = model.reasoning.supported_efforts;
+    if (Array.isArray(efforts)) {
+      const levels = sortEfforts(efforts.filter((level) => typeof level === "string" && level.trim()));
+      if (levels.length) caps.thinkingLevels = levels;
+    }
+    if (model.reasoning.mandatory === true) caps.thinkingCanDisable = false;
+  }
 
   const contextWindow = Number(model?.context_length);
   const maxOutput = Number(model?.top_provider?.max_completion_tokens);
   if (contextWindow > 0) caps.contextWindow = contextWindow;
   if (maxOutput > 0) caps.maxOutput = maxOutput;
   return sanitizeCapabilities(caps);
+}
+
+// Canonical picker order (mirrors the translator's EFFORT_LEVELS, plus "none"
+// for wires that can disable). OpenRouter returns efforts highest-first; the
+// dashboard renders this list in the order stored, so normalize it here.
+const EFFORT_ORDER = ["none", "minimal", "low", "medium", "high", "xhigh", "max"];
+
+function sortEfforts(efforts) {
+  return [...new Set(efforts)].sort((a, b) => {
+    const ia = EFFORT_ORDER.indexOf(a);
+    const ib = EFFORT_ORDER.indexOf(b);
+    if (ia === -1 && ib === -1) return a.localeCompare(b);
+    if (ia === -1) return 1;
+    if (ib === -1) return -1;
+    return ia - ib;
+  });
 }
 
 function normalizePricing(model) {
@@ -57,11 +85,23 @@ function normalizePricing(model) {
 
 function mergeCapabilities(entries) {
   const merged = {};
+  const levels = new Set();
+  let canDisable;
   for (const entry of entries) {
     for (const [key, value] of Object.entries(normalizeCapabilities(entry))) {
-      if (typeof value === "boolean") merged[key] = merged[key] === true || value;
+      if (key === "thinkingLevels") {
+        for (const level of value) levels.add(level);
+      } else if (key === "thinkingCanDisable") {
+        // False is sticky: one mandatory variant keeps thinking on everywhere.
+        if (value === false) canDisable = false;
+        else if (canDisable === undefined) canDisable = true;
+      } else if (typeof value === "boolean") {
+        merged[key] = merged[key] === true || value;
+      }
     }
   }
+  if (levels.size) merged.thinkingLevels = sortEfforts([...levels]);
+  if (canDisable === false) merged.thinkingCanDisable = false;
   return merged;
 }
 

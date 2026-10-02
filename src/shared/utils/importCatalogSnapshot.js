@@ -26,6 +26,9 @@ export function buildCatalogRuleBody({ provider, pattern, detail }) {
   if (Number.isFinite(caps.maxOutput) && caps.maxOutput > 0) {
     body.maxOutput = Math.floor(caps.maxOutput);
   }
+  if (Number.isFinite(caps.minOutput) && caps.minOutput > 0) {
+    body.minOutput = Math.floor(caps.minOutput);
+  }
   if (detail.pricing && typeof detail.pricing === "object") {
     const pricing = {};
     for (const key of SNAPSHOT_PRICING_KEYS) {

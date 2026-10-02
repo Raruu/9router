@@ -48,6 +48,7 @@ function emptyForm() {
     capabilities: Object.fromEntries(BOOLEAN_FIELDS.map(([key]) => [key, "inherit"])),
     contextWindow: "",
     maxOutput: "",
+    minOutput: "",
     pricing: Object.fromEntries(PRICE_FIELDS.map(([key]) => [key, ""])),
     thinkingFormatOverride: "",
     thinkingLevels: "",
@@ -73,6 +74,7 @@ function editForm(entry) {
     ])),
     contextWindow: entry.contextWindow ?? entry.data?.contextWindow ?? capabilities.contextWindow ?? "",
     maxOutput: entry.maxOutput ?? entry.data?.maxOutput ?? capabilities.maxOutput ?? "",
+    minOutput: entry.minOutput ?? entry.data?.minOutput ?? capabilities.minOutput ?? "",
     pricing: Object.fromEntries(PRICE_FIELDS.map(([key]) => [key, pricing[key] ?? ""])),
     thinkingFormatOverride: capabilities.thinkingFormatOverride ?? "",
     thinkingLevels: Array.isArray(capabilities.thinkingLevels) ? capabilities.thinkingLevels.join(", ") : "",
@@ -141,6 +143,7 @@ export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSa
       },
       contextWindow: toNumber(form.contextWindow),
       maxOutput: toNumber(form.maxOutput),
+      minOutput: toNumber(form.minOutput),
       pricing: Object.fromEntries(Object.entries(form.pricing).map(([key, value]) => [key, toNumber(value)])),
     });
   };
@@ -194,10 +197,14 @@ export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSa
         </fieldset>
 
         <fieldset>
-          <legend className="mb-3 text-sm font-semibold">Token limits</legend>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <legend className="mb-1 text-sm font-semibold">Token limits</legend>
+          <p className="mb-3 text-xs text-text-muted">
+            Min output raises a client&apos;s smaller output cap to at least this value, so a reasoning model cannot spend the whole budget thinking and return an empty turn. Applies only when the client sends a cap; leave on Inherit for no floor.
+          </p>
+          <div className="grid gap-4 sm:grid-cols-3">
             <Input type="number" min="1" step="1" label="Context window" value={form.contextWindow} onChange={(event) => update("contextWindow", event.target.value)} placeholder="Inherit" />
             <Input type="number" min="1" step="1" label="Max output" value={form.maxOutput} onChange={(event) => update("maxOutput", event.target.value)} placeholder="Inherit" />
+            <Input type="number" min="1" step="1" label="Min output" value={form.minOutput} onChange={(event) => update("minOutput", event.target.value)} placeholder="Inherit" />
           </div>
         </fieldset>
 

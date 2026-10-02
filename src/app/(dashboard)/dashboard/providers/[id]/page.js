@@ -20,6 +20,7 @@ import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
 import ConnectionRow from "./ConnectionRow";
+import { persistPriorityOrder } from "../utils";
 import AddApiKeyModal from "./AddApiKeyModal";
 import EditCompatibleNodeModal from "./EditCompatibleNodeModal";
 import AddCustomModelModal from "./AddCustomModelModal";
@@ -1483,30 +1484,81 @@ const ids = [];
     }
   };
 
-  const handleSwapPriority = async (index1, index2) => {
-    // Optimistic update state
-    const newConnections = [...connections];
-    [newConnections[index1], newConnections[index2]] = [newConnections[index2], newConnections[index1]];
-    setConnections(newConnections);
+  const moveQueueRef = useRef(Promise.resolve());
+  // Blocks new moves while a failure-path refetch restores a trustworthy base.
+  const connectionsResyncingRef = useRef(false);
+
+  // Mirror of connections for the move queue: queued moves run between
+  // renders, so each move must read the latest optimistic order rather than
+  // the snapshot captured when its click was queued.
+  const connectionsRef = useRef(connections);
+  useEffect(() => {
+    connectionsRef.current = connections;
+  }, [connections]);
+
+  // Persist a single move: optimistic re-order, then sequential PUTs that
+  // write every row's final 1-based position.
+  //
+  // Sequential ascending writes are load-bearing: the server renumbers the
+  // provider's rows 1..N after every PUT (connectionsRepo.reorderInTx) and
+  // breaks priority ties by most-recently-updated. Ascending order keeps each
+  // write's target position valid in every intermediate state, so the final
+  // order always matches the request for single moves with distinct stored
+  // priorities. Writing every row (not just moved ones) additionally covers
+  // stored duplicate priorities, where the server tiebreak would otherwise
+  // drift skipped rows. Parallel writes have neither guarantee.
+  const persistConnectionMove = async (fromIndex, toIndex) => {
+    const current = connectionsRef.current;
+    if (fromIndex < 0 || toIndex < 0 || toIndex >= current.length) return;
+    const movedRow = current[fromIndex];
+    const targetRow = current[toIndex];
+
+    // Optimistic update — the UI must reflect the requested final order.
+    const next = [...current];
+    next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, movedRow);
+    connectionsRef.current = next;
+    setConnections(next);
+
+    // Guard against a delete/refresh landing between queueing and running:
+    // both endpoint rows must still be the ones the click was made on.
+    if (next[toIndex] !== movedRow || current[toIndex] !== targetRow) {
+      await fetchConnections();
+      return;
+    }
 
     try {
-      await Promise.all([
-        fetch(`/api/providers/${newConnections[index1].id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ priority: index1 }),
-        }),
-        fetch(`/api/providers/${newConnections[index2].id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ priority: index2 }),
-        }),
-      ]);
+      // Shared write path (sequential ascending PUTs, one per row's final
+      // 1-based position, each response checked).
+      const finalized = await persistPriorityOrder(next);
+      // Persist the new priorities into local state as well — the next move
+      // diffs against them.
+      connectionsRef.current = finalized;
+      setConnections(finalized);
     } catch (error) {
       console.log("Error swapping priority:", error);
-      await fetchConnections();
+      // Roll back: block queued moves until the server refetch lands, so a
+      // queued click never reorders a phantom base, then re-sync.
+      connectionsResyncingRef.current = true;
+      try {
+        await fetchConnections();
+      } finally {
+        connectionsResyncingRef.current = false;
+      }
     }
   };
+
+  const moveConnection = (fromIndex, toIndex) => {
+    if (fromIndex === toIndex) return;
+    if (connectionsResyncingRef.current) return;
+    // Serialize moves — rapid clicks must not interleave PUT sequences,
+    // each queued move builds on the optimistic state of the previous one.
+    moveQueueRef.current = moveQueueRef.current
+      .then(() => persistConnectionMove(fromIndex, toIndex))
+      .catch((error) => console.log("Error swapping priority:", error));
+  };
+
+  const handleSwapPriority = moveConnection;
 
   const selectedConnections = connections.filter((conn) => selectedConnectionIds.includes(conn.id));
   const allSelected = connections.length > 0 && selectedConnectionIds.length === connections.length;
@@ -2417,7 +2469,7 @@ const ids = [];
       </Card>
 
       {/* Per-provider user overrides (custom headers / connect timeout) */}
-      <CustomConfigCard providerId={providerId} />
+      <CustomConfigCard providerId={providerId} alwaysVisible={isCompatible} />
 
       {/* Models */}
       <Card>

@@ -36,6 +36,59 @@ describe("model catalog precedence", () => {
     expect(resolver.getCapabilities("other", "foo-basic", { reasoning: false }).reasoning).toBe(false);
   });
 
+  it("supports provider-exact-before-OpenRouter priority", () => {
+    // "Provider exact" rows are hardcoded rules scoped to one provider. The
+    // new order re-applies them over OpenRouter, while OpenRouter still refines
+    // the generic hardcoded layer.
+    const providerRules = [
+      // Generic (provider "*"): canonical exact / ordered globs / models.dev.
+      { provider: "*", pattern: "*foo*", data: { capabilities: { tools: true, contextWindow: 111 }, pricing: { cached: 1 } } },
+      // Provider-exact row for acme.
+      { provider: "acme", pattern: "foo-special", data: { capabilities: { contextWindow: 222, vision: true }, pricing: { input: 5 } } },
+    ];
+    const openRouterRules = [
+      { provider: "*", pattern: "*foo*", data: { capabilities: { contextWindow: 999, vision: false, reasoning: true }, pricing: { input: 2, output: 4 } } },
+    ];
+
+    const resolver = createCatalogResolver({
+      openRouterRules,
+      hardcodedRules: providerRules,
+      priority: "user-provider-exact-openrouter-hardcoded",
+    });
+    // The third arg mirrors runtime.js: the full hand-written chain for this
+    // provider, which already carries the provider-exact values.
+    const caps = resolver.getCapabilities("acme", "foo-special", { tools: true, contextWindow: 222, vision: true });
+    // Provider exact wins over OpenRouter...
+    expect(caps.contextWindow).toBe(222);
+    expect(caps.vision).toBe(true);
+    // ...OpenRouter wins over the generic hardcoded layer...
+    expect(caps.reasoning).toBe(true);
+    // ...and fields only the generic layer declares survive.
+    expect(caps.tools).toBe(true);
+
+    const pricing = resolver.getPricing("acme", "foo-special", { cached: 1, input: 5 });
+    expect(pricing.input).toBe(5); // provider exact
+    expect(pricing.output).toBe(4); // openrouter
+    expect(pricing.cached).toBe(1); // generic hardcoded
+
+    // The default priority keeps OpenRouter above provider exact.
+    const defaultResolver = createCatalogResolver({ openRouterRules, hardcodedRules: providerRules });
+    const defaultCaps = defaultResolver.getCapabilities("acme", "foo-special", { tools: true, contextWindow: 222, vision: true });
+    expect(defaultCaps.contextWindow).toBe(999);
+    expect(defaultCaps.vision).toBe(false);
+  });
+
+  it("scopes provider-exact rows to their provider only", () => {
+    const resolver = createCatalogResolver({
+      openRouterRules: [{ provider: "*", pattern: "*foo*", data: { capabilities: { contextWindow: 999 } } }],
+      hardcodedRules: [{ provider: "acme", pattern: "*foo*", data: { capabilities: { contextWindow: 222 } } }],
+      priority: "user-provider-exact-openrouter-hardcoded",
+    });
+    // other provider: the acme-scoped row must not apply.
+    expect(resolver.getCapabilities("other", "foo-basic", { contextWindow: 111 }).contextWindow).toBe(999);
+    expect(resolver.getCapabilities("acme", "foo-basic", { contextWindow: 222 }).contextWindow).toBe(222);
+  });
+
   it("drives the public synchronous capability and pricing seams", () => {
     const resolver = createCatalogResolver(rules);
     setCatalogSource(resolver);

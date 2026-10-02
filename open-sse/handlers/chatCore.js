@@ -3,6 +3,7 @@ import { translateRequest } from "../translator/index.js";
 import { applyThinking, extractThinking, stripThinkingSuffix } from "../translator/concerns/thinkingUnified.js";
 import { FORMATS } from "../translator/formats.js";
 import { normalizeClaudePassthrough, anchorClaudeCache } from "../translator/formats/claude.js";
+import { applyMinOutputFloor, resolveMinOutputFloor } from "../translator/formats/minTokens.js";
 import { createStreamController } from "../utils/streamHandler.js";
 import { providerDisplayLabel } from "../utils/providerLabel.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
@@ -317,6 +318,16 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   }
 
   if (xf.length && log?.line) log.line(reqTag, "⚙", xf.join(" · "));
+
+  // Minimum output floor (Model Catalog → Min output): raise a too-small
+  // client-sent cap so reasoning-heavy models don't return empty turns. Only
+  // explicit caps are raised — an absent cap keeps the upstream default, which
+  // may be larger than the floor. Runs on the final body, after every saver.
+  const minOutputFloor = resolveMinOutputFloor(provider, model);
+  if (minOutputFloor !== null) {
+    const raised = applyMinOutputFloor(translatedBody, finalFormat, minOutputFloor);
+    if (raised > 0) log?.debug?.("MINOUT", `${displayProvider.toUpperCase()} | ${model} | raised ${raised} cap field(s) to ${minOutputFloor}`);
+  }
 
   // Pin cache breakpoints to the final body — every saver above can reshape
   // system/tools/messages, and a stale anchor costs a full prefix rewrite.

@@ -1,13 +1,14 @@
 export const MODEL_CATALOG_PRIORITIES = [
   "user-openrouter-hardcoded",
   "user-hardcoded-openrouter",
+  "user-provider-exact-openrouter-hardcoded",
 ];
 
 export const DEFAULT_MODEL_CATALOG_PRIORITY = MODEL_CATALOG_PRIORITIES[0];
 
 export const CAPABILITY_KEYS = [
   "vision", "pdf", "audioInput", "videoInput", "imageOutput", "audioOutput",
-  "tools", "reasoning", "thinkingCanDisable", "thinkingEnforce", "contextWindow", "maxOutput",
+  "tools", "reasoning", "thinkingCanDisable", "thinkingEnforce", "contextWindow", "maxOutput", "minOutput",
 ];
 
 // Thinking wire formats a user rule may force. Mirrors the formats understood
@@ -45,7 +46,7 @@ export function sanitizeCapabilities(input) {
   const out = {};
   for (const key of CAPABILITY_KEYS) {
     const value = input[key];
-    if (key === "contextWindow" || key === "maxOutput") {
+    if (key === "contextWindow" || key === "maxOutput" || key === "minOutput") {
       if (Number.isFinite(value) && value >= 0) out[key] = Math.floor(value);
     } else if (typeof value === "boolean") {
       out[key] = value;

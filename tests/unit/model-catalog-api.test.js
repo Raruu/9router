@@ -51,6 +51,26 @@ describe("model catalog API backend", () => {
     expect(catalog.hardcoded.some((row) => row.type === "Pattern")).toBe(true);
   });
 
+  it("round-trips the minOutput floor and rejects negative values", async () => {
+    const backend = await import("../../src/app/api/models/catalog/_backend.js");
+    const entry = backend.validateUserEntry({
+      provider: "acme",
+      pattern: "spark-*",
+      matchType: "glob",
+      minOutput: 8000,
+    });
+    await backend.saveUserEntry(entry);
+    const catalog = await backend.getCatalog();
+    expect(catalog.userDefined[0].capabilities.minOutput).toBe(8000);
+
+    expect(() => backend.validateUserEntry({
+      provider: "acme",
+      pattern: "spark-*",
+      matchType: "glob",
+      minOutput: -1,
+    })).toThrow(/minOutput/i);
+  });
+
   it("round-trips thinking overrides and rejects unknown formats", async () => {
     const backend = await import("../../src/app/api/models/catalog/_backend.js");
     const entry = backend.validateUserEntry({

@@ -9,7 +9,7 @@ import { useNotificationStore } from "@/store/notificationStore";
 const BLOCKED_HEADERS = ["host", "content-length", "content-type", "connection", "transfer-encoding", "authorization", "cookie"];
 const HEADER_NAME_RE = /^[A-Za-z0-9-]+$/;
 
-export default function CustomConfigCard({ providerId }) {
+export default function CustomConfigCard({ providerId, alwaysVisible = false }) {
   const notify = useNotificationStore();
   const [expanded, setExpanded] = useState(false);
   const [rows, setRows] = useState([{ name: "", value: "" }]);
@@ -83,8 +83,11 @@ export default function CustomConfigCard({ providerId }) {
     setRows(Object.entries(builtin).map(([name, value]) => ({ name, value })));
   };
 
-  // Only render when there is something to customize: registry headers or existing overrides
-  if (Object.keys(builtin).length === 0 && !hasOverride) return null;
+  // Custom provider nodes (openai-/anthropic-compatible) have no registry
+  // headers, so without `alwaysVisible` the card would never render on their
+  // pages and their overrides would be unreachable. Registry providers keep the
+  // old behavior: hidden until there is something to customize.
+  if (!alwaysVisible && Object.keys(builtin).length === 0 && !hasOverride) return null;
 
   return (
     <Card padding="xs">
@@ -107,6 +110,11 @@ export default function CustomConfigCard({ providerId }) {
 
       {expanded && (
         <div className="mt-3 border-t border-border pt-3">
+          {Object.keys(builtin).length === 0 && (
+            <p className="mb-2 text-xs text-text-muted">
+              Sent on every request to this provider. Nothing is added by default.
+            </p>
+          )}
           <div className="flex flex-col gap-2">
             {rows.map((row, i) => {
               const overridden = row.name.trim() in builtin && row.value !== builtin[row.name.trim()];
@@ -178,4 +186,6 @@ export default function CustomConfigCard({ providerId }) {
 
 CustomConfigCard.propTypes = {
   providerId: PropTypes.string.isRequired,
+  // Render even when the provider declares no built-in headers (custom nodes).
+  alwaysVisible: PropTypes.bool,
 };

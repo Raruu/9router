@@ -16,6 +16,7 @@ const detail = {
     reasoning: false,
     contextWindow: 200000,
     maxOutput: 32000,
+    minOutput: 8000,
     extraUnknown: true,
   },
   pricing: { input: 3, output: 15, bogus: 1, negative: -2 },
@@ -30,6 +31,7 @@ describe("importCatalogSnapshot", () => {
       capabilities: { vision: true, pdf: false, tools: true, reasoning: false },
       contextWindow: 200000,
       maxOutput: 32000,
+      minOutput: 8000,
       pricing: { input: 3, output: 15 },
     });
   });

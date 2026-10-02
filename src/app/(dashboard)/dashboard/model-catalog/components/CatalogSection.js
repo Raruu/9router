@@ -8,7 +8,7 @@ import CatalogTable, { matchesCatalogRow } from "./CatalogTable";
 
 const PAGE_SIZE_OPTIONS = [5, 10, 20];
 
-export default function CatalogSection({ title, description, icon, actions, rows, emptyText, onEdit, onDelete, providerLabel }) {
+export default function CatalogSection({ title, description, icon, actions, rows, emptyText, onEdit, onDelete, onPreview, providerLabel }) {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(5);
@@ -46,7 +46,7 @@ export default function CatalogSection({ title, description, icon, actions, rows
             />
           </label>
         </div>
-        <CatalogTable rows={pageRows} emptyText={search ? `No ${title.toLowerCase()} entries match the search.` : emptyText} onEdit={onEdit} onDelete={onDelete} providerLabel={providerLabel} />
+        <CatalogTable rows={pageRows} emptyText={search ? `No ${title.toLowerCase()} entries match the search.` : emptyText} onEdit={onEdit} onDelete={onDelete} onPreview={onPreview} providerLabel={providerLabel} />
         <Pagination currentPage={currentPage} pageSize={pageSize} totalItems={filteredRows.length} onPageChange={setPage} onPageSizeChange={(size) => { setPageSize(size); setPage(1); }} pageSizeOptions={PAGE_SIZE_OPTIONS} className="pb-0" />
       </Card>
     </section>
@@ -62,4 +62,5 @@ CatalogSection.propTypes = {
   emptyText: PropTypes.string.isRequired,
   onEdit: PropTypes.func,
   onDelete: PropTypes.func,
+  onPreview: PropTypes.func,
 };

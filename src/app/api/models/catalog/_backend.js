@@ -15,15 +15,13 @@ import { ModelCatalogConflictError, ModelCatalogNotFoundError } from "@/lib/mode
 import { getHardcodedCatalogEntries } from "@/lib/modelCatalog/catalog.js";
 import { normalizeOpenRouterModels } from "@/lib/modelCatalog/normalize.js";
 import {
+  MODEL_CATALOG_PRIORITIES,
   THINKING_FORMATS,
   sanitizeCatalogData,
   sanitizeThinkingLevels,
 } from "@/lib/modelCatalog/validation.js";
 
-export const PRIORITIES = [
-  "user-openrouter-hardcoded",
-  "user-hardcoded-openrouter",
-];
+export const PRIORITIES = MODEL_CATALOG_PRIORITIES;
 
 const BOOLEAN_CAPABILITIES = [
   "vision",
@@ -157,6 +155,9 @@ export function validateUserEntry(value) {
         ...capabilities,
         ...(optionalNumber(value.contextWindow, "contextWindow") !== null ? { contextWindow: Number(value.contextWindow) } : {}),
         ...(optionalNumber(value.maxOutput, "maxOutput") !== null ? { maxOutput: Number(value.maxOutput) } : {}),
+        // Floor applied at dispatch: a client-sent output cap below this is
+        // raised to it (reasoning-heavy models otherwise return empty turns).
+        ...(optionalNumber(value.minOutput, "minOutput") !== null ? { minOutput: Number(value.minOutput) } : {}),
       },
       pricing,
     }),

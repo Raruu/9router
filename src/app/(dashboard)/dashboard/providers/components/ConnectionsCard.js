@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { getStatusVariant as getConnectionStatusVariant } from "@/shared/utils/connectionStatus";
 import PropTypes from "prop-types";
 import { Card, Badge, Button, Modal, Select, Toggle, EditConnectionModal, ConfirmModal } from "@/shared/components";
+import { persistPriorityOrder } from "../utils";
 
 // ── CooldownTimer ──────────────────────────────────────────────
 function CooldownTimer({ until }) {
@@ -306,6 +307,18 @@ export default function ConnectionsCard({ providerId, isOAuth }) {
   const [providerStickyLimit, setProviderStickyLimit] = useState("1");
   const [confirmState, setConfirmState] = useState(null);
 
+  // Reorder bookkeeping (mirrors the provider detail page):
+  // - connectionsRef: latest optimistic order for queued moves
+  // - moveQueueRef: serializes rapid clicks so PUT sequences never interleave
+  // - resyncingRef: blocks moves while a failure-path refetch restores a
+  //   trustworthy base
+  const connectionsRef = useRef(connections);
+  const moveQueueRef = useRef(Promise.resolve());
+  const resyncingRef = useRef(false);
+  useEffect(() => {
+    connectionsRef.current = connections;
+  }, [connections]);
+
   const fetch_ = useCallback(async () => {
     try {
       const [connRes, proxyRes, settingsRes] = await Promise.all([
@@ -343,15 +356,55 @@ export default function ConnectionsCard({ providerId, isOAuth }) {
   };
 
   const handleSwapPriority = async (i1, i2) => {
-    const next = [...connections];
-    [next[i1], next[i2]] = [next[i2], next[i1]];
+    // This card lists every connection of one provider, so a move writes the
+    // whole list's final 1-based order through the same shared path as the
+    // provider detail page: sequential ascending PUTs, every row, each
+    // response checked. The previous version wrote raw 0-based indices for
+    // only the swapped pair in parallel, which the server's renumber +
+    // updatedAt tiebreak resolved into a different order after refresh (#329).
+    const current = connectionsRef.current;
+    if (i1 < 0 || i2 < 0 || i1 >= current.length || i2 >= current.length) return;
+    const movedRow = current[i1];
+    const targetRow = current[i2];
+
+    // Optimistic update — the UI must reflect the requested final order.
+    const next = [...current];
+    next.splice(i1, 1);
+    next.splice(i2, 0, movedRow);
+    connectionsRef.current = next;
     setConnections(next);
+
+    // Guard against a delete/refresh landing between queueing and running.
+    if (next[i2] !== movedRow || current[i2] !== targetRow) {
+      await fetch_();
+      return;
+    }
+
     try {
-      await Promise.all([
-        fetch(`/api/providers/${next[i1].id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ priority: i1 }) }),
-        fetch(`/api/providers/${next[i2].id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ priority: i2 }) }),
-      ]);
-    } catch { await fetch_(); }
+      const finalized = await persistPriorityOrder(next);
+      connectionsRef.current = finalized;
+      setConnections(finalized);
+    } catch (error) {
+      console.log("Error swapping priority:", error);
+      // Roll back: block queued moves until the server refetch lands, then
+      // re-sync so the UI never keeps an order that failed to save.
+      resyncingRef.current = true;
+      try {
+        await fetch_();
+      } finally {
+        resyncingRef.current = false;
+      }
+    }
+  };
+
+  // Serialize rapid clicks and mirror the latest optimistic order for queued
+  // moves (they run between renders, so a render snapshot would be stale).
+  const moveConnection = (i1, i2) => {
+    if (i1 === i2) return;
+    if (resyncingRef.current) return;
+    moveQueueRef.current = moveQueueRef.current
+      .then(() => handleSwapPriority(i1, i2))
+      .catch((error) => console.log("Error swapping priority:", error));
   };
 
   const handleDelete = async (id) => {
@@ -443,8 +496,8 @@ export default function ConnectionsCard({ providerId, isOAuth }) {
                   isOAuth={isOAuth}
                   isFirst={idx === 0}
                   isLast={idx === connections.length - 1}
-                  onMoveUp={() => handleSwapPriority(idx, idx - 1)}
-                  onMoveDown={() => handleSwapPriority(idx, idx + 1)}
+                  onMoveUp={() => moveConnection(idx, idx - 1)}
+                  onMoveDown={() => moveConnection(idx, idx + 1)}
                   onToggleActive={(isActive) => handleToggleActive(conn.id, isActive)}
                   onUpdateProxy={(poolId) => handleUpdateProxy(conn.id, poolId)}
                   onEdit={() => { setSelectedConnection(conn); setShowEditModal(true); }}
