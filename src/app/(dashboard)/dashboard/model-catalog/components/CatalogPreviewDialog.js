@@ -80,7 +80,7 @@ export default function CatalogPreviewDialog({ isOpen, entry, onClose }) {
 
         {hasCapabilityData ? (
           <>
-            {(Number.isFinite(capabilities.contextWindow) || Number.isFinite(capabilities.maxOutput)) && (
+            {(Number.isFinite(capabilities.contextWindow) || Number.isFinite(capabilities.maxOutput) || Number.isFinite(capabilities.minOutput)) && (
               <Section title="Limits">
                 <LimitsRow capabilities={capabilities} />
               </Section>

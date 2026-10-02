@@ -91,8 +91,9 @@ Section.propTypes = {
 };
 
 export function LimitsRow({ capabilities }) {
+  const hasMin = Number.isFinite(capabilities.minOutput) && capabilities.minOutput > 0;
   return (
-    <div className="grid grid-cols-2 gap-2">
+    <div className={`grid gap-2 ${hasMin ? "grid-cols-3" : "grid-cols-2"}`}>
       <div className="rounded-lg border border-border bg-bg-alt/40 px-3 py-2">
         <p className="text-[10px] uppercase tracking-wide text-text-muted">Context window</p>
         <p className="font-mono text-lg font-medium" title={`${capabilities.contextWindow} tokens`}>
@@ -105,6 +106,14 @@ export function LimitsRow({ capabilities }) {
           {fmtTokens(capabilities.maxOutput)}
         </p>
       </div>
+      {hasMin && (
+        <div className="rounded-lg border border-border bg-bg-alt/40 px-3 py-2">
+          <p className="text-[10px] uppercase tracking-wide text-text-muted">Min output</p>
+          <p className="font-mono text-lg font-medium" title={`${capabilities.minOutput} tokens — a smaller client-sent cap is raised to this`}>
+            {fmtTokens(capabilities.minOutput)}
+          </p>
+        </div>
+      )}
     </div>
   );
 }

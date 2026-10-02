@@ -155,6 +155,9 @@ export function validateUserEntry(value) {
         ...capabilities,
         ...(optionalNumber(value.contextWindow, "contextWindow") !== null ? { contextWindow: Number(value.contextWindow) } : {}),
         ...(optionalNumber(value.maxOutput, "maxOutput") !== null ? { maxOutput: Number(value.maxOutput) } : {}),
+        // Floor applied at dispatch: a client-sent output cap below this is
+        // raised to it (reasoning-heavy models otherwise return empty turns).
+        ...(optionalNumber(value.minOutput, "minOutput") !== null ? { minOutput: Number(value.minOutput) } : {}),
       },
       pricing,
     }),
