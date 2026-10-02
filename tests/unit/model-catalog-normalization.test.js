@@ -38,4 +38,56 @@ describe("OpenRouter model normalization", () => {
     expect(row.data.pricing).toBeUndefined();
     expect(row.data.provenance.variantOnly).toBe(true);
   });
+
+  it("maps the reasoning contract into thinking levels and can-disable", () => {
+    const [row] = normalizeOpenRouterModels({ data: [{
+      id: "openai/gpt-6.1-sol",
+      supported_parameters: ["reasoning", "tools"],
+      reasoning: {
+        mandatory: true,
+        default_enabled: true,
+        supported_efforts: ["max", "xhigh", "high", "medium", "low"],
+        default_effort: "medium",
+      },
+    }] });
+    expect(row.data.capabilities).toMatchObject({
+      reasoning: true,
+      thinkingCanDisable: false,
+      // Stored in picker order, not OpenRouter's highest-first order.
+      thinkingLevels: ["low", "medium", "high", "xhigh", "max"],
+    });
+  });
+
+  it("treats a reasoning object as reasoning even without the parameter flag", () => {
+    const [row] = normalizeOpenRouterModels({ data: [{
+      id: "acme/quiet-thinker",
+      supported_parameters: [],
+      reasoning: { mandatory: false, supported_efforts: ["high", "medium", "low", "minimal", "none"] },
+    }] });
+    expect(row.data.capabilities).toMatchObject({
+      reasoning: true,
+      thinkingLevels: ["none", "minimal", "low", "medium", "high"],
+    });
+    // Non-mandatory models keep the default (thinking can be disabled).
+    expect(row.data.capabilities).not.toHaveProperty("thinkingCanDisable");
+  });
+
+  it("unions variant efforts and keeps can-disable sticky across variants", () => {
+    // Variant-only group: no unsuffixed base, so capabilities merge. One
+    // variant is mandatory, the other accepts a different effort subset.
+    const [row] = normalizeOpenRouterModels({ data: [
+      {
+        id: "acme/thinker:free",
+        supported_parameters: ["reasoning"],
+        reasoning: { mandatory: true, supported_efforts: ["high", "low"] },
+      },
+      {
+        id: "acme/thinker:batch",
+        supported_parameters: ["reasoning"],
+        reasoning: { mandatory: false, supported_efforts: ["max", "low"] },
+      },
+    ] });
+    expect(row.data.capabilities.thinkingLevels).toEqual(["low", "high", "max"]);
+    expect(row.data.capabilities.thinkingCanDisable).toBe(false);
+  });
 });
