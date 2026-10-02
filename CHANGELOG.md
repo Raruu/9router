@@ -1,3 +1,51 @@
+# v0.5.95-2 (2026-10-02)
+
+## Features
+- **Providers**: custom (compatible) nodes expose the Custom Headers card —
+  per-provider header overrides were already applied at dispatch, but the card
+  hid itself when the provider had no registry headers, so custom endpoints
+  could never reach the setting; the card now renders with an empty state and
+  saves under the node's id, which is the key the dispatcher looks up
+- **Model Catalog**: the OpenRouter fetch maps the reasoning contract —
+  `supported_efforts` becomes the picker's level list (stored in picker order)
+  and `mandatory: true` pins thinking on, so a level the model accepts is
+  always offered and a disable option its wire rejects is never shown; a
+  `reasoning` object alone also marks the model as reasoning-capable
+- **Model Catalog**: new resolution order `user > hardcoded (provider exact) >
+  openrouter > hardcoded` — the provider-scoped hardcoded rows are re-applied
+  over the fetched OpenRouter catalog, so a gateway's own numbers survive a
+  fetch while OpenRouter still refines the generic layer
+- **Model Catalog**: entry preview dialog (Catalog Entry) — every row in all
+  three sources opens a read-only view styled after Model Info with the
+  applied pattern, limits, capabilities (including thinking levels), pricing
+  source, OpenRouter provenance and the raw JSON
+- **Model Catalog**: minimum output floor — a new `minOutput` capability raises
+  a client's too-small output cap just before dispatch, so a reasoning-heavy
+  model cannot spend the whole budget thinking and return an empty turn. Only
+  explicitly sent caps are raised (an absent cap keeps the upstream default),
+  the floor is clamped to the model's own `maxOutput`, and it applies to any
+  provider or pattern — including custom nodes — instead of being hardcoded
+  per executor (generalizes #4387, whose executor-local clamp only covered
+  OpenCode Free muse-spark)
+
+## Fixes
+- **Login**: the default-password hint follows the password source that login
+  actually accepts — a saved password or `INITIAL_PASSWORD`; an unavailable
+  status now hides the hint instead of claiming a default password. Based on
+  #4454 by @will-bogusz
+- **CLI**: `--foreground` / `--supervised` and `TRAY_MODE=0` stop supervised
+  environments (systemd, Docker CMD, PM2) from silently falling into tray mode
+  after `--skip-update`, which printed a background message and exited, causing
+  infinite restart loops. Based on #4451 by @ege-arhan
+- **Providers**: moving an account up/down persisted the wrong order — the
+  swap wrote raw 0-based indices for only the moved pair, in parallel, and the
+  server's per-PUT renumber plus the updatedAt tiebreak resolved the collision
+  nondeterministically, so a move could land elsewhere (or at the top) after a
+  refresh. The write now covers every row's final 1-based position in
+  sequential ascending order, checks each response and refetches on failure;
+  rapid clicks are queued. Based on #4280 by @StevanusPangau, extended to the
+  media-providers Connections card, which carried the same bug
+
 # v0.5.95-1 (2026-10-01)
 
 Merged upstream v0.5.95 into the fork. This section includes the full upstream
