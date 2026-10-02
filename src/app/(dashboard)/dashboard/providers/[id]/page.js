@@ -2417,7 +2417,7 @@ const ids = [];
       </Card>
 
       {/* Per-provider user overrides (custom headers / connect timeout) */}
-      <CustomConfigCard providerId={providerId} />
+      <CustomConfigCard providerId={providerId} alwaysVisible={isCompatible} />
 
       {/* Models */}
       <Card>
