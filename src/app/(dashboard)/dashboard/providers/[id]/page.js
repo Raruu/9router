@@ -20,7 +20,7 @@ import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
 import ConnectionRow from "./ConnectionRow";
-import { buildPriorityUpdates } from "../utils";
+import { persistPriorityOrder } from "../utils";
 import AddApiKeyModal from "./AddApiKeyModal";
 import EditCompatibleNodeModal from "./EditCompatibleNodeModal";
 import AddCustomModelModal from "./AddCustomModelModal";
@@ -1527,23 +1527,12 @@ const ids = [];
       return;
     }
 
-    const updates = buildPriorityUpdates(next);
-
     try {
-      for (const update of updates) {
-        const res = await fetch(`/api/providers/${update.id}`, {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ priority: update.priority }),
-        });
-        if (!res.ok) throw new Error(`Update failed with status ${res.status}`);
-      }
+      // Shared write path (sequential ascending PUTs, one per row's final
+      // 1-based position, each response checked).
+      const finalized = await persistPriorityOrder(next);
       // Persist the new priorities into local state as well — the next move
       // diffs against them.
-      const byId = new Map(updates.map((update) => [update.id, update.priority]));
-      const finalized = next.map(
-        (row) => (byId.has(row.id) ? { ...row, priority: byId.get(row.id) } : row)
-      );
       connectionsRef.current = finalized;
       setConnections(finalized);
     } catch (error) {

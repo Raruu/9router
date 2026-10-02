@@ -41,3 +41,26 @@ export function buildPriorityUpdates(next) {
     .map((row, i) => ({ id: row.id, priority: i + 1 }))
     .filter((row) => Boolean(row.id));
 }
+
+// Persist the re-ordered list: sequential ascending PUTs, one per row's final
+// 1-based position, each response checked. Returns `next` with the persisted
+// priorities stamped in (so the caller's next diff sees a truthful base), or
+// throws on the first failed write — the caller refetches to roll back.
+//
+// Shared by the provider detail page and the ConnectionsCard so both reorder
+// surfaces write identically; the card previously wrote raw 0-based indices
+// for only the swapped pair in parallel, which the server's renumber +
+// updatedAt tiebreak resolved into a different order (#329).
+export async function persistPriorityOrder(next, fetchImpl = fetch) {
+  const updates = buildPriorityUpdates(next);
+  for (const update of updates) {
+    const res = await fetchImpl(`/api/providers/${update.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ priority: update.priority }),
+    });
+    if (!res.ok) throw new Error(`Update failed with status ${res.status}`);
+  }
+  const byId = new Map(updates.map((update) => [update.id, update.priority]));
+  return next.map((row) => (byId.has(row.id) ? { ...row, priority: byId.get(row.id) } : row));
+}

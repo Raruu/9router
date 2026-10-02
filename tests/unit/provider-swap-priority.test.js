@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { buildPriorityUpdates } from "../../src/app/(dashboard)/dashboard/providers/utils.js";
+import { describe, expect, it, vi } from "vitest";
+import { buildPriorityUpdates, persistPriorityOrder } from "../../src/app/(dashboard)/dashboard/providers/utils.js";
 
 // Simulates the server-side invariant enforced by connectionsRepo:
 // rows are ordered by priority ASC, ties broken by most-recently-updated,
@@ -167,5 +167,78 @@ describe("buildPriorityUpdates", () => {
     [next[1], next[2]] = [next[2], next[1]];
     const rows = applySequential(current, buildPriorityUpdates(next));
     expect(orderedIds(rows)).toEqual(["c0", "c2", "c1", "c3", "c4"]);
+  });
+});
+
+// persistPriorityOrder is the shared write path used by BOTH the provider
+// detail page and the ConnectionsCard (media-providers pages). The card
+// previously had its own broken swap (0-based indices, parallel, unchecked);
+// these tests pin the shared helper's contract so both surfaces stay fixed.
+describe("persistPriorityOrder", () => {
+  it("writes every row sequentially in ascending 1-based order and stamps the result", async () => {
+    const calls = [];
+    const fetchImpl = vi.fn(async (url, init) => {
+      calls.push({ url, body: JSON.parse(init.body) });
+      return { ok: true, status: 200 };
+    });
+    const next = makeConnections([1, 2, 3, 4, 5]);
+    [next[1], next[2]] = [next[2], next[1]];
+
+    const finalized = await persistPriorityOrder(next, fetchImpl);
+
+    expect(calls.map((c) => c.url)).toEqual([
+      "/api/providers/c0", "/api/providers/c2", "/api/providers/c1", "/api/providers/c3", "/api/providers/c4",
+    ]);
+    expect(calls.map((c) => c.body.priority)).toEqual([1, 2, 3, 4, 5]);
+    // Priorities are stamped into the returned rows for the next diff.
+    expect(finalized.map((r) => r.priority)).toEqual([1, 2, 3, 4, 5]);
+    expect(finalized.map((r) => r.id)).toEqual(["c0", "c2", "c1", "c3", "c4"]);
+  });
+
+  it("sends no writes when the order is already final", async () => {
+    const fetchImpl = vi.fn();
+    const rows = await persistPriorityOrder(makeConnections([1, 2, 3]), fetchImpl);
+    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(rows.map((r) => r.priority)).toEqual([1, 2, 3]);
+  });
+
+  it("stops at the first failed write and throws, so the caller can refetch", async () => {
+    const fetchImpl = vi.fn(async () => ({ ok: false, status: 500 }));
+    const next = makeConnections([1, 2, 3]);
+    [next[0], next[1]] = [next[1], next[0]];
+
+    await expect(persistPriorityOrder(next, fetchImpl)).rejects.toThrow(/status 500/);
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+  });
+
+  it("converges against the server model for every single move (card path)", async () => {
+    // Same convergence property as the UI-level tests, but exercised through
+    // the shared helper with a fetch impl that applies each PUT to a server
+    // model (flush after every write).
+    for (let n = 2; n <= 6; n += 1) {
+      const base = makeConnections(Array.from({ length: n }, (_, k) => k + 1));
+      for (let from = 0; from < n; from += 1) {
+        for (let to = 0; to < n; to += 1) {
+          if (from === to) continue;
+          const next = [...base];
+          const [moved] = next.splice(from, 1);
+          next.splice(to, 0, moved);
+
+          let server = base.map((row) => ({ ...row }));
+          const fetchImpl = vi.fn(async (url, init) => {
+            const id = url.split("/").pop();
+            const row = server.find((r) => r.id === id);
+            row.priority = JSON.parse(init.body).priority;
+            writeClock += 1;
+            row.updatedAt = new Date(2026, 5, 1, 0, 0, 0, writeClock).toISOString();
+            server = flush(server);
+            return { ok: true, status: 200 };
+          });
+
+          await persistPriorityOrder(next, fetchImpl);
+          expect(orderedIds(server)).toEqual(next.map((c) => c.id));
+        }
+      }
+    }
   });
 });
