@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, CardSkeleton, ConfirmModal, Select } from "@/shared/components";
 import { useNotificationStore } from "@/store/notificationStore";
 import CatalogSection from "./components/CatalogSection";
+import CatalogPreviewDialog from "./components/CatalogPreviewDialog";
 import UserCatalogDialog from "./components/UserCatalogDialog";
 import ClearCatalogDialog from "./components/ClearCatalogDialog";
 import { matchesCatalogRow } from "./components/CatalogTable";
@@ -69,6 +70,7 @@ export default function ModelCatalogPage() {
   const [capability, setCapability] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [previewing, setPreviewing] = useState(null);
   const [deleting, setDeleting] = useState(null);
   const [deletingOpenRouter, setDeletingOpenRouter] = useState(null);
   const [confirmClear, setConfirmClear] = useState(false);
@@ -290,6 +292,7 @@ export default function ModelCatalogPage() {
         emptyText={capability !== "all" ? "No user entries match the capability filter." : "No user-defined models yet."}
         onEdit={(entry) => { setEditing(entry); setDialogOpen(true); }}
         onDelete={setDeleting}
+        onPreview={setPreviewing}
         providerLabel={providerLabel}
         actions={
           <>
@@ -315,6 +318,7 @@ export default function ModelCatalogPage() {
         emptyText={capability !== "all" ? "No OpenRouter models match the capability filter." : "Fetch the OpenRouter catalog to populate this source."}
         onEdit={editAsUserOverride}
         onDelete={setDeletingOpenRouter}
+        onPreview={setPreviewing}
         providerLabel={providerLabel}
         actions={
           <>
@@ -331,10 +335,12 @@ export default function ModelCatalogPage() {
         rows={filtered.hardcoded}
         emptyText="No hardcoded entries match the filters."
         onEdit={editAsUserOverride}
+        onPreview={setPreviewing}
         providerLabel={providerLabel}
       />
 
       <UserCatalogDialog key={editing ? `${editing.provider}:${editing.pattern}` : "new"} isOpen={dialogOpen} entry={editing} saving={busy === "user"} onClose={() => { setDialogOpen(false); setEditing(null); }} onSave={saveUser} />
+      <CatalogPreviewDialog isOpen={Boolean(previewing)} entry={previewing} onClose={() => setPreviewing(null)} />
       <ConfirmModal isOpen={Boolean(deleting)} onClose={() => setDeleting(null)} onConfirm={deleteUser} loading={busy === "delete"} title="Delete user model" message={`Delete ${deleting?.pattern || deleting?.model || "this entry"}?`} confirmText="Delete" />
       <ConfirmModal isOpen={Boolean(deletingOpenRouter)} onClose={() => setDeletingOpenRouter(null)} onConfirm={deleteOpenRouter} loading={busy === "delete-openrouter"} title="Delete OpenRouter model" message={`Delete ${deletingOpenRouter?.pattern || "this cached entry"}? Fetching OpenRouter again may restore it.`} confirmText="Delete" />
       <ConfirmModal isOpen={confirmClear} onClose={() => setConfirmClear(false)} onConfirm={clearOpenRouter} loading={busy === "clear"} title="Clear OpenRouter catalog" message="Remove all fetched OpenRouter models? User-defined and hardcoded entries will not be changed." confirmText="Clear All" />
