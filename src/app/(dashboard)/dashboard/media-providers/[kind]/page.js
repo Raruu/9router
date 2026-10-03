@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { Card, Badge, Button, Toggle } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
+import { getProviderIconSrcForNode } from "@/shared/utils/providerIcon";
 import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS, isCustomEmbeddingProvider } from "@/shared/constants/providers";
 import { listProvidersServingKind, customModelKindsByAlias, customNodeServesKind, CUSTOM_CAPABLE_KINDS } from "@/shared/utils/providerKinds";
 
@@ -62,7 +63,7 @@ function MediaProviderCard({ provider, kind, connections, isCustom, onToggle, hr
               style={{ backgroundColor: `${provider.color?.length > 7 ? provider.color : (provider.color ?? "#888") + "15"}` }}
             >
               <ProviderIcon
-                src={`/providers/${provider.id}.png`}
+                src={getProviderIconSrcForNode(provider.id, provider.iconVersion, provider.apiType)}
                 alt={provider.name}
                 size={30}
                 className="object-contain rounded-lg max-w-[30px] max-h-[30px]"
@@ -208,6 +209,11 @@ export default function MediaProviderKindPage() {
       color: n.type === "custom-embedding" ? "#6366F1" : (n.type === "anthropic-compatible" ? "#D97757" : "#10A37F"),
       textIcon: n.type === "custom-embedding" ? "CE" : (n.type === "anthropic-compatible" ? "AC" : "OC"),
       prefix: n.prefix,
+      // Compatible nodes have no /providers asset: the card resolves the
+      // uploaded icon (served by /api/provider-nodes/{id}/icon) and then the
+      // generic per-API-type fallback from these two fields.
+      iconVersion: n.iconVersion,
+      apiType: n.apiType,
     }));
 
   // The custom section exists for the kinds a user-created node can dispatch;
