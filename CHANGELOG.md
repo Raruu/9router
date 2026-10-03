@@ -1,3 +1,30 @@
+# v0.5.95-3 (2026-10-03)
+
+## Features
+- **Providers**: media kinds now cover what each provider actually carries —
+  OpenRouter gains `image` (its config, adapter and models were already wired
+  but undeclared), NVIDIA gains a self-hosted Riva `sttConfig` (its hosted API
+  exposes no ASR route) and Runway ML gains `videoConfig` plus a task-API
+  adapter mapped onto the pollable `/v1/videos` job shape; a
+  registry-kind-coverage test pins the invariant so a provider cannot carry an
+  undeclared model kind
+- **Dashboard**: media provider pages list providers by served models rather
+  than declared kinds — providers that gained media models (or received a
+  user-added custom model) now appear, and custom compatible nodes carrying
+  media models are listed too. Custom providers render in their own section
+  with a circle loader while fetching, and the embedding page's Add Custom
+  Embedding button is replaced by that section's hint (create an
+  OpenAI-compatible provider plus an Embedding model instead)
+
+## Fixes
+- **Combos**: Combo Info now shows Min output — `minOutput` is catalog-only, so
+  the combo capability merge dropped it; it merges like the other numeric
+  limits (best member by default, smallest under the "min" strategy) and is
+  clamped to the merged max output
+- **Dashboard**: custom provider cards on media pages resolve their uploaded
+  icon (falling back to the generic OpenAI/Anthropic icon) instead of
+  hardcoding `/providers/{id}.png`, which always 404'd for user-created ids
+
 # v0.5.95-2 (2026-10-02)
 
 ## Features
