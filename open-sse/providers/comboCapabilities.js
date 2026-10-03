@@ -192,6 +192,14 @@ function unionThinkingRanges(ranges) {
 // so clients sizing prompts off context_length never over-fill a fallback.
 // Limits-only by design: AND-ing booleans would recreate the masked-vision bug
 // above, and `tools` defaults true so intersection could zero out tool calling.
+//
+// `minOutput` is catalog-only (deliberately absent from DEFAULT_CAPABILITIES so
+// direct models don't all grow a 16th key), so it cannot ride the key loop
+// below — it is merged separately and only when a member actually declares a
+// floor. Same direction rule as the other numeric limits: the default strategy
+// advertises the best member's floor, `min` the smallest, and the result is
+// clamped to the merged maxOutput (mirroring resolveMinOutputFloor) so the
+// advertised floor can never exceed the advertised ceiling.
 export function mergeMemberCapabilities(memberCapabilities, limitStrategy = "max") {
   if (memberCapabilities.length === 0) return null;
 
@@ -222,5 +230,15 @@ export function mergeMemberCapabilities(memberCapabilities, limitStrategy = "max
       merged[key] = DEFAULT_CAPABILITIES[key];
     }
   }
+
+  const floors = memberCapabilities
+    .map((caps) => Number(caps.minOutput))
+    .filter((floor) => Number.isFinite(floor) && floor > 0);
+  if (floors.length > 0) {
+    const floor = limitStrategy === "min" ? Math.min(...floors) : Math.max(...floors);
+    const ceiling = merged.maxOutput;
+    merged.minOutput = Number.isFinite(ceiling) && ceiling > 0 && floor > ceiling ? ceiling : floor;
+  }
+
   return merged;
 }

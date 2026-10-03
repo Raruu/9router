@@ -34,12 +34,25 @@ export default {
     { id: "fastpitch", name: "FastPitch", kind: "tts" },
     { id: "tacotron2", name: "Tacotron2", kind: "tts" },
   ],
-  serviceKinds: ["llm","tts","embedding"],
+  serviceKinds: ["llm","tts","embedding","stt"],
   ttsConfig: {
     baseUrl: "https://integrate.api.nvidia.com/v1/audio/speech",
     authType: "apikey",
     authHeader: "bearer",
     format: "nvidia-tts",
+  },
+  // NVIDIA's hosted API (integrate.api.nvidia.com) exposes no ASR route — the
+  // parakeet model runs on a self-hosted Riva ASR NIM, whose HTTP interface
+  // listens on port 9000. The default below matches a same-host NIM deployment;
+  // a remote one is pointed at via the connection's providerSpecificData.baseUrl
+  // (authType "apikey" is what gives the connection that record — the NIM
+  // ignores the key itself, so any value works). Dispatch shape: multipart
+  // file+model → { text } (sttCore's "nvidia-asr" case).
+  sttConfig: {
+    baseUrl: "http://localhost:9000/v1/audio/transcriptions",
+    authType: "apikey",
+    authHeader: "bearer",
+    format: "nvidia-asr",
   },
   embeddingConfig: { baseUrl: "https://integrate.api.nvidia.com/v1/embeddings", authType: "apikey", authHeader: "bearer" },
 };

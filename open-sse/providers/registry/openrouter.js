@@ -45,7 +45,7 @@ export default {
     { id: "bytedance/seedance-2.0", name: "Seedance 2.0 (via OpenRouter)", params: ["duration","aspect_ratio","resolution"], kind: "video" },
     { id: "typesafe/jev-1.13", name: "Jev 1.13", kind: "systemone" },
   ],
-  serviceKinds: ["llm","embedding","tts","imageToText","video","systemone"],
+  serviceKinds: ["llm","embedding","tts","imageToText","image","video","systemone"],
   // System One decision API (TypeSafe-compatible): https://openrouter.ai/docs/guides/community/typesafe-sdk
   systemoneConfig: {
     baseUrl: "https://openrouter.ai/api/v1/systemone",

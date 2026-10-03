@@ -354,6 +354,33 @@ describe("GET /api/models/detail — combos", () => {
     expect(res.body.capabilities).toMatchObject(expected);
   });
 
+  // minOutput is catalog-only, so the combo merge has to carry it explicitly —
+  // without this the Combo Info modal never shows the Min output tile even
+  // though each member resolves a floor.
+  it("advertises a member's catalog minOutput floor on the combo", async () => {
+    setCatalogSource(createCatalogResolver({
+      userRules: [{ provider: "anthropic", pattern: "claude-opus-4.6", data: { capabilities: { minOutput: 8000 } } }],
+    }));
+    mocks.getCombos.mockResolvedValue([
+      { name: "floored", kind: "llm", models: ["anthropic/claude-opus-4.6"] },
+    ]);
+
+    const res = await GET(req("combo=floored"));
+
+    expect(res.body.members[0].capabilities.minOutput).toBe(8000);
+    expect(res.body.capabilities.minOutput).toBe(8000);
+  });
+
+  it("omits minOutput when no member declares a floor", async () => {
+    mocks.getCombos.mockResolvedValue([
+      { name: "plain", kind: "llm", models: ["anthropic/claude-opus-4.6"] },
+    ]);
+
+    const res = await GET(req("combo=plain"));
+
+    expect("minOutput" in res.body.capabilities).toBe(false);
+  });
+
   it("returns null capabilities when no member resolves", async () => {
     mocks.getCombos.mockResolvedValue([
       { name: "empty", kind: "llm", models: ["bare-nonsense"] },
