@@ -3,37 +3,15 @@
 import { useParams, notFound, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Card, Badge, Button, Toggle, AddCustomEmbeddingModal } from "@/shared/components";
+import { Card, Badge, Button, Toggle } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS, isCustomEmbeddingProvider } from "@/shared/constants/providers";
-import { listProvidersServingKind, customModelKindsByAlias } from "@/shared/utils/providerKinds";
-import { COMPAT_KIND_IDS } from "open-sse/config/kindEndpoints.js";
+import { listProvidersServingKind, customModelKindsByAlias, customNodeServesKind, CUSTOM_CAPABLE_KINDS } from "@/shared/utils/providerKinds";
 
 // Kinds that support combos (currently disabled for image/tts — temporarily hidden).
 // webSearch/webFetch handled by /web page.
 const COMBO_KINDS = new Set([]);
 const COMBO_BASE_NAMES = { image: "image-combo", tts: "tts-combo" };
-
-// Media kinds a user-created compatible node can dispatch: the per-kind
-// endpoints it can be pointed at. Anthropic-compatible nodes have no media
-// adapters, so they never appear on a media page; custom-embedding nodes serve
-// embedding only.
-const COMPAT_MEDIA_KINDS = new Set(COMPAT_KIND_IDS);
-
-// Custom-embedding nodes keep their historical behavior: always listed on the
-// embedding page (it is where they are created and managed — hiding a
-// model-less node would make it unreachable, since the providers page does not
-// list them). Compatible nodes only appear once they actually carry a model of
-// the kind, so the card never leads to an empty provider page.
-function nodeServesKind(node, kind, customKindsByAlias) {
-  if (!node?.id) return false;
-  if (node.type === "custom-embedding") return kind === "embedding";
-  if (node.type !== "openai-compatible" || !COMPAT_MEDIA_KINDS.has(kind)) return false;
-  for (const alias of [node.id, node.prefix]) {
-    if (alias && customKindsByAlias.get(alias)?.has(kind)) return true;
-  }
-  return false;
-}
 
 function getEffectiveStatus(conn) {
   const isCooldown = Object.entries(conn).some(
@@ -164,10 +142,12 @@ export default function MediaProviderKindPage() {
   const { kind } = useParams();
   const router = useRouter();
   const [connections, setConnections] = useState([]);
-  const [customNodes, setCustomNodes] = useState([]);
-  const [customModels, setCustomModels] = useState([]);
+  // null = fetch still in flight. The custom section renders a circle loader
+  // until both settle, so the cards never pop in silently; a failed fetch
+  // resolves to [] rather than leaving the spinner up forever.
+  const [customNodes, setCustomNodes] = useState(null);
+  const [customModels, setCustomModels] = useState(null);
   const [combos, setCombos] = useState([]);
-  const [showAddCustomEmbedding, setShowAddCustomEmbedding] = useState(false);
 
   // webSearch/webFetch listing pages are merged into /web
   useEffect(() => {
@@ -177,7 +157,6 @@ export default function MediaProviderKindPage() {
   }, [kind, router]);
 
   const kindConfig = MEDIA_PROVIDER_KINDS.find((k) => k.id === kind);
-  const isEmbedding = kind === "embedding";
   const supportsCombo = COMBO_KINDS.has(kind);
 
   useEffect(() => {
@@ -192,11 +171,11 @@ export default function MediaProviderKindPage() {
     fetch("/api/provider-nodes", { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => setCustomNodes(d.nodes || []))
-      .catch(() => {});
+      .catch(() => setCustomNodes([]));
     fetch("/api/models/custom", { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => setCustomModels(d.models || []))
-      .catch(() => {});
+      .catch(() => setCustomModels([]));
     if (supportsCombo) {
       fetch("/api/combos", { cache: "no-store" })
         .then((r) => r.json())
@@ -205,20 +184,24 @@ export default function MediaProviderKindPage() {
     }
   }, [supportsCombo, kindConfig]);
 
-  const customKindsByAlias = useMemo(() => customModelKindsByAlias(customModels), [customModels]);
+  const customKindsByAlias = useMemo(() => customModelKindsByAlias(customModels ?? []), [customModels]);
 
   if (!kindConfig) return notFound();
 
+  const customProvidersReady = customNodes !== null && customModels !== null;
+
   // Built-ins that serve this kind: declared, or carrying models of it (the
   // registry declarations drifted before; the model list is the ground truth).
-  const providers = listProvidersServingKind(kind, { customModels });
+  const providers = listProvidersServingKind(kind, { customModels: customModels ?? [] });
   const kindCombos = combos.filter((c) => c.kind === kind);
 
-  // Map custom nodes to MediaProviderCard shape. Nodes only render when they
-  // actually have a model of this kind; their card links to the provider page,
-  // which owns connections, per-kind endpoints and model management.
-  const customProviders = customNodes
-    .filter((n) => nodeServesKind(n, kind, customKindsByAlias))
+  // Custom providers are listed separately from the built-ins. A node only
+  // qualifies when it can dispatch this kind AND actually carries a model of it
+  // (except custom-embedding nodes, which live on the embedding page); the card
+  // links to the provider page, which owns connections, per-kind endpoints and
+  // model management.
+  const customProviders = (customNodes ?? [])
+    .filter((n) => customNodeServesKind(n, kind, customKindsByAlias))
     .map((n) => ({
       id: n.id,
       name: n.name || (n.type === "custom-embedding" ? "Custom Embedding" : "Custom Provider"),
@@ -227,7 +210,10 @@ export default function MediaProviderKindPage() {
       prefix: n.prefix,
     }));
 
-  const allProviders = [...providers, ...customProviders];
+  // The custom section exists for the kinds a user-created node can dispatch;
+  // web kinds and music have no compat endpoint, so it would always be empty.
+  const showCustomSection = CUSTOM_CAPABLE_KINDS.has(kind);
+  const hasAnyProvider = providers.length > 0 || customProviders.length > 0;
 
   const handleToggleProvider = async (providerId, newActive) => {
     const providerConns = connections.filter((c) => c.provider === providerId);
@@ -267,16 +253,25 @@ export default function MediaProviderKindPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      {(isEmbedding || supportsCombo) && (
+      {supportsCombo && (
         <div className="flex items-center justify-end gap-2">
-          {supportsCombo && (
-            <Button size="sm" icon="add" onClick={handleCreateCombo}>Create Combo</Button>
-          )}
-          {isEmbedding && (
-            <Button size="sm" icon="add" onClick={() => setShowAddCustomEmbedding(true)}>
-              Add Custom Embedding
-            </Button>
-          )}
+          <Button size="sm" icon="add" onClick={handleCreateCombo}>Create Combo</Button>
+        </div>
+      )}
+
+      {/* Custom embeddings are no longer created here: an OpenAI-compatible
+          provider (with its per-kind Embedding endpoint) plus an Embedding
+          model is the supported flow, and the union listing surfaces it. */}
+      {kind === "embedding" && (
+        <div className="flex items-start gap-2 rounded-lg border border-border bg-bg-alt/40 px-3 py-2">
+          <span className="material-symbols-outlined shrink-0 text-[16px] text-text-muted">info</span>
+          <p className="min-w-0 flex-1 text-xs leading-relaxed text-text-muted">
+            Custom embedding providers are added from the{" "}
+            <Link href="/dashboard/providers" className="font-medium text-primary hover:underline">
+              Providers page
+            </Link>
+            : create an OpenAI-compatible provider, then add an Embedding model to it. It appears here automatically.
+          </p>
         </div>
       )}
 
@@ -284,11 +279,7 @@ export default function MediaProviderKindPage() {
         <ComboList combos={kindCombos} />
       )}
 
-      {allProviders.length === 0 ? (
-        <div className="text-center py-12 border border-dashed border-border rounded-xl text-text-muted text-sm">
-          No providers support <strong>{kindConfig.label}</strong> yet.
-        </div>
-      ) : (
+      {providers.length > 0 && (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {providers.map((provider) => (
             <MediaProviderCard
@@ -299,34 +290,57 @@ export default function MediaProviderKindPage() {
               onToggle={handleToggleProvider}
             />
           ))}
-          {customProviders.map((provider) => (
-            <MediaProviderCard
-              key={provider.id}
-              provider={provider}
-              kind={kind}
-              connections={connections}
-              isCustom
-              onToggle={handleToggleProvider}
-              // Compatible nodes are managed on the provider page (connections,
-              // per-kind endpoints, kind-grouped models); custom-embedding nodes
-              // keep their media detail page.
-              href={isCustomEmbeddingProvider(provider.id)
-                ? `/dashboard/media-providers/${kind}/${provider.id}`
-                : `/dashboard/providers/${provider.id}`}
-            />
-          ))}
         </div>
       )}
 
-      {isEmbedding && (
-        <AddCustomEmbeddingModal
-          isOpen={showAddCustomEmbedding}
-          onClose={() => setShowAddCustomEmbedding(false)}
-          onCreated={(node) => {
-            setCustomNodes((prev) => [...prev, node]);
-            setShowAddCustomEmbedding(false);
-          }}
-        />
+      {showCustomSection && (
+        <div className="flex flex-col gap-3">
+          <h2 className="text-sm font-semibold text-text-muted">Custom Providers</h2>
+          {!customProvidersReady ? (
+            <div className="flex items-center justify-center gap-2 py-10 text-sm text-text-muted">
+              <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
+              Loading custom providers...
+            </div>
+          ) : customProviders.length === 0 ? (
+            <div className="flex items-center justify-center gap-2 rounded-xl border border-dashed border-border py-4 text-sm text-text-muted">
+              <span className="material-symbols-outlined text-[18px]">extension</span>
+              <span>
+                No custom providers — add one from the{" "}
+                <Link href="/dashboard/providers" className="font-medium text-primary hover:underline">
+                  Providers page
+                </Link>
+              </span>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+              {customProviders.map((provider) => (
+                <MediaProviderCard
+                  key={provider.id}
+                  provider={provider}
+                  kind={kind}
+                  connections={connections}
+                  isCustom
+                  onToggle={handleToggleProvider}
+                  // Compatible nodes are managed on the provider page
+                  // (connections, per-kind endpoints, kind-grouped models);
+                  // custom-embedding nodes keep their media detail page.
+                  href={isCustomEmbeddingProvider(provider.id)
+                    ? `/dashboard/media-providers/${kind}/${provider.id}`
+                    : `/dashboard/providers/${provider.id}`}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Kinds without a custom section (web kinds, music) are the only ones
+          that can read as empty at the page level — a custom-capable kind
+          always shows the section above, whose hint covers this case. */}
+      {!hasAnyProvider && !showCustomSection && (
+        <div className="text-center py-12 border border-dashed border-border rounded-xl text-text-muted text-sm">
+          No providers support <strong>{kindConfig.label}</strong> yet.
+        </div>
       )}
     </div>
   );

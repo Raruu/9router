@@ -15,6 +15,17 @@ import { TtsExampleCard } from "./components/TtsExampleCard";
 import { GenericExampleCard } from "./components/GenericExampleCard";
 import { SttExampleCard } from "./components/SttExampleCard";
 
+// Centered circle loader — the same pattern the model detail modal and the
+// kind page's custom section use, so a pending fetch reads identically here.
+function CustomProviderLoading() {
+  return (
+    <div className="flex items-center justify-center gap-2 py-12 text-sm text-text-muted">
+      <span className="material-symbols-outlined animate-spin text-[20px]">progress_activity</span>
+      Loading...
+    </div>
+  );
+}
+
 // MediaProviderDetailPage
 export default function MediaProviderDetailPage() {
   const { kind, id } = useParams();
@@ -77,7 +88,7 @@ export default function MediaProviderDetailPage() {
   if (!isCustom && !builtInProvider) return notFound();
   if (isCustom && !customLoading && !customNode) return notFound();
   if (isCustom && customLoading) {
-    return <div className="text-text-muted text-sm py-12 text-center">Loading...</div>;
+    return <CustomProviderLoading />;
   }
 
   const kinds = isCustom ? ["embedding"] : (provider.serviceKinds ?? ["llm"]);
@@ -91,7 +102,7 @@ export default function MediaProviderDetailPage() {
       // model can still make this valid, so only reject once that fetch has
       // settled — otherwise a slow response flashes a 404.
       if (customModels === null) {
-        return <div className="text-text-muted text-sm py-12 text-center">Loading...</div>;
+        return <CustomProviderLoading />;
       }
       return notFound();
     }

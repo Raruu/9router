@@ -7,6 +7,8 @@ import {
   declaredKinds,
   builtInModelKinds,
   customModelKindsByAlias,
+  customNodeServesKind,
+  CUSTOM_CAPABLE_KINDS,
   providerServesKind,
   listProvidersServingKind,
 } from "../../src/shared/utils/providerKinds.js";
@@ -115,5 +117,71 @@ describe("listProvidersServingKind", () => {
   it("keeps hidden providers and hiddenKinds out", () => {
     expect(listProvidersServingKind("tts").map((p) => p.id)).not.toContain("huggingface");
     expect(listProvidersServingKind("tts").map((p) => p.id)).not.toContain("coqui");
+  });
+});
+
+// Custom provider nodes on a media kind page. Custom-embedding nodes are
+// purpose-built (and the embedding page is their management home, so they stay
+// listed even before a model exists); compatible nodes only qualify once they
+// carry a model of the kind.
+describe("CUSTOM_CAPABLE_KINDS", () => {
+  it("covers exactly the kinds a compatible node has an endpoint for", () => {
+    expect([...CUSTOM_CAPABLE_KINDS].sort()).toEqual(
+      ["embedding", "image", "stt", "systemone", "tts", "video"],
+    );
+  });
+
+  it("excludes the kinds with no compat endpoint", () => {
+    for (const kind of ["webSearch", "webFetch", "music", "imageToText", "llm"]) {
+      expect(CUSTOM_CAPABLE_KINDS.has(kind), `${kind} must not be custom-capable`).toBe(false);
+    }
+  });
+});
+
+describe("customNodeServesKind", () => {
+  const node = (id, type, prefix) => ({ id, type, prefix });
+  const embedNode = node("custom-embedding-1", "custom-embedding", "voyage");
+  const compatNode = node("openai-compatible-chat-1", "openai-compatible", "nr");
+  const anthropicNode = node("anthropic-compatible-1", "anthropic-compatible", "ac");
+
+  it("lists a custom-embedding node on the embedding page only, model or not", () => {
+    const none = customModelKindsByAlias([]);
+    expect(customNodeServesKind(embedNode, "embedding", none)).toBe(true);
+    for (const kind of ["image", "stt", "tts", "video", "systemone"]) {
+      expect(customNodeServesKind(embedNode, kind, none)).toBe(false);
+    }
+  });
+
+  it("lists a compatible node once it carries a model of the kind", () => {
+    const none = customModelKindsByAlias([]);
+    expect(customNodeServesKind(compatNode, "image", none)).toBe(false);
+
+    const withImage = customModelKindsByAlias([custom("openai-compatible-chat-1", "image")]);
+    expect(customNodeServesKind(compatNode, "image", withImage)).toBe(true);
+    expect(customNodeServesKind(compatNode, "stt", withImage)).toBe(false);
+  });
+
+  it("matches models stored under the connection prefix as well as the node id", () => {
+    const byPrefix = customModelKindsByAlias([custom("nr", "video")]);
+    expect(customNodeServesKind(compatNode, "video", byPrefix)).toBe(true);
+  });
+
+  it("never lists an anthropic-compatible node on a media page", () => {
+    const anyKind = customModelKindsByAlias([custom("anthropic-compatible-1", "image")]);
+    for (const kind of ["embedding", "image", "stt", "tts", "video", "systemone"]) {
+      expect(customNodeServesKind(anthropicNode, kind, anyKind)).toBe(false);
+    }
+  });
+
+  it("rejects kinds with no compat endpoint even when a model carries one", () => {
+    const byAlias = customModelKindsByAlias([custom("openai-compatible-chat-1", "music")]);
+    expect(customNodeServesKind(compatNode, "music", byAlias)).toBe(false);
+  });
+
+  it("tolerates malformed nodes and an absent map", () => {
+    expect(customNodeServesKind(null, "image", customModelKindsByAlias([]))).toBe(false);
+    expect(customNodeServesKind({ id: "x" }, "image", customModelKindsByAlias([]))).toBe(false);
+    expect(customNodeServesKind(compatNode, "image", undefined)).toBe(false);
+    expect(customNodeServesKind(compatNode, "", customModelKindsByAlias([]))).toBe(false);
   });
 });

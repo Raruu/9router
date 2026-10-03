@@ -13,8 +13,14 @@
 // the API agree on who serves what.
 import { AI_PROVIDERS, getProvidersByKind } from "../constants/providers.js";
 import { getModelsByProviderId, getModelKind } from "../constants/models.js";
+import { COMPAT_KIND_IDS } from "open-sse/config/kindEndpoints.js";
 
 const DEFAULT_KINDS = ["llm"];
+
+// Media kinds a user-created compatible node can dispatch: the per-kind
+// endpoints it can be pointed at (kindEndpoints). Anything outside this set has
+// no compat adapter, so a compatible node can never serve it.
+export const CUSTOM_CAPABLE_KINDS = new Set(COMPAT_KIND_IDS);
 
 /** Declared kinds for a provider id/alias, defaulting to ["llm"]. */
 export function declaredKinds(providerId) {
@@ -61,6 +67,35 @@ export function customModelKindsByAlias(customModels = []) {
     byAlias.get(alias).add(kind);
   }
   return byAlias;
+}
+
+/**
+ * Does a user-created provider node belong on the page for `kind`?
+ *
+ * - custom-embedding nodes are purpose-built for embeddings, and the embedding
+ *   page is where they have always been managed, so they stay listed there even
+ *   before a model is added (the providers page does not list them — hiding a
+ *   model-less node would make it unreachable).
+ * - openai-compatible nodes can be pointed at any per-kind endpoint, but only
+ *   appear once they actually carry a model of that kind, so the card never
+ *   leads to an empty provider page.
+ * - anthropic-compatible nodes have no media adapters and never appear.
+ *
+ * @param {object} node - provider node ({ id, type, prefix })
+ * @param {string} kind - service kind ("image", "stt", …)
+ * @param {Map<string, Set<string>>} customKindsByAlias - from customModelKindsByAlias
+ * @returns {boolean}
+ */
+export function customNodeServesKind(node, kind, customKindsByAlias) {
+  if (!node?.id || !kind) return false;
+  if (node.type === "custom-embedding") return kind === "embedding";
+  if (node.type !== "openai-compatible" || !CUSTOM_CAPABLE_KINDS.has(kind)) return false;
+  // Custom models are keyed by the node id or by the connection prefix the
+  // user typed; match either form.
+  for (const alias of [node.id, node.prefix]) {
+    if (alias && customKindsByAlias?.get(alias)?.has(kind)) return true;
+  }
+  return false;
 }
 
 /**
