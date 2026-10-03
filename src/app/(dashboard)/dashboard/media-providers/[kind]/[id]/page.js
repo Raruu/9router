@@ -6,6 +6,7 @@ import { useState, useEffect } from "react";
 import { Card, Badge, Button, AddCustomEmbeddingModal, NoAuthProxyCard, ProviderInfoCard } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
 import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS, isCustomEmbeddingProvider } from "@/shared/constants/providers";
+import { providerServesKind } from "@/shared/utils/providerKinds";
 import ConnectionsCard from "@/app/(dashboard)/dashboard/providers/components/ConnectionsCard";
 import ModelsCard from "@/app/(dashboard)/dashboard/providers/components/ModelsCard";
 import { KIND_EXAMPLE_CONFIG } from "./components/exampleShared";
@@ -20,6 +21,7 @@ export default function MediaProviderDetailPage() {
   const router = useRouter();
   const kindConfig = MEDIA_PROVIDER_KINDS.find((k) => k.id === kind);
   const isCustom = isCustomEmbeddingProvider(id) && kind === "embedding";
+  const [customModels, setCustomModels] = useState(null);
 
   const handleDeleteCustom = async () => {
     if (!confirm("Delete this Custom Embedding node?")) return;
@@ -50,6 +52,19 @@ export default function MediaProviderDetailPage() {
     return () => { cancelled = true; };
   }, [id, isCustom]);
 
+  // Custom models decide whether an undeclared provider still serves this kind
+  // (the list page links here on the same rule). null = still loading, so the
+  // guard below never 404s a valid page just because the fetch has not landed.
+  useEffect(() => {
+    if (!kindConfig || isCustom) return;
+    let cancelled = false;
+    fetch("/api/models/custom", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setCustomModels(d.models || []); })
+      .catch(() => { if (!cancelled) setCustomModels([]); });
+    return () => { cancelled = true; };
+  }, [kindConfig, isCustom]);
+
   if (!kindConfig) return notFound();
 
   const builtInProvider = AI_PROVIDERS[id];
@@ -66,7 +81,21 @@ export default function MediaProviderDetailPage() {
   }
 
   const kinds = isCustom ? ["embedding"] : (provider.serviceKinds ?? ["llm"]);
-  if (!isCustom && !kinds.includes(kind)) return notFound();
+  // Declared kinds OR a model of the kind (registry or user-added) — the same
+  // union the list page applies, so every card it renders resolves here.
+  if (!isCustom) {
+    const aliases = [provider.alias].filter(Boolean);
+    const serves = providerServesKind(id, kind, { aliases, ...(customModels ? { customModels } : {}) });
+    if (!serves) {
+      // Not declared and no built-in models of this kind. A user-added custom
+      // model can still make this valid, so only reject once that fetch has
+      // settled — otherwise a slow response flashes a 404.
+      if (customModels === null) {
+        return <div className="text-text-muted text-sm py-12 text-center">Loading...</div>;
+      }
+      return notFound();
+    }
+  }
 
   return (
     <div className="flex flex-col gap-8">

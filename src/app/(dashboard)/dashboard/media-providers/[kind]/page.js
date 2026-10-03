@@ -2,15 +2,38 @@
 
 import { useParams, notFound, useRouter } from "next/navigation";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, Badge, Button, Toggle, AddCustomEmbeddingModal } from "@/shared/components";
 import ProviderIcon from "@/shared/components/ProviderIcon";
-import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS, getProvidersByKind } from "@/shared/constants/providers";
+import { MEDIA_PROVIDER_KINDS, AI_PROVIDERS, isCustomEmbeddingProvider } from "@/shared/constants/providers";
+import { listProvidersServingKind, customModelKindsByAlias } from "@/shared/utils/providerKinds";
+import { COMPAT_KIND_IDS } from "open-sse/config/kindEndpoints.js";
 
 // Kinds that support combos (currently disabled for image/tts — temporarily hidden).
 // webSearch/webFetch handled by /web page.
 const COMBO_KINDS = new Set([]);
 const COMBO_BASE_NAMES = { image: "image-combo", tts: "tts-combo" };
+
+// Media kinds a user-created compatible node can dispatch: the per-kind
+// endpoints it can be pointed at. Anthropic-compatible nodes have no media
+// adapters, so they never appear on a media page; custom-embedding nodes serve
+// embedding only.
+const COMPAT_MEDIA_KINDS = new Set(COMPAT_KIND_IDS);
+
+// Custom-embedding nodes keep their historical behavior: always listed on the
+// embedding page (it is where they are created and managed — hiding a
+// model-less node would make it unreachable, since the providers page does not
+// list them). Compatible nodes only appear once they actually carry a model of
+// the kind, so the card never leads to an empty provider page.
+function nodeServesKind(node, kind, customKindsByAlias) {
+  if (!node?.id) return false;
+  if (node.type === "custom-embedding") return kind === "embedding";
+  if (node.type !== "openai-compatible" || !COMPAT_MEDIA_KINDS.has(kind)) return false;
+  for (const alias of [node.id, node.prefix]) {
+    if (alias && customKindsByAlias.get(alias)?.has(kind)) return true;
+  }
+  return false;
+}
 
 function getEffectiveStatus(conn) {
   const isCooldown = Object.entries(conn).some(
@@ -19,7 +42,7 @@ function getEffectiveStatus(conn) {
   return conn.testStatus === "unavailable" && !isCooldown ? "active" : conn.testStatus;
 }
 
-function MediaProviderCard({ provider, kind, connections, isCustom, onToggle }) {
+function MediaProviderCard({ provider, kind, connections, isCustom, onToggle, href }) {
   const providerInfo = AI_PROVIDERS[provider.id];
   const isNoAuth = !!providerInfo?.noAuth;
 
@@ -49,7 +72,7 @@ function MediaProviderCard({ provider, kind, connections, isCustom, onToggle }) 
   };
 
   return (
-    <Link href={`/dashboard/media-providers/${kind}/${provider.id}`} className="group">
+    <Link href={href || `/dashboard/media-providers/${kind}/${provider.id}`} className="group">
       <Card
         padding="xs"
         className={`h-full hover:bg-black/[0.01] dark:hover:bg-white/[0.01] transition-colors cursor-pointer ${allDisabled ? "opacity-50" : ""}`}
@@ -142,6 +165,7 @@ export default function MediaProviderKindPage() {
   const router = useRouter();
   const [connections, setConnections] = useState([]);
   const [customNodes, setCustomNodes] = useState([]);
+  const [customModels, setCustomModels] = useState([]);
   const [combos, setCombos] = useState([]);
   const [showAddCustomEmbedding, setShowAddCustomEmbedding] = useState(false);
 
@@ -162,32 +186,46 @@ export default function MediaProviderKindPage() {
       .then((r) => r.json())
       .then((d) => setConnections(d.connections || []))
       .catch(() => {});
-    if (isEmbedding) {
-      fetch("/api/provider-nodes", { cache: "no-store" })
-        .then((r) => r.json())
-        .then((d) => setCustomNodes((d.nodes || []).filter((n) => n.type === "custom-embedding")))
-        .catch(() => {});
-    }
+    // Nodes + custom models drive the union listing: a compatible node with
+    // media models must appear here, and a chat provider that only gained a
+    // custom media model must too.
+    fetch("/api/provider-nodes", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => setCustomNodes(d.nodes || []))
+      .catch(() => {});
+    fetch("/api/models/custom", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((d) => setCustomModels(d.models || []))
+      .catch(() => {});
     if (supportsCombo) {
       fetch("/api/combos", { cache: "no-store" })
         .then((r) => r.json())
         .then((d) => setCombos(d.combos || []))
         .catch(() => {});
     }
-  }, [isEmbedding, supportsCombo, kindConfig]);
+  }, [supportsCombo, kindConfig]);
+
+  const customKindsByAlias = useMemo(() => customModelKindsByAlias(customModels), [customModels]);
 
   if (!kindConfig) return notFound();
 
-  const providers = getProvidersByKind(kind);
+  // Built-ins that serve this kind: declared, or carrying models of it (the
+  // registry declarations drifted before; the model list is the ground truth).
+  const providers = listProvidersServingKind(kind, { customModels });
   const kindCombos = combos.filter((c) => c.kind === kind);
 
-  // Map custom nodes to MediaProviderCard shape
-  const customProviders = customNodes.map((n) => ({
-    id: n.id,
-    name: n.name || "Custom Embedding",
-    color: "#6366F1",
-    textIcon: "CE",
-  }));
+  // Map custom nodes to MediaProviderCard shape. Nodes only render when they
+  // actually have a model of this kind; their card links to the provider page,
+  // which owns connections, per-kind endpoints and model management.
+  const customProviders = customNodes
+    .filter((n) => nodeServesKind(n, kind, customKindsByAlias))
+    .map((n) => ({
+      id: n.id,
+      name: n.name || (n.type === "custom-embedding" ? "Custom Embedding" : "Custom Provider"),
+      color: n.type === "custom-embedding" ? "#6366F1" : (n.type === "anthropic-compatible" ? "#D97757" : "#10A37F"),
+      textIcon: n.type === "custom-embedding" ? "CE" : (n.type === "anthropic-compatible" ? "AC" : "OC"),
+      prefix: n.prefix,
+    }));
 
   const allProviders = [...providers, ...customProviders];
 
@@ -269,6 +307,12 @@ export default function MediaProviderKindPage() {
               connections={connections}
               isCustom
               onToggle={handleToggleProvider}
+              // Compatible nodes are managed on the provider page (connections,
+              // per-kind endpoints, kind-grouped models); custom-embedding nodes
+              // keep their media detail page.
+              href={isCustomEmbeddingProvider(provider.id)
+                ? `/dashboard/media-providers/${kind}/${provider.id}`
+                : `/dashboard/providers/${provider.id}`}
             />
           ))}
         </div>
