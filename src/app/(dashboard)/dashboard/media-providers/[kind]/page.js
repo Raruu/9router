@@ -265,22 +265,6 @@ export default function MediaProviderKindPage() {
         </div>
       )}
 
-      {/* Custom embeddings are no longer created here: an OpenAI-compatible
-          provider (with its per-kind Embedding endpoint) plus an Embedding
-          model is the supported flow, and the union listing surfaces it. */}
-      {kind === "embedding" && (
-        <div className="flex items-start gap-2 rounded-lg border border-border bg-bg-alt/40 px-3 py-2">
-          <span className="material-symbols-outlined shrink-0 text-[16px] text-text-muted">info</span>
-          <p className="min-w-0 flex-1 text-xs leading-relaxed text-text-muted">
-            Custom embedding providers are added from the{" "}
-            <Link href="/dashboard/providers" className="font-medium text-primary hover:underline">
-              Providers page
-            </Link>
-            : create an OpenAI-compatible provider, then add an Embedding model to it. It appears here automatically.
-          </p>
-        </div>
-      )}
-
       {supportsCombo && kindCombos.length > 0 && (
         <ComboList combos={kindCombos} />
       )}
