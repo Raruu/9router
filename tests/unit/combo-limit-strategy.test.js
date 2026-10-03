@@ -10,7 +10,8 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 
 import { mergeMemberCapabilities, comboCapabilities } from "../../open-sse/providers/comboCapabilities.js";
-import { getCapabilitiesForModel } from "../../open-sse/providers/capabilities.js";
+import { getCapabilitiesForModel, setCatalogSource } from "../../open-sse/providers/capabilities.js";
+import { createCatalogResolver } from "../../src/lib/modelCatalog/resolution.js";
 
 const caps = (fullModel) => {
   const slash = fullModel.indexOf("/");
@@ -77,6 +78,72 @@ describe("mergeMemberCapabilities — limit strategy", () => {
     );
     expect(merged.contextWindow).toBe(200000);
     expect(Number.isFinite(merged.maxOutput)).toBe(true);
+  });
+});
+
+// minOutput is catalog-only (absent from DEFAULT_CAPABILITIES), so the key loop
+// cannot carry it — it merges separately, same direction rule as the numeric
+// limits, and never advertises a floor above the advertised ceiling.
+describe("mergeMemberCapabilities — minOutput", () => {
+  const withFloor = (caps, minOutput, maxOutput) => ({ ...caps, ...(minOutput ? { minOutput } : {}), ...(maxOutput ? { maxOutput } : {}) });
+
+  it("omits the key when no member declares a floor (2-column LimitsRow layout)", () => {
+    const merged = mergeMemberCapabilities(memberCaps());
+    expect("minOutput" in merged).toBe(false);
+  });
+
+  it("takes the largest floor by default and the smallest under min", () => {
+    const members = [
+      withFloor(caps("vs-llm/glm-5.3-flash"), 8000),
+      withFloor(caps("openai/gpt-5.4"), 12000),
+    ];
+    expect(mergeMemberCapabilities(members).minOutput).toBe(12000);
+    expect(mergeMemberCapabilities(members, "min").minOutput).toBe(8000);
+  });
+
+  it("ignores members without a floor instead of dragging the value down", () => {
+    const merged = mergeMemberCapabilities([
+      withFloor(caps("vs-llm/glm-5.3-flash"), 8000),
+      caps("openai/gpt-5.4"),
+    ]);
+    expect(merged.minOutput).toBe(8000);
+  });
+
+  it("drops non-positive and non-finite floors", () => {
+    const merged = mergeMemberCapabilities([
+      withFloor(caps("vs-llm/glm-5.3-flash"), 0),
+      withFloor(caps("openai/gpt-5.4"), Number.NaN),
+      withFloor(caps("anthropic/claude-opus-4.6"), -5),
+    ]);
+    expect("minOutput" in merged).toBe(false);
+  });
+
+  it("clamps the floor to the merged maxOutput ceiling", () => {
+    const members = [
+      withFloor(caps("vs-llm/glm-5.3-flash"), 200000, 4096),
+    ];
+    const merged = mergeMemberCapabilities(members);
+    expect(merged.maxOutput).toBe(4096);
+    expect(merged.minOutput).toBe(4096);
+  });
+
+  it("carries the floor through comboCapabilities and nested combos", () => {
+    // A catalog rule supplies the floor (minOutput is catalog-only), then the
+    // merge must surface it at the combo level and through a nested member.
+    setCatalogSource(createCatalogResolver({
+      userRules: [{ provider: "vs-llm", pattern: "glm-5.3-flash", data: { capabilities: { minOutput: 9000 } } }],
+    }));
+    try {
+      const ctx = { providerIdByPrefix: new Map(), comboByName: new Map(), modelAliases: {} };
+      const flat = comboCapabilities({ name: "flat", models: ["vs-llm/glm-5.3-flash"] }, ctx);
+      expect(flat.minOutput).toBe(9000);
+
+      ctx.comboByName.set("inner", { name: "inner", models: ["vs-llm/glm-5.3-flash"] });
+      const outer = comboCapabilities({ name: "outer", models: ["inner"] }, ctx);
+      expect(outer.minOutput).toBe(9000);
+    } finally {
+      setCatalogSource(null);
+    }
   });
 });
 
