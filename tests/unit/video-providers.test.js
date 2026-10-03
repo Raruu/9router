@@ -37,11 +37,21 @@ describe("registry wiring", () => {
     expect(PROVIDER_MEDIA.vertex.serviceKinds).toContain("video");
   });
 
+  it("exposes videoConfig + video serviceKind for runwayml", () => {
+    expect(getVideoConfig("runwayml").baseUrl).toBe("https://api.dev.runwayml.com/v1");
+    expect(PROVIDER_MEDIA.runwayml.serviceKinds).toContain("video");
+  });
+
   it("registers video-kind models on both providers", () => {
     const or = PROVIDER_MODELS.openrouter.find((m) => m.id === "google/veo-3.1");
     const vx = PROVIDER_MODELS.vertex.find((m) => m.id === "veo-3.1-generate-preview");
     expect(or?.kind).toBe("video");
     expect(vx?.kind).toBe("video");
+  });
+
+  it("registers video-kind models on runwayml", () => {
+    const rw = PROVIDER_MODELS.runwayml.find((m) => m.id === "gen4_turbo");
+    expect(rw?.kind).toBe("video");
   });
 });
 
@@ -291,6 +301,121 @@ describe("vertex (veo) video adapter", () => {
       credentials: { apiKey: saJson },
     });
     expect(result.status).toBe(400);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("runwayml video adapter", () => {
+  beforeEach(() => { global.fetch = vi.fn(); });
+  afterEach(() => { global.fetch = originalFetch; });
+
+  it("POSTs an image_to_video task with the translated body", async () => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ id: "task-1" }));
+
+    const result = await handleVideoProxyCore({
+      provider: "runwayml",
+      action: "generations",
+      rawBody: JSON.stringify({
+        model: "gen4_turbo",
+        prompt: "a paper boat",
+        size: "1792x1024",
+        duration: 8,
+        image: "https://example.com/src.png",
+      }),
+      contentType: "application/json",
+      credentials: { apiKey: "rw-key" },
+    });
+
+    expect(result.success).toBe(true);
+    const [url, init] = global.fetch.mock.calls[0];
+    expect(url).toBe("https://api.dev.runwayml.com/v1/image_to_video");
+    expect(init.method).toBe("POST");
+    expect(init.headers.Authorization).toBe("Bearer rw-key");
+    expect(init.headers["X-Runway-Version"]).toBe("2024-11-06");
+    expect(JSON.parse(init.body)).toEqual({
+      promptText: "a paper boat",
+      model: "gen4_turbo",
+      ratio: "16:9",
+      duration: 8,
+      promptImage: "https://example.com/src.png",
+    });
+    // Create response carries only an id — mapped to a poll-able pending job.
+    expect(await result.response.json()).toEqual({ id: "task-1", request_id: "task-1", status: "pending" });
+  });
+
+  it("defaults duration and omits promptImage when no image is sent", async () => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ id: "task-2" }));
+
+    await handleVideoProxyCore({
+      provider: "runwayml",
+      action: "generations",
+      rawBody: JSON.stringify({ model: "gen4_turbo", prompt: "x" }),
+      contentType: "application/json",
+      credentials: { apiKey: "rw-key" },
+    });
+
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body)).toEqual({
+      promptText: "x",
+      model: "gen4_turbo",
+      ratio: "1:1",
+      duration: 5,
+    });
+  });
+
+  it("polls GET /tasks/{id} and maps a completed task", async () => {
+    global.fetch.mockResolvedValueOnce(
+      jsonResponse({ id: "task-3", status: "SUCCEEDED", output: ["https://cdn/v.mp4"] })
+    );
+
+    const result = await handleVideoProxyCore({
+      provider: "runwayml",
+      requestId: "task-3",
+      credentials: { apiKey: "rw-key" },
+    });
+
+    const [url, init] = global.fetch.mock.calls[0];
+    expect(url).toBe("https://api.dev.runwayml.com/v1/tasks/task-3");
+    expect(init.method).toBe("GET");
+    expect(await result.response.json()).toEqual({
+      id: "task-3",
+      request_id: "task-3",
+      status: "completed",
+      video: { url: "https://cdn/v.mp4", b64_json: null, mime_type: "video/mp4" },
+      videos: [{ url: "https://cdn/v.mp4", b64_json: null, mime_type: "video/mp4" }],
+    });
+  });
+
+  it("maps RUNNING to pending and FAILED to a failed job", async () => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ id: "task-4", status: "RUNNING" }));
+    const running = await handleVideoProxyCore({ provider: "runwayml", requestId: "task-4", credentials: { apiKey: "k" } });
+    expect((await running.response.json()).status).toBe("pending");
+
+    global.fetch.mockResolvedValueOnce(jsonResponse({ id: "task-5", status: "FAILED", failure: "moderation" }));
+    const failed = await handleVideoProxyCore({ provider: "runwayml", requestId: "task-5", credentials: { apiKey: "k" } });
+    const body = await failed.response.json();
+    expect(body.status).toBe("failed");
+    expect(body.error).toBe("moderation");
+  });
+
+  it("rejects unsupported actions and missing prompt before any upstream call", async () => {
+    const action = await handleVideoProxyCore({
+      provider: "runwayml",
+      action: "extensions",
+      rawBody: "{}",
+      contentType: "application/json",
+      credentials: { apiKey: "k" },
+    });
+    expect(action.status).toBe(400);
+
+    const noPrompt = await handleVideoProxyCore({
+      provider: "runwayml",
+      action: "generations",
+      rawBody: JSON.stringify({ model: "gen4_turbo" }),
+      contentType: "application/json",
+      credentials: { apiKey: "k" },
+    });
+    expect(noPrompt.status).toBe(400);
+
     expect(global.fetch).not.toHaveBeenCalled();
   });
 });
