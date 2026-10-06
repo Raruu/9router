@@ -1,3 +1,20 @@
+# v0.5.95-4 (2026-10-06)
+
+## Features
+- **Console Log**: retention is a runtime setting — the server buffer and the
+  dashboard keep up to `consoleLogMaxLines` lines (10–10000, default 200),
+  editable from an inline toolbar control and applied without a restart;
+  shrinking trims the existing buffer immediately
+- **Providers**: the Custom Headers card gains Export/Import — export
+  downloads every displayed row as JSON, import validates the file against the
+  server's override rules and merges it into the editor for review before Save
+
+## Fixes
+- **Translator**: Responses tool outputs carrying `input_image` parts (Codex
+  view_image / screenshots) are forwarded as image blocks instead of
+  stringified base64, which billed multi-MB screenshots as text and blew past
+  Claude's 1M-token limit (#4518 by @hhalai007)
+
 # v0.5.95-3 (2026-10-03)
 
 ## Features

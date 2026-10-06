@@ -1,9 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import PropTypes from "prop-types";
 import { Card, Badge } from "@/shared/components";
 import { useNotificationStore } from "@/store/notificationStore";
+import {
+  buildHeaderExport,
+  buildHeaderExportFilename,
+  collectDisplayedHeaders,
+  parseHeaderImport,
+} from "./customHeaderTransfer";
 
 // Mirrors the server-side gate in /api/providers/[id]/overrides — client check is UX only
 const BLOCKED_HEADERS = ["host", "content-length", "content-type", "connection", "transfer-encoding", "authorization", "cookie"];
@@ -16,6 +22,7 @@ export default function CustomConfigCard({ providerId, alwaysVisible = false }) 
   const [builtin, setBuiltin] = useState({});
   const [hasOverride, setHasOverride] = useState(false);
   const [saving, setSaving] = useState(false);
+  const importFileRef = useRef(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -81,6 +88,60 @@ export default function CustomConfigCard({ providerId, alwaysVisible = false }) 
 
   const resetToBuiltin = () => {
     setRows(Object.entries(builtin).map(([name, value]) => ({ name, value })));
+  };
+
+  // Export every displayed row (builtins + overrides), matching what the user
+  // sees in the editor.
+  const handleExport = () => {
+    const headers = collectDisplayedHeaders(rows);
+    if (Object.keys(headers).length === 0) {
+      notify.error("No headers to export");
+      return;
+    }
+    const payload = buildHeaderExport(providerId, headers);
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = buildHeaderExportFilename(providerId);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    notify.success(`Exported ${Object.keys(headers).length} header(s)`);
+  };
+
+  const handleImportFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (importFileRef.current) importFileRef.current.value = "";
+    if (!file) return;
+
+    let imported;
+    try {
+      imported = parseHeaderImport(await file.text());
+    } catch (err) {
+      notify.error(err.message || "Invalid header file");
+      return;
+    }
+
+    // Merge into the editor (incoming wins on duplicates); nothing persists
+    // until Save, so the user can review the result first.
+    setRows((prev) => {
+      const merged = new Map();
+      for (const row of prev) {
+        const name = row.name.trim();
+        if (name) merged.set(name.toLowerCase(), { name, value: row.value });
+      }
+      for (const { name, value } of imported.headers) {
+        const key = name.toLowerCase();
+        const existing = merged.get(key);
+        merged.set(key, { name: existing?.name || name, value });
+      }
+      const next = [...merged.values()];
+      return next.length ? next : [{ name: "", value: "" }];
+    });
+    setExpanded(true);
+    notify.success(`Imported ${imported.headers.length} header(s) — review and Save`);
   };
 
   // Custom provider nodes (openai-/anthropic-compatible) have no registry
@@ -150,15 +211,43 @@ export default function CustomConfigCard({ providerId, alwaysVisible = false }) 
             })}
           </div>
 
-          <div className="mt-3 flex items-center justify-between gap-2">
-            <button
-              type="button"
-              onClick={() => setRows((prev) => [...prev, { name: "", value: "" }])}
-              className="flex items-center gap-1 text-xs text-primary hover:underline"
-            >
-              <span className="material-symbols-outlined text-[16px]">add</span>
-              Add header
-            </button>
+          <div className="mt-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-2">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+              <button
+                type="button"
+                onClick={() => setRows((prev) => [...prev, { name: "", value: "" }])}
+                className="flex items-center gap-1 text-xs text-primary hover:underline"
+              >
+                <span className="material-symbols-outlined text-[16px]">add</span>
+                Add header
+              </button>
+              <button
+                type="button"
+                onClick={handleExport}
+                disabled={Object.keys(collectDisplayedHeaders(rows)).length === 0}
+                title="Download all displayed headers as JSON"
+                className="flex items-center gap-1 text-xs text-primary hover:underline disabled:opacity-40"
+              >
+                <span className="material-symbols-outlined text-[16px]">download</span>
+                Export
+              </button>
+              <button
+                type="button"
+                onClick={() => importFileRef.current?.click()}
+                title="Merge headers from a JSON file into the editor"
+                className="flex items-center gap-1 text-xs text-primary hover:underline"
+              >
+                <span className="material-symbols-outlined text-[16px]">upload</span>
+                Import
+              </button>
+              <input
+                ref={importFileRef}
+                type="file"
+                accept=".json,application/json"
+                className="hidden"
+                onChange={handleImportFile}
+              />
+            </div>
             <div className="flex gap-2">
               <button
                 type="button"

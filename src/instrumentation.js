@@ -1,12 +1,15 @@
 export async function register() {
   if (process.env.NEXT_RUNTIME === "nodejs") {
-    const { initConsoleLogCapture } = await import("@/lib/consoleLogBuffer");
+    const { initConsoleLogCapture, applyConsoleLogMaxLines } = await import("@/lib/consoleLogBuffer");
     initConsoleLogCapture();
 
     // Server-only composite snapshot. Runtime modules keep sync seams and never
     // import SQLite/node APIs into browser bundles.
     const { installModelCatalogRuntime } = await import("@/lib/modelCatalog/runtime.js");
     await installModelCatalogRuntime();
+
+    // Persisted console-log retention (settings.consoleLogMaxLines)
+    await applyConsoleLogMaxLines();
 
     // Reset persisted exponential 429 backoff once per process. Keep active
     // model locks intact so restart never bypasses a real cooldown.

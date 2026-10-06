@@ -1,4 +1,5 @@
 import pkg from "../../../package.json" with { type: "json" };
+import { CONSOLE_LOG_LIMITS } from "../utils/consoleLogLimits.js";
 
 // App configuration
 export const APP_CONFIG = {
@@ -55,7 +56,9 @@ export const API_ENDPOINTS = {
 };
 
 export const CONSOLE_LOG_CONFIG = {
-  maxLines: 200,
+  // Runtime-adjustable via settings.consoleLogMaxLines (see consoleLogLimits.js);
+  // this is only the fallback when no setting is stored yet.
+  maxLines: CONSOLE_LOG_LIMITS.default,
   pollIntervalMs: 1000,
 };
 

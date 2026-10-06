@@ -40,6 +40,14 @@ export async function POST(request) {
       console.warn("[Settings][DatabaseImport] Failed to re-apply outbound proxy env:", err);
     }
 
+    // Console-log retention lives in the imported settings too.
+    try {
+      const { applyConsoleLogMaxLines } = await import("@/lib/consoleLogBuffer");
+      await applyConsoleLogMaxLines();
+    } catch (err) {
+      console.warn("[Settings][DatabaseImport] Failed to re-apply console log limit:", err);
+    }
+
     return NextResponse.json({ success: true });
   } catch (error) {
     console.log("Error importing database:", error);

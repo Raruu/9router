@@ -1,6 +1,7 @@
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { DEFAULT_MODEL_CATALOG_PRIORITY, MODEL_CATALOG_PRIORITIES } from "../../modelCatalog/validation.js";
+import { CONSOLE_LOG_LIMITS } from "../../../shared/utils/consoleLogLimits.js";
 
 const DEFAULT_MITM_ROUTER_BASE = "http://localhost:20128";
 const DEFAULT_HEADROOM_URL = process.env.HEADROOM_URL || "http://localhost:8787";
@@ -96,6 +97,9 @@ export const DEFAULT_SETTINGS = {
   pxpipeAutoInstall: true,
   pxpipeMinChars: 25000,
   pxpipeTimeoutMs: 15000,
+  // How many console lines the server buffer keeps (and streams to the
+  // dashboard). Bounds live in shared/utils/consoleLogLimits.js.
+  consoleLogMaxLines: CONSOLE_LOG_LIMITS.default,
   modelCatalogPriority: DEFAULT_MODEL_CATALOG_PRIORITY,
   // Per-provider user header overrides applied at dispatch: { [providerId]: { headers: {..} } }
   providerOverrides: {},
