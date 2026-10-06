@@ -649,6 +649,19 @@ function refine(base, provider, model) {
     }
   }
 
+  // Context window as a share of the inherited size (Model Catalog → Context
+  // window %): compute the absolute here — the single funnel every consumer
+  // (dispatch, /v1/models, capacity adapter, combos) reads — and strip the
+  // rule-layer key so the resolved shape stays absolute-only.
+  const percent = Number(result.contextWindowPercent);
+  if (Number.isFinite(percent) && percent > 0 && percent <= 100) {
+    const baseWindow = Number(result.contextWindow);
+    if (isPositiveNumber(baseWindow)) {
+      result.contextWindow = Math.max(1, Math.floor((baseWindow * percent) / 100));
+    }
+  }
+  delete result.contextWindowPercent;
+
   // Output clamp (Model Catalog → Clamp output): mark the ceiling a
   // client-sent output cap may be lowered to. `clampMaxOutput` arrives as
   // true/false from the rules (runtime injects true from the global setting

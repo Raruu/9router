@@ -71,21 +71,48 @@ describe("model catalog API backend", () => {
     })).toThrow(/minOutput/i);
   });
 
-  it("round-trips clampMaxOutput", async () => {
+  it("round-trips clampMaxOutput and contextWindowPercent", async () => {
     const backend = await import("../../src/app/api/models/catalog/_backend.js");
     const entry = backend.validateUserEntry({
       provider: "acme",
       pattern: "big-*",
       matchType: "glob",
+      contextWindowPercent: 80,
       maxOutput: 128000,
       capabilities: { clampMaxOutput: true },
     });
     await backend.saveUserEntry(entry);
     const catalog = await backend.getCatalog();
     expect(catalog.userDefined[0].capabilities).toMatchObject({
+      contextWindowPercent: 80,
       maxOutput: 128000,
       clampMaxOutput: true,
     });
+  });
+
+  it("rejects a percent combined with an absolute window and out-of-range percents", async () => {
+    const backend = await import("../../src/app/api/models/catalog/_backend.js");
+    expect(() => backend.validateUserEntry({
+      provider: "acme",
+      pattern: "big-*",
+      matchType: "glob",
+      contextWindow: 1000000,
+      contextWindowPercent: 80,
+    })).toThrow(/mutually exclusive/i);
+
+    expect(() => backend.validateUserEntry({
+      provider: "acme",
+      pattern: "big-*",
+      matchType: "glob",
+      contextWindowPercent: 150,
+    })).toThrow(/contextWindowPercent/);
+
+    expect(() => backend.validateUserEntry({
+      provider: "acme",
+      pattern: "big-*",
+      matchType: "glob",
+      contextWindowPercent: 0,
+    })).toThrow(/contextWindowPercent/);
   });
 
   it("round-trips thinking overrides and rejects unknown formats", async () => {

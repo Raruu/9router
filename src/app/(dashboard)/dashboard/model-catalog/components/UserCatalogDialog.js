@@ -47,6 +47,7 @@ function emptyForm() {
     name: "",
     capabilities: Object.fromEntries(BOOLEAN_FIELDS.map(([key]) => [key, "inherit"])),
     contextWindow: "",
+    contextWindowPercent: "",
     maxOutput: "",
     minOutput: "",
     clampMaxOutput: "inherit",
@@ -75,6 +76,7 @@ function editForm(entry) {
     name: entry.name ?? "",
     capabilities: Object.fromEntries(BOOLEAN_FIELDS.map(([key]) => [key, triState(capabilities[key])])),
     contextWindow: entry.contextWindow ?? entry.data?.contextWindow ?? capabilities.contextWindow ?? "",
+    contextWindowPercent: entry.contextWindowPercent ?? entry.data?.contextWindowPercent ?? capabilities.contextWindowPercent ?? "",
     maxOutput: entry.maxOutput ?? entry.data?.maxOutput ?? capabilities.maxOutput ?? "",
     minOutput: entry.minOutput ?? entry.data?.minOutput ?? capabilities.minOutput ?? "",
     clampMaxOutput: triState(capabilities.clampMaxOutput),
@@ -96,6 +98,11 @@ export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSa
   const editing = entry?.source === "user";
 
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
+  // The absolute window and its share are mutually exclusive — typing in one
+  // clears the other, so the saved rule can never carry both (the API would
+  // reject it). Same one-way behavior as the server-side validation.
+  const updateContextWindow = (value) => setForm((current) => ({ ...current, contextWindow: value, ...(value !== "" ? { contextWindowPercent: "" } : {}) }));
+  const updateContextWindowPercent = (value) => setForm((current) => ({ ...current, contextWindowPercent: value, ...(value !== "" ? { contextWindow: "" } : {}) }));
   const updateCapability = (field, value) => setForm((current) => ({
     ...current,
     capabilities: { ...current.capabilities, [field]: value },
@@ -119,6 +126,11 @@ export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSa
     }
     if (form.matchType === "exact" && pattern.includes("*")) {
       setError("An exact pattern cannot contain *.");
+      return;
+    }
+    const percent = toNumber(form.contextWindowPercent);
+    if (percent !== null && (!Number.isInteger(percent) || percent < 1 || percent > 100)) {
+      setError("Context window % must be a whole number between 1 and 100.");
       return;
     }
     setError("");
@@ -146,6 +158,7 @@ export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSa
         ...(levels.length ? { thinkingLevels: levels } : {}),
       },
       contextWindow: toNumber(form.contextWindow),
+      contextWindowPercent: toNumber(form.contextWindowPercent),
       maxOutput: toNumber(form.maxOutput),
       minOutput: toNumber(form.minOutput),
       pricing: Object.fromEntries(Object.entries(form.pricing).map(([key, value]) => [key, toNumber(value)])),
@@ -203,10 +216,11 @@ export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSa
         <fieldset>
           <legend className="mb-1 text-sm font-semibold">Token limits</legend>
           <p className="mb-3 text-xs text-text-muted">
-            Min output raises a client&apos;s smaller output cap to at least this value, so a reasoning model cannot spend the whole budget thinking and return an empty turn. Clamp output lowers a client&apos;s larger cap to Max output so the upstream cannot reject it.
+            Context window % shrinks the inherited window (80% of a 1M pattern = 800K) and cannot be combined with an absolute window. Min output raises a client&apos;s smaller output cap to at least this value, so a reasoning model cannot spend the whole budget thinking and return an empty turn. Clamp output lowers a client&apos;s larger cap to Max output so the upstream cannot reject it.
           </p>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Input type="number" min="1" step="1" label="Context window" value={form.contextWindow} onChange={(event) => update("contextWindow", event.target.value)} placeholder="Inherit" />
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Input type="number" min="1" step="1" label="Context window" value={form.contextWindow} onChange={(event) => updateContextWindow(event.target.value)} placeholder="Inherit" />
+            <Input type="number" min="1" max="100" step="1" label="Context window %" value={form.contextWindowPercent} onChange={(event) => updateContextWindowPercent(event.target.value)} placeholder="Inherit" />
             <Input type="number" min="1" step="1" label="Max output" value={form.maxOutput} onChange={(event) => update("maxOutput", event.target.value)} placeholder="Inherit" />
             <Input type="number" min="1" step="1" label="Min output" value={form.minOutput} onChange={(event) => update("minOutput", event.target.value)} placeholder="Inherit" />
           </div>

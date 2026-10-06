@@ -15,6 +15,8 @@ import { ModelCatalogConflictError, ModelCatalogNotFoundError } from "@/lib/mode
 import { getHardcodedCatalogEntries } from "@/lib/modelCatalog/catalog.js";
 import { normalizeOpenRouterModels } from "@/lib/modelCatalog/normalize.js";
 import {
+  CONTEXT_WINDOW_PERCENT_MAX,
+  CONTEXT_WINDOW_PERCENT_MIN,
   MODEL_CATALOG_PRIORITIES,
   THINKING_FORMATS,
   sanitizeCatalogData,
@@ -147,6 +149,19 @@ export function validateUserEntry(value) {
     if (number !== null) pricing[field] = number;
   }
 
+  // Context window: an absolute token count or a share of the inherited size,
+  // never both — a rule that sent both would resolve one and silently ignore
+  // the other. The percent is validated to the shrink-only range here so the
+  // error message names the field instead of the value vanishing in sanitize.
+  const contextWindow = optionalNumber(value.contextWindow, "contextWindow");
+  const contextWindowPercent = optionalNumber(value.contextWindowPercent, "contextWindowPercent");
+  if (contextWindow !== null && contextWindowPercent !== null) {
+    throw new CatalogBackendError("contextWindow and contextWindowPercent are mutually exclusive", 400);
+  }
+  if (contextWindowPercent !== null && (contextWindowPercent < CONTEXT_WINDOW_PERCENT_MIN || contextWindowPercent > CONTEXT_WINDOW_PERCENT_MAX)) {
+    throw new CatalogBackendError(`contextWindowPercent must be between ${CONTEXT_WINDOW_PERCENT_MIN} and ${CONTEXT_WINDOW_PERCENT_MAX}`, 400);
+  }
+
   return {
     provider,
     pattern,
@@ -155,7 +170,8 @@ export function validateUserEntry(value) {
     data: sanitizeCatalogData({
       capabilities: {
         ...capabilities,
-        ...(optionalNumber(value.contextWindow, "contextWindow") !== null ? { contextWindow: Number(value.contextWindow) } : {}),
+        ...(contextWindow !== null ? { contextWindow: Number(value.contextWindow) } : {}),
+        ...(contextWindowPercent !== null ? { contextWindowPercent: Number(value.contextWindowPercent) } : {}),
         ...(optionalNumber(value.maxOutput, "maxOutput") !== null ? { maxOutput: Number(value.maxOutput) } : {}),
         // Floor applied at dispatch: a client-sent output cap below this is
         // raised to it (reasoning-heavy models otherwise return empty turns).
