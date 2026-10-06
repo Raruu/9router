@@ -71,6 +71,23 @@ describe("model catalog API backend", () => {
     })).toThrow(/minOutput/i);
   });
 
+  it("round-trips clampMaxOutput", async () => {
+    const backend = await import("../../src/app/api/models/catalog/_backend.js");
+    const entry = backend.validateUserEntry({
+      provider: "acme",
+      pattern: "big-*",
+      matchType: "glob",
+      maxOutput: 128000,
+      capabilities: { clampMaxOutput: true },
+    });
+    await backend.saveUserEntry(entry);
+    const catalog = await backend.getCatalog();
+    expect(catalog.userDefined[0].capabilities).toMatchObject({
+      maxOutput: 128000,
+      clampMaxOutput: true,
+    });
+  });
+
   it("round-trips thinking overrides and rejects unknown formats", async () => {
     const backend = await import("../../src/app/api/models/catalog/_backend.js");
     const entry = backend.validateUserEntry({

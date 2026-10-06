@@ -34,6 +34,7 @@ const BOOLEAN_CAPABILITIES = [
   "reasoning",
   "thinkingCanDisable",
   "thinkingEnforce",
+  "clampMaxOutput",
 ];
 
 const PRICING_FIELDS = [
@@ -64,6 +65,7 @@ export async function getCatalog() {
   ]);
   return {
     priority: settings.modelCatalogPriority,
+    clampMaxOutput: settings.modelCatalogClampMaxOutput === true,
     userDefined: users.map((row) => ({ source: "user", ...row, ...row.data, pricingPerMillion: true })),
     openrouter: {
       models: openrouter.map((row) => ({ source: "openrouter", provider: "*", matchType: "glob", ...row, ...row.data, pricingPerMillion: true })),
@@ -223,6 +225,13 @@ export async function setPriority(priority) {
     throw new CatalogBackendError("Invalid catalog priority", 400);
   }
   return await updateSettings({ modelCatalogPriority: priority });
+}
+
+export async function setClampMaxOutput(value) {
+  if (typeof value !== "boolean") {
+    throw new CatalogBackendError("clampMaxOutput must be a boolean", 400);
+  }
+  return await updateSettings({ modelCatalogClampMaxOutput: value });
 }
 
 export function validateOpenRouterResponse(payload) {

@@ -38,9 +38,18 @@ export async function refreshModelCatalogRuntime() {
     priority: settings.modelCatalogPriority,
     normalizeProviderId: resolveProviderId,
   });
+  const clampGlobal = settings.modelCatalogClampMaxOutput === true;
   const source = {
     getCapabilities(provider, model, hardcoded) {
-      return resolver.getCapabilities(provider, model, { ...hardcoded, ...modelsDevCapabilities(provider, model) });
+      const caps = resolver.getCapabilities(provider, model, { ...hardcoded, ...modelsDevCapabilities(provider, model) });
+      // Global default for the output clamp (Model Catalog → Clamp output):
+      // a rule's explicit true/false wins; only `undefined` (no rule says
+      // anything) follows the toggle. Injected only when on so models without
+      // a policy don't all grow an extra resolved key.
+      if (caps.clampMaxOutput === undefined && clampGlobal) {
+        return { ...caps, clampMaxOutput: true };
+      }
+      return caps;
     },
     getPricing: resolver.getPricing,
   };

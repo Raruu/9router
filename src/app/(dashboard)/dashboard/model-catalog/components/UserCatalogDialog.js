@@ -49,12 +49,17 @@ function emptyForm() {
     contextWindow: "",
     maxOutput: "",
     minOutput: "",
+    clampMaxOutput: "inherit",
     pricing: Object.fromEntries(PRICE_FIELDS.map(([key]) => [key, ""])),
     thinkingFormatOverride: "",
     thinkingLevels: "",
     thinkingCanDisable: "inherit",
     thinkingEnforce: false,
   };
+}
+
+function triState(value) {
+  return value === true ? "yes" : value === false ? "no" : "inherit";
 }
 
 function editForm(entry) {
@@ -68,17 +73,15 @@ function editForm(entry) {
     pattern: entry.pattern ?? entry.model ?? entry.modelId ?? "",
     matchType: entry.matchType ?? (entry.pattern?.includes("*") ? "glob" : "exact"),
     name: entry.name ?? "",
-    capabilities: Object.fromEntries(BOOLEAN_FIELDS.map(([key]) => [
-      key,
-      capabilities[key] === true ? "yes" : capabilities[key] === false ? "no" : "inherit",
-    ])),
+    capabilities: Object.fromEntries(BOOLEAN_FIELDS.map(([key]) => [key, triState(capabilities[key])])),
     contextWindow: entry.contextWindow ?? entry.data?.contextWindow ?? capabilities.contextWindow ?? "",
     maxOutput: entry.maxOutput ?? entry.data?.maxOutput ?? capabilities.maxOutput ?? "",
     minOutput: entry.minOutput ?? entry.data?.minOutput ?? capabilities.minOutput ?? "",
+    clampMaxOutput: triState(capabilities.clampMaxOutput),
     pricing: Object.fromEntries(PRICE_FIELDS.map(([key]) => [key, pricing[key] ?? ""])),
     thinkingFormatOverride: capabilities.thinkingFormatOverride ?? "",
     thinkingLevels: Array.isArray(capabilities.thinkingLevels) ? capabilities.thinkingLevels.join(", ") : "",
-    thinkingCanDisable: capabilities.thinkingCanDisable === true ? "yes" : capabilities.thinkingCanDisable === false ? "no" : "inherit",
+    thinkingCanDisable: triState(capabilities.thinkingCanDisable),
     thinkingEnforce: capabilities.thinkingEnforce === true,
   };
 }
@@ -136,6 +139,7 @@ export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSa
         ])),
         thinkingFormatOverride: form.thinkingFormatOverride || null,
         thinkingCanDisable: form.thinkingCanDisable === "inherit" ? null : form.thinkingCanDisable === "yes",
+        clampMaxOutput: form.clampMaxOutput === "inherit" ? null : form.clampMaxOutput === "yes",
         // Only sent when on: an explicit false would override a broader rule
         // that enforces, so "off" means inherit here like the other optional keys.
         ...(form.thinkingEnforce ? { thinkingEnforce: true } : {}),
@@ -199,12 +203,18 @@ export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSa
         <fieldset>
           <legend className="mb-1 text-sm font-semibold">Token limits</legend>
           <p className="mb-3 text-xs text-text-muted">
-            Min output raises a client&apos;s smaller output cap to at least this value, so a reasoning model cannot spend the whole budget thinking and return an empty turn. Applies only when the client sends a cap; leave on Inherit for no floor.
+            Min output raises a client&apos;s smaller output cap to at least this value, so a reasoning model cannot spend the whole budget thinking and return an empty turn. Clamp output lowers a client&apos;s larger cap to Max output so the upstream cannot reject it.
           </p>
           <div className="grid gap-4 sm:grid-cols-3">
             <Input type="number" min="1" step="1" label="Context window" value={form.contextWindow} onChange={(event) => update("contextWindow", event.target.value)} placeholder="Inherit" />
             <Input type="number" min="1" step="1" label="Max output" value={form.maxOutput} onChange={(event) => update("maxOutput", event.target.value)} placeholder="Inherit" />
             <Input type="number" min="1" step="1" label="Min output" value={form.minOutput} onChange={(event) => update("minOutput", event.target.value)} placeholder="Inherit" />
+          </div>
+          <div className="mt-3">
+            <Select label="Clamp output" value={form.clampMaxOutput} onChange={(event) => update("clampMaxOutput", event.target.value)} options={TRI_STATE_OPTIONS} />
+            <p className="mt-1 text-[11px] text-text-muted">
+              Yes lowers an explicitly-sent output cap to Max output; No disables the global clamp for matching models; Inherit follows the page toggle.
+            </p>
           </div>
         </fieldset>
 

@@ -4,6 +4,7 @@ import { applyThinking, extractThinking, stripThinkingSuffix } from "../translat
 import { FORMATS } from "../translator/formats.js";
 import { normalizeClaudePassthrough, anchorClaudeCache } from "../translator/formats/claude.js";
 import { applyMinOutputFloor, resolveMinOutputFloor } from "../translator/formats/minTokens.js";
+import { applyMaxOutputClamp, resolveMaxOutputClamp } from "../translator/formats/maxOutputClamp.js";
 import { createStreamController } from "../utils/streamHandler.js";
 import { providerDisplayLabel } from "../utils/providerLabel.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
@@ -318,6 +319,17 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
   }
 
   if (xf.length && log?.line) log.line(reqTag, "⚙", xf.join(" · "));
+
+  // Output clamp (Model Catalog → Clamp output): lower a too-large client-sent
+  // cap to the model's explicit Max output. Only explicit caps are lowered, and
+  // only when a catalog layer declares the ceiling — the 64K fallback must not
+  // shrink a client that knows better. Runs before the floor below so a raised
+  // value can never be re-lowered by the same model's ceiling.
+  const maxOutputClamp = resolveMaxOutputClamp(provider, model);
+  if (maxOutputClamp !== null) {
+    const lowered = applyMaxOutputClamp(translatedBody, finalFormat, maxOutputClamp);
+    if (lowered > 0) log?.debug?.("MAXOUT", `${displayProvider.toUpperCase()} | ${model} | lowered ${lowered} cap field(s) to ${maxOutputClamp}`);
+  }
 
   // Minimum output floor (Model Catalog → Min output): raise a too-small
   // client-sent cap so reasoning-heavy models don't return empty turns. Only

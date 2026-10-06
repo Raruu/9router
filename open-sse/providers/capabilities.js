@@ -620,10 +620,17 @@ function refine(base, provider, model) {
   const hardcoded = { ...(base || {}) };
   if (hardcoded.vision !== true && looksLikeVisionModel(model)) hardcoded.vision = true;
   let result = { ...DEFAULT_CAPABILITIES, ...hardcoded };
+  // Whether a layer explicitly declared the output ceiling, as opposed to the
+  // 64K DEFAULT_CAPABILITIES fallback. Only an explicit ceiling may feed the
+  // output clamp: lowering a client to a conservative default it never agreed
+  // to would silently shrink output for every model the tables don't know.
+  let explicitMaxOutput = isPositiveNumber(hardcoded.maxOutput);
 
   const source = getCatalogSource();
   if (source?.getCapabilities) {
-    result = { ...DEFAULT_CAPABILITIES, ...(source.getCapabilities(provider, model, hardcoded) || {}) };
+    const catalogCaps = source.getCapabilities(provider, model, hardcoded) || {};
+    explicitMaxOutput = isPositiveNumber(catalogCaps.maxOutput);
+    result = { ...DEFAULT_CAPABILITIES, ...catalogCaps };
   } else if (source) {
     const modalities = source.getModalities(provider, model);
     if (modalities) {
@@ -635,11 +642,28 @@ function refine(base, provider, model) {
     const limits = source.getLimits(provider, model);
     if (limits) {
       if (limits.contextWindow > 0) result.contextWindow = limits.contextWindow;
-      if (limits.maxOutput > 0) result.maxOutput = limits.maxOutput;
+      if (limits.maxOutput > 0) {
+        result.maxOutput = limits.maxOutput;
+        explicitMaxOutput = true;
+      }
     }
   }
 
+  // Output clamp (Model Catalog → Clamp output): mark the ceiling a
+  // client-sent output cap may be lowered to. `clampMaxOutput` arrives as
+  // true/false from the rules (runtime injects true from the global setting
+  // when a rule leaves it on inherit); only true engages, and only against an
+  // explicitly declared ceiling.
+  if (result.clampMaxOutput === true && explicitMaxOutput) {
+    const ceiling = Number(result.maxOutput);
+    if (isPositiveNumber(ceiling)) result.maxOutputClamp = Math.floor(ceiling);
+  }
+
   return result;
+}
+
+function isPositiveNumber(value) {
+  return Number.isFinite(Number(value)) && Number(value) > 0;
 }
 
 // Mirrors Command Code CLI `isKnownTextOnlyModel` (no image input). New models
