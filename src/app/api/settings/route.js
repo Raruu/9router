@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getSettings, updateSettings } from "@/lib/localDb";
 import { applyOutboundProxyEnv } from "@/lib/network/outboundProxy";
 import { resetComboRotation } from "open-sse/services/combo.js";
+import { setConsoleLogMaxLines } from "@/lib/consoleLogBuffer";
+import { normalizeConsoleLogMaxLines } from "@/shared/utils/consoleLogLimits.js";
 import bcrypt from "bcryptjs";
 
 export const dynamic = "force-dynamic";
@@ -42,6 +44,19 @@ export async function PATCH(request) {
     // Strip protected secrets before any internal handling sets them
     for (const key of PROTECTED_SETTING_KEYS) delete body[key];
 
+    // Console log retention: validate at the trust boundary, then clamp to the
+    // shared bounds so the stored value and the live buffer always agree.
+    if (Object.prototype.hasOwnProperty.call(body, "consoleLogMaxLines")) {
+      const normalized = normalizeConsoleLogMaxLines(body.consoleLogMaxLines);
+      if (normalized === null) {
+        return NextResponse.json(
+          { error: "consoleLogMaxLines must be a whole number" },
+          { status: 400 }
+        );
+      }
+      body.consoleLogMaxLines = normalized;
+    }
+
     // If updating password, hash it
     if (body.newPassword) {
       const settings = await getSettings();
@@ -77,6 +92,11 @@ export async function PATCH(request) {
     }
 
     const settings = await updateSettings(body);
+
+    // Apply console log retention immediately (no restart required)
+    if (Object.prototype.hasOwnProperty.call(body, "consoleLogMaxLines")) {
+      setConsoleLogMaxLines(settings.consoleLogMaxLines);
+    }
 
     // Apply outbound proxy settings immediately (no restart required)
     if (

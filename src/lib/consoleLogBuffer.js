@@ -1,5 +1,6 @@
 import { EventEmitter } from "events";
 import { CONSOLE_LOG_CONFIG } from "@/shared/constants/config.js";
+import { normalizeConsoleLogMaxLines } from "@/shared/utils/consoleLogLimits.js";
 
 const consoleLevels = ["log", "info", "warn", "error", "debug"];
 
@@ -23,6 +24,9 @@ if (!state.emitter) {
 
 if (!state.pendingLines) state.pendingLines = [];
 if (!state.flushTimer) state.flushTimer = null;
+// Live retention limit — seeded from the constant, replaced by the persisted
+// setting via applyConsoleLogMaxLines() (boot, settings PATCH, DB import).
+if (!state.maxLines) state.maxLines = CONSOLE_LOG_CONFIG.maxLines;
 
 const FLUSH_INTERVAL_MS = 100;
 const MAX_BATCH_LINES = 50;
@@ -64,7 +68,7 @@ function formatArg(arg) {
 
 function appendLine(line) {
   state.logs.push(line);
-  const maxLines = CONSOLE_LOG_CONFIG.maxLines;
+  const maxLines = state.maxLines;
   if (state.logs.length > maxLines) {
     state.logs = state.logs.slice(-maxLines);
   }
@@ -78,6 +82,41 @@ function appendLine(line) {
   } else {
     scheduleFlush();
   }
+}
+
+/**
+ * Set the live retention limit. Normalizes (clamps to bounds); a non-integer
+ * value is ignored so callers can forward raw user input safely. Shrinking
+ * trims the existing buffer immediately.
+ * @param {number|string} value
+ * @returns {number} the applied limit
+ */
+export function setConsoleLogMaxLines(value) {
+  const normalized = normalizeConsoleLogMaxLines(value);
+  if (normalized === null) return state.maxLines;
+  state.maxLines = normalized;
+  if (state.logs.length > normalized) {
+    state.logs = state.logs.slice(-normalized);
+  }
+  return normalized;
+}
+
+/**
+ * Read the persisted limit and apply it. Used on boot and after settings
+ * changes that bypass the PATCH hook (DB import). Fail-open: keeps the
+ * current limit when settings are unavailable.
+ */
+export async function applyConsoleLogMaxLines() {
+  try {
+    const { getRawSettings } = await import("@/lib/db/repos/settingsRepo.js");
+    const raw = await getRawSettings();
+    if (raw && Object.prototype.hasOwnProperty.call(raw, "consoleLogMaxLines")) {
+      return setConsoleLogMaxLines(raw.consoleLogMaxLines);
+    }
+  } catch {
+    // Settings not available yet (early boot) — keep the current limit.
+  }
+  return state.maxLines;
 }
 
 export function initConsoleLogCapture() {

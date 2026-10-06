@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef } from "react";
 import { Card, Button, SegmentedControl } from "@/shared/components";
 import { CONSOLE_LOG_CONFIG } from "@/shared/constants/config";
+import { CONSOLE_LOG_LIMITS, normalizeConsoleLogMaxLines } from "@/shared/utils/consoleLogLimits";
+import { useNotificationStore } from "@/store/notificationStore";
 import { isPinnedToBottom } from "@/shared/utils/scrollFollow";
 import { LOG_CATEGORIES, buildConsoleLogFilename, buildConsoleLogText } from "./logCategories";
 
@@ -22,10 +24,38 @@ function colorLine(line) {
 }
 
 export default function ConsoleLogClient() {
+  const notify = useNotificationStore();
   const [logs, setLogs] = useState([]);
   const [activeTab, setActiveTab] = useState("all");
   const [connected, setConnected] = useState(false);
+  const [maxLinesInput, setMaxLinesInput] = useState(String(CONSOLE_LOG_CONFIG.maxLines));
+  const [savingMaxLines, setSavingMaxLines] = useState(false);
   const logRef = useRef(null);
+
+  // Live limit for the SSE callbacks: they are registered once on mount, so a
+  // state read inside them would be stale after the user changes the value.
+  const maxLinesRef = useRef(CONSOLE_LOG_CONFIG.maxLines);
+
+  const applyMaxLines = (next) => {
+    maxLinesRef.current = next;
+    setMaxLinesInput(String(next));
+    setLogs((prev) => (prev.length > next ? prev.slice(-next) : prev));
+  };
+
+  // Persisted value wins over the constant; the server trims its buffer to the
+  // same limit, so an empty SSE init just means nothing is buffered yet.
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/settings")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        const normalized = normalizeConsoleLogMaxLines(data.consoleLogMaxLines);
+        if (normalized !== null) applyMaxLines(normalized);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   const handleClear = async () => {
     try {
@@ -33,6 +63,50 @@ export default function ConsoleLogClient() {
       // UI cleared via SSE "clear" event
     } catch (err) {
       console.error("Failed to clear console logs:", err);
+    }
+  };
+
+  const saveMaxLines = async () => {
+    const raw = maxLinesInput.trim();
+    const numeric = Number(raw);
+    const normalized = normalizeConsoleLogMaxLines(raw);
+    if (normalized === null) {
+      notify.error("Max lines must be a whole number");
+      setMaxLinesInput(String(maxLinesRef.current));
+      return;
+    }
+    // Tell the user when their input was clamped into the allowed range.
+    if (numeric !== normalized) {
+      notify.info(`Max lines limited to ${normalized} (allowed ${CONSOLE_LOG_LIMITS.min}–${CONSOLE_LOG_LIMITS.max})`);
+    }
+    const changed = normalized !== maxLinesRef.current;
+    const previous = maxLinesRef.current;
+    applyMaxLines(normalized);
+    if (!changed) return;
+
+    setSavingMaxLines(true);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ consoleLogMaxLines: normalized }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        notify.error(err.error || "Failed to save max lines");
+        // Server kept the old value — mirror that locally (trimmed lines stay
+        // trimmed; a reload restores them from the server buffer).
+        setMaxLinesInput(String(previous));
+        maxLinesRef.current = previous;
+        return;
+      }
+      notify.success(`Console log limit set to ${normalized} lines`);
+    } catch {
+      notify.error("Failed to save max lines");
+      setMaxLinesInput(String(previous));
+      maxLinesRef.current = previous;
+    } finally {
+      setSavingMaxLines(false);
     }
   };
 
@@ -44,16 +118,19 @@ export default function ConsoleLogClient() {
     es.onmessage = (e) => {
       const msg = JSON.parse(e.data);
       if (msg.type === "init") {
-        setLogs(msg.logs.slice(-CONSOLE_LOG_CONFIG.maxLines));
+        // The server buffer is already trimmed to the persisted limit, so trust
+        // its payload: trimming to the client default here would drop lines the
+        // user configured to keep when this lands before the settings fetch.
+        setLogs(msg.logs);
       } else if (msg.type === "line") {
         setLogs((prev) => {
           const next = [...prev, msg.line];
-          return next.length > CONSOLE_LOG_CONFIG.maxLines ? next.slice(-CONSOLE_LOG_CONFIG.maxLines) : next;
+          return next.length > maxLinesRef.current ? next.slice(-maxLinesRef.current) : next;
         });
       } else if (msg.type === "lines") {
         setLogs((prev) => {
           const next = [...prev, ...msg.lines];
-          return next.length > CONSOLE_LOG_CONFIG.maxLines ? next.slice(-CONSOLE_LOG_CONFIG.maxLines) : next;
+          return next.length > maxLinesRef.current ? next.slice(-maxLinesRef.current) : next;
         });
       } else if (msg.type === "clear") {
         setLogs([]);
@@ -121,6 +198,23 @@ export default function ConsoleLogClient() {
             size="sm"
           />
           <div className="ml-auto flex items-center gap-3">
+            <label className="flex items-center gap-1.5" title={`Keeps the newest ${CONSOLE_LOG_LIMITS.min}–${CONSOLE_LOG_LIMITS.max} lines (server buffer and this view)`}>
+              <span className="text-xs text-text-muted whitespace-nowrap">Max lines</span>
+              <input
+                type="number"
+                min={CONSOLE_LOG_LIMITS.min}
+                max={CONSOLE_LOG_LIMITS.max}
+                step={1}
+                value={maxLinesInput}
+                disabled={savingMaxLines}
+                onChange={(e) => setMaxLinesInput(e.target.value)}
+                onBlur={saveMaxLines}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") e.currentTarget.blur();
+                }}
+                className="w-20 rounded-md border border-border bg-background px-2 py-1 text-xs focus:border-primary focus:outline-none disabled:opacity-50"
+              />
+            </label>
             <span className={`text-xs ${connected ? "text-green-500" : "text-text-muted"}`}>
               {connected ? "Connected" : "Disconnected"}
             </span>
