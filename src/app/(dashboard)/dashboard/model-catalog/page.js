@@ -304,13 +304,16 @@ export default function ModelCatalogPage() {
             <Select aria-label="Filter by capability" value={capability} onChange={(event) => setCapability(event.target.value)} options={CAPABILITY_OPTIONS} selectClassName="sm:min-w-44" />
           </div>
         </div>
-        <div className="border-t border-border-subtle pt-3">
+        <div className="border-t border-border-subtle pt-3 flex items-center justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">Clamp output to Max output</p>
+            <p className="text-xs text-text-muted mt-0.5">When a client sends an output cap above a model&apos;s Max output, lower it to that ceiling before dispatch so the upstream cannot reject the request. Applies to models with an explicit Max output.</p>
+          </div>
           <Toggle
             checked={catalog.clampMaxOutput === true}
             onChange={changeClamp}
             disabled={busy === "clamp"}
-            label="Clamp output to Max output"
-            description="When a client sends an output cap above a model's Max output, lower it to that ceiling before dispatch so the upstream cannot reject the request. Applies to models with an explicit Max output; a rule's Clamp output setting overrides this default."
+            aria-label="Clamp output to Max output"
           />
         </div>
       </div>

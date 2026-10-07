@@ -203,12 +203,15 @@ export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSa
             <Select label="Can be disabled" value={form.thinkingCanDisable} onChange={(event) => update("thinkingCanDisable", event.target.value)} options={TRI_STATE_OPTIONS} />
             <Input label="Levels" value={form.thinkingLevels} onChange={(event) => update("thinkingLevels", event.target.value)} placeholder="low, medium, high" />
           </div>
-          <div className="mt-3">
+          <div className="mt-3 flex items-center justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Enforce level</p>
+              <p className="text-xs text-text-muted mt-0.5">Send the requested level as-is for matching models: none stays none instead of being mapped to off/low or clamped to the model&apos;s minimum.</p>
+            </div>
             <Toggle
               checked={form.thinkingEnforce}
               onChange={(value) => update("thinkingEnforce", value)}
-              label="Enforce level"
-              description="Send the requested level as-is for matching models: none stays none instead of being mapped to off/low or clamped to the model's minimum."
+              aria-label="Enforce level"
             />
           </div>
         </fieldset>
