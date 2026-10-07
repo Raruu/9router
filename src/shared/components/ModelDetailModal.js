@@ -50,7 +50,19 @@ function MembersTable({ members }) {
                 {m.capabilities ? fmtTokens(m.capabilities.contextWindow) : "—"}
               </td>
               <td className="px-3 py-1.5 text-right font-mono text-text-muted">
-                {m.capabilities ? fmtTokens(m.capabilities.maxOutput) : "—"}
+                {m.capabilities ? (
+                  <>
+                    {fmtTokens(m.capabilities.maxOutput)}
+                    {Number.isFinite(m.capabilities.minOutput) && m.capabilities.minOutput > 0 && (
+                      <span
+                        className="block text-[10px]"
+                        title={`A client-sent output cap below ${m.capabilities.minOutput} tokens is raised to it before dispatch`}
+                      >
+                        min {fmtTokens(m.capabilities.minOutput)}
+                      </span>
+                    )}
+                  </>
+                ) : "—"}
               </td>
               <td className="px-3 py-1.5 text-center">
                 {m.capabilities && Object.keys(CAPACITY_META).some((key) => m.capabilities[key]) ? (

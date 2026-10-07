@@ -47,14 +47,20 @@ function emptyForm() {
     name: "",
     capabilities: Object.fromEntries(BOOLEAN_FIELDS.map(([key]) => [key, "inherit"])),
     contextWindow: "",
+    contextWindowPercent: "",
     maxOutput: "",
     minOutput: "",
+    clampMaxOutput: "inherit",
     pricing: Object.fromEntries(PRICE_FIELDS.map(([key]) => [key, ""])),
     thinkingFormatOverride: "",
     thinkingLevels: "",
     thinkingCanDisable: "inherit",
     thinkingEnforce: false,
   };
+}
+
+function triState(value) {
+  return value === true ? "yes" : value === false ? "no" : "inherit";
 }
 
 function editForm(entry) {
@@ -68,17 +74,16 @@ function editForm(entry) {
     pattern: entry.pattern ?? entry.model ?? entry.modelId ?? "",
     matchType: entry.matchType ?? (entry.pattern?.includes("*") ? "glob" : "exact"),
     name: entry.name ?? "",
-    capabilities: Object.fromEntries(BOOLEAN_FIELDS.map(([key]) => [
-      key,
-      capabilities[key] === true ? "yes" : capabilities[key] === false ? "no" : "inherit",
-    ])),
+    capabilities: Object.fromEntries(BOOLEAN_FIELDS.map(([key]) => [key, triState(capabilities[key])])),
     contextWindow: entry.contextWindow ?? entry.data?.contextWindow ?? capabilities.contextWindow ?? "",
+    contextWindowPercent: entry.contextWindowPercent ?? entry.data?.contextWindowPercent ?? capabilities.contextWindowPercent ?? "",
     maxOutput: entry.maxOutput ?? entry.data?.maxOutput ?? capabilities.maxOutput ?? "",
     minOutput: entry.minOutput ?? entry.data?.minOutput ?? capabilities.minOutput ?? "",
+    clampMaxOutput: triState(capabilities.clampMaxOutput),
     pricing: Object.fromEntries(PRICE_FIELDS.map(([key]) => [key, pricing[key] ?? ""])),
     thinkingFormatOverride: capabilities.thinkingFormatOverride ?? "",
     thinkingLevels: Array.isArray(capabilities.thinkingLevels) ? capabilities.thinkingLevels.join(", ") : "",
-    thinkingCanDisable: capabilities.thinkingCanDisable === true ? "yes" : capabilities.thinkingCanDisable === false ? "no" : "inherit",
+    thinkingCanDisable: triState(capabilities.thinkingCanDisable),
     thinkingEnforce: capabilities.thinkingEnforce === true,
   };
 }
@@ -93,6 +98,11 @@ export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSa
   const editing = entry?.source === "user";
 
   const update = (field, value) => setForm((current) => ({ ...current, [field]: value }));
+  // The absolute window and its share are mutually exclusive — typing in one
+  // clears the other, so the saved rule can never carry both (the API would
+  // reject it). Same one-way behavior as the server-side validation.
+  const updateContextWindow = (value) => setForm((current) => ({ ...current, contextWindow: value, ...(value !== "" ? { contextWindowPercent: "" } : {}) }));
+  const updateContextWindowPercent = (value) => setForm((current) => ({ ...current, contextWindowPercent: value, ...(value !== "" ? { contextWindow: "" } : {}) }));
   const updateCapability = (field, value) => setForm((current) => ({
     ...current,
     capabilities: { ...current.capabilities, [field]: value },
@@ -118,6 +128,11 @@ export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSa
       setError("An exact pattern cannot contain *.");
       return;
     }
+    const percent = toNumber(form.contextWindowPercent);
+    if (percent !== null && (!Number.isInteger(percent) || percent < 1 || percent > 100)) {
+      setError("Context window % must be a whole number between 1 and 100.");
+      return;
+    }
     setError("");
     const levels = form.thinkingLevels
       .split(",")
@@ -136,12 +151,14 @@ export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSa
         ])),
         thinkingFormatOverride: form.thinkingFormatOverride || null,
         thinkingCanDisable: form.thinkingCanDisable === "inherit" ? null : form.thinkingCanDisable === "yes",
+        clampMaxOutput: form.clampMaxOutput === "inherit" ? null : form.clampMaxOutput === "yes",
         // Only sent when on: an explicit false would override a broader rule
         // that enforces, so "off" means inherit here like the other optional keys.
         ...(form.thinkingEnforce ? { thinkingEnforce: true } : {}),
         ...(levels.length ? { thinkingLevels: levels } : {}),
       },
       contextWindow: toNumber(form.contextWindow),
+      contextWindowPercent: toNumber(form.contextWindowPercent),
       maxOutput: toNumber(form.maxOutput),
       minOutput: toNumber(form.minOutput),
       pricing: Object.fromEntries(Object.entries(form.pricing).map(([key, value]) => [key, toNumber(value)])),
@@ -186,12 +203,15 @@ export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSa
             <Select label="Can be disabled" value={form.thinkingCanDisable} onChange={(event) => update("thinkingCanDisable", event.target.value)} options={TRI_STATE_OPTIONS} />
             <Input label="Levels" value={form.thinkingLevels} onChange={(event) => update("thinkingLevels", event.target.value)} placeholder="low, medium, high" />
           </div>
-          <div className="mt-3">
+          <div className="mt-3 flex items-center justify-between gap-4">
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium">Enforce level</p>
+              <p className="text-xs text-text-muted mt-0.5">Send the requested level as-is for matching models: none stays none instead of being mapped to off/low or clamped to the model&apos;s minimum.</p>
+            </div>
             <Toggle
               checked={form.thinkingEnforce}
               onChange={(value) => update("thinkingEnforce", value)}
-              label="Enforce level"
-              description="Send the requested level as-is for matching models: none stays none instead of being mapped to off/low or clamped to the model's minimum."
+              aria-label="Enforce level"
             />
           </div>
         </fieldset>
@@ -199,12 +219,19 @@ export default function UserCatalogDialog({ isOpen, entry, saving, onClose, onSa
         <fieldset>
           <legend className="mb-1 text-sm font-semibold">Token limits</legend>
           <p className="mb-3 text-xs text-text-muted">
-            Min output raises a client&apos;s smaller output cap to at least this value, so a reasoning model cannot spend the whole budget thinking and return an empty turn. Applies only when the client sends a cap; leave on Inherit for no floor.
+            Context window % shrinks the inherited window (80% of a 1M pattern = 800K) and cannot be combined with an absolute window. Min output raises a client&apos;s smaller output cap to at least this value, so a reasoning model cannot spend the whole budget thinking and return an empty turn. Clamp output lowers a client&apos;s larger cap to Max output so the upstream cannot reject it.
           </p>
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Input type="number" min="1" step="1" label="Context window" value={form.contextWindow} onChange={(event) => update("contextWindow", event.target.value)} placeholder="Inherit" />
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Input type="number" min="1" step="1" label="Context window" value={form.contextWindow} onChange={(event) => updateContextWindow(event.target.value)} placeholder="Inherit" />
+            <Input type="number" min="1" max="100" step="1" label="Context window %" value={form.contextWindowPercent} onChange={(event) => updateContextWindowPercent(event.target.value)} placeholder="Inherit" />
             <Input type="number" min="1" step="1" label="Max output" value={form.maxOutput} onChange={(event) => update("maxOutput", event.target.value)} placeholder="Inherit" />
             <Input type="number" min="1" step="1" label="Min output" value={form.minOutput} onChange={(event) => update("minOutput", event.target.value)} placeholder="Inherit" />
+          </div>
+          <div className="mt-3">
+            <Select label="Clamp output" value={form.clampMaxOutput} onChange={(event) => update("clampMaxOutput", event.target.value)} options={TRI_STATE_OPTIONS} />
+            <p className="mt-1 text-[11px] text-text-muted">
+              Yes lowers an explicitly-sent output cap to Max output; No disables the global clamp for matching models; Inherit follows the page toggle.
+            </p>
           </div>
         </fieldset>
 

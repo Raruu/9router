@@ -53,6 +53,10 @@ function pricePerMillion(value, alreadyPerMillion = false) {
 
 function Limits({ row }) {
   const capabilities = row.capabilities ?? row.caps ?? row.data?.capabilities ?? row.data?.caps ?? {};
+  // A rule may set the context window as a share of the inherited size instead
+  // of an absolute token count; show the share so the cell stays meaningful.
+  const percent = Number(capabilities.contextWindowPercent);
+  const hasPercent = Number.isFinite(percent) && percent > 0;
   const context = first(
     row.contextWindow,
     row.context_length,
@@ -69,7 +73,7 @@ function Limits({ row }) {
   );
   return (
     <span className="font-mono text-xs text-text-muted tabular-nums">
-      {formatTokens(context)} / {formatTokens(output)}
+      {hasPercent ? `${Math.floor(percent)}%` : formatTokens(context)} / {formatTokens(output)}
     </span>
   );
 }

@@ -92,12 +92,21 @@ Section.propTypes = {
 
 export function LimitsRow({ capabilities }) {
   const hasMin = Number.isFinite(capabilities.minOutput) && capabilities.minOutput > 0;
+  // A catalog rule may express the window as a share of the inherited size
+  // (Model Catalog → Context window %). The resolved caps carry the computed
+  // absolute; raw rule rows still carry the percent, so render that instead of
+  // an empty tile.
+  const percent = Number(capabilities.contextWindowPercent);
+  const hasPercent = Number.isFinite(percent) && percent > 0 && !Number.isFinite(capabilities.contextWindow);
   return (
     <div className={`grid gap-2 ${hasMin ? "grid-cols-3" : "grid-cols-2"}`}>
       <div className="rounded-lg border border-border bg-bg-alt/40 px-3 py-2">
         <p className="text-[10px] uppercase tracking-wide text-text-muted">Context window</p>
-        <p className="font-mono text-lg font-medium" title={`${capabilities.contextWindow} tokens`}>
-          {fmtTokens(capabilities.contextWindow)}
+        <p
+          className="font-mono text-lg font-medium"
+          title={hasPercent ? `${Math.floor(percent)}% of the inherited context window` : `${capabilities.contextWindow} tokens`}
+        >
+          {hasPercent ? `${Math.floor(percent)}%` : fmtTokens(capabilities.contextWindow)}
         </p>
       </div>
       <div className="rounded-lg border border-border bg-bg-alt/40 px-3 py-2">

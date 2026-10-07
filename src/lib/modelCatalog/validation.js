@@ -8,8 +8,15 @@ export const DEFAULT_MODEL_CATALOG_PRIORITY = MODEL_CATALOG_PRIORITIES[0];
 
 export const CAPABILITY_KEYS = [
   "vision", "pdf", "audioInput", "videoInput", "imageOutput", "audioOutput",
-  "tools", "reasoning", "thinkingCanDisable", "thinkingEnforce", "contextWindow", "maxOutput", "minOutput",
+  "tools", "reasoning", "thinkingCanDisable", "thinkingEnforce", "contextWindow", "contextWindowPercent", "maxOutput", "minOutput",
+  "clampMaxOutput",
 ];
+
+// contextWindowPercent shrinks the inherited context window to a share of it
+// (80% of 1M = 800K). It is an input-side rule-layer concept: the resolver
+// computes the absolute value and strips the percent from the resolved caps.
+export const CONTEXT_WINDOW_PERCENT_MIN = 1;
+export const CONTEXT_WINDOW_PERCENT_MAX = 100;
 
 // Thinking wire formats a user rule may force. Mirrors the formats understood
 // by the translator (thinkingUnified.applyFormat / thinkingLevels.FORMAT_LEVELS);
@@ -48,6 +55,13 @@ export function sanitizeCapabilities(input) {
     const value = input[key];
     if (key === "contextWindow" || key === "maxOutput" || key === "minOutput") {
       if (Number.isFinite(value) && value >= 0) out[key] = Math.floor(value);
+    } else if (key === "contextWindowPercent") {
+      // Out-of-range values are dropped rather than clamped: a 0 or 150 stored
+      // silently would compute a nonsense window, so an invalid rule behaves
+      // as if the percent were never set.
+      if (Number.isFinite(value) && value >= CONTEXT_WINDOW_PERCENT_MIN && value <= CONTEXT_WINDOW_PERCENT_MAX) {
+        out[key] = Math.floor(value);
+      }
     } else if (typeof value === "boolean") {
       out[key] = value;
     }

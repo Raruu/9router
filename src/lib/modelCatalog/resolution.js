@@ -37,6 +37,29 @@ function resolveRules(rules, provider, model, field, global = false) {
     .reduce((result, rule) => ({ ...result, ...(rule.data?.[field] || {}) }), {});
 }
 
+// The context-window keys are mutually exclusive within one rule, but different
+// rules may each set one. The most specific matching rule that sets either
+// decides which survives: a percent from a specific rule must not be erased by
+// an absolute from a broader one, and vice versa. Rules sort least→most
+// specific, so the last match that sets a key is the winner. Returns
+// "percent" | "absolute" | null.
+function windowKeyWinner(rules, provider, model) {
+  const normalizedProvider = String(provider || "").toLowerCase();
+  const candidates = rules
+    .filter((rule) => (rule.provider === "*" || rule.provider === normalizedProvider) && matches(rule.pattern, model))
+    .sort((a, b) => compareRules(a, b, provider));
+  let winner = null;
+  for (const rule of candidates) {
+    const caps = rule.data?.capabilities;
+    if (!caps) continue;
+    // A rule carrying both is impossible through the API (mutually exclusive
+    // there); if one arrives through a direct repository write, prefer percent.
+    if (caps.contextWindowPercent !== undefined) winner = "percent";
+    else if (caps.contextWindow !== undefined) winner = "absolute";
+  }
+  return winner;
+}
+
 function matchingCustomModels(customModels, provider, model, normalizeProviderId) {
   const normalizedProvider = String(normalizeProviderId(provider) || "").toLowerCase();
   const terminal = String(model || "").split("/").pop();
@@ -120,7 +143,20 @@ export function createCatalogResolver({ userRules = [], openRouterRules = [], ha
     } else {
       lower = { ...hardcoded, ...openrouter };
     }
-    return { ...(custom.hasReference ? {} : lower), ...custom.data, ...user };
+    const result = { ...(custom.hasReference ? {} : lower), ...custom.data, ...user };
+    // contextWindowPercent shrinks whatever the lower layers resolve; an
+    // absolute window from the same-or-higher-priority source supersedes it.
+    // The most specific matching rule that sets either key decides — a percent
+    // from a specific rule survives a broader rule's absolute, and vice versa.
+    // A custom-model pinned absolute is a base for a user percent (user rules
+    // outrank pins), but supersedes a percent that also came from the pin.
+    if (field === "capabilities" && result.contextWindowPercent !== undefined) {
+      const winner = windowKeyWinner(normalizedUserRules, provider, model);
+      const absoluteWins = winner === "absolute"
+        || (winner === null && Number.isFinite(custom.data?.contextWindow));
+      if (absoluteWins) delete result.contextWindowPercent;
+    }
+    return result;
   }
 
   return {

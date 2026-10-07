@@ -1,4 +1,5 @@
 import { getCapabilitiesForModel } from "../../providers/capabilities.js";
+import { FORMAT_FIELDS, readField, writeField } from "./outputCapFields.js";
 
 // Minimum output floor — the counterpart of maxTokens.js's ceiling.
 //
@@ -13,34 +14,6 @@ import { getCapabilitiesForModel } from "../../providers/capabilities.js";
 // left absent — the upstream default may be larger than the floor, and writing
 // one would silently LOWER the budget. kiro/codex/cursor rebuild or strip the
 // field entirely, so there is nothing to raise for them.
-
-// format → the request field(s) carrying the output cap. A format may accept
-// several spellings from different clients; all present ones are floored.
-const FORMAT_FIELDS = {
-  openai: ["max_tokens", "max_completion_tokens", "max_output_tokens"],
-  "openai-responses": ["max_output_tokens"],
-  "openai-response": ["max_output_tokens"],
-  claude: ["max_tokens"],
-  gemini: ["generationConfig.maxOutputTokens"],
-  vertex: ["generationConfig.maxOutputTokens"],
-  ollama: ["options.num_predict"],
-};
-
-function readField(body, path) {
-  if (!body || typeof body !== "object") return undefined;
-  if (!path.includes(".")) return body[path];
-  const [head, tail] = path.split(".", 2);
-  return body[head] && typeof body[head] === "object" ? body[head][tail] : undefined;
-}
-
-function writeField(body, path, value) {
-  if (!path.includes(".")) {
-    body[path] = value;
-    return;
-  }
-  const [head, tail] = path.split(".", 2);
-  body[head][tail] = value;
-}
 
 /**
  * Resolve the effective floor for a provider/model, or null when none applies.

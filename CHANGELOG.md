@@ -1,3 +1,22 @@
+# v0.5.95-5 (2026-10-07)
+
+## Features
+- **Model Catalog**: output clamp — a client-sent output cap above the model's
+  Max output is lowered to it just before dispatch (a generic client sending
+  `max_tokens: 200000` against a 128000 model otherwise gets a 400 or a silent
+  truncation). Per-rule tri-state `clampMaxOutput` plus a global "Clamp output
+  to Max output" toggle below Resolution order; a rule's setting overrides the
+  toggle. Only engages against a ceiling a layer explicitly declares — the 64K
+  fallback never caps a client that knows better
+- **Model Catalog**: context window as a share of the inherited size — a rule
+  sets `contextWindowPercent` (1–100, e.g. 80% of a 1M pattern = 800K) instead
+  of an absolute count, so a refetched OpenRouter/table value re-derives
+  automatically; mutually exclusive with the absolute input, computed at
+  resolution time, and the most specific matching rule decides between the two
+- **Combos**: the Combo Info members table shows each member's catalog Min
+  output floor beneath its output cap, with a tooltip explaining that a
+  smaller client-sent cap is raised to it before dispatch
+
 # v0.5.95-4 (2026-10-06)
 
 ## Features

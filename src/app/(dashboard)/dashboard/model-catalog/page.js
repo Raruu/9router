@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Button, CardSkeleton, ConfirmModal, Select } from "@/shared/components";
+import { Button, CardSkeleton, ConfirmModal, Select, Toggle } from "@/shared/components";
 import { useNotificationStore } from "@/store/notificationStore";
 import CatalogSection from "./components/CatalogSection";
 import CatalogPreviewDialog from "./components/CatalogPreviewDialog";
@@ -130,6 +130,26 @@ export default function ModelCatalogPage() {
       notify.success("Catalog priority updated");
     } catch (error) {
       setCatalog((current) => ({ ...current, priority: previous }));
+      notify.error(error.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const changeClamp = async (value) => {
+    const previous = catalog.clampMaxOutput === true;
+    setCatalog((current) => ({ ...current, clampMaxOutput: value }));
+    setBusy("clamp");
+    try {
+      await requestJson("/api/models/catalog/clamp", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clampMaxOutput: value }),
+      });
+      invalidateModelCapabilities();
+      notify.success(value ? "Output clamp enabled" : "Output clamp disabled");
+    } catch (error) {
+      setCatalog((current) => ({ ...current, clampMaxOutput: previous }));
       notify.error(error.message);
     } finally {
       setBusy("");
@@ -272,15 +292,29 @@ export default function ModelCatalogPage() {
 
   return (
     <div className="flex min-w-0 flex-col gap-5">
-      <div className="flex flex-col gap-3 rounded-xl border border-border-subtle bg-surface/70 p-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">Resolution order</p>
-          <p className="mt-1 text-xs text-text-muted">The first matching source supplies model metadata.</p>
-          {catalog.status?.message && <p className="mt-1 text-xs text-text-muted">{catalog.status.message}</p>}
+      <div className="flex flex-col gap-3 rounded-xl border border-border-subtle bg-surface/70 p-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-wide text-text-muted">Resolution order</p>
+            <p className="mt-1 text-xs text-text-muted">The first matching source supplies model metadata.</p>
+            {catalog.status?.message && <p className="mt-1 text-xs text-text-muted">{catalog.status.message}</p>}
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <Select aria-label="Catalog priority" value={catalog.priority} onChange={changePriority} options={PRIORITY_OPTIONS} disabled={busy === "priority"} selectClassName="sm:min-w-64" />
+            <Select aria-label="Filter by capability" value={capability} onChange={(event) => setCapability(event.target.value)} options={CAPABILITY_OPTIONS} selectClassName="sm:min-w-44" />
+          </div>
         </div>
-        <div className="grid gap-2 sm:grid-cols-2">
-          <Select aria-label="Catalog priority" value={catalog.priority} onChange={changePriority} options={PRIORITY_OPTIONS} disabled={busy === "priority"} selectClassName="sm:min-w-64" />
-          <Select aria-label="Filter by capability" value={capability} onChange={(event) => setCapability(event.target.value)} options={CAPABILITY_OPTIONS} selectClassName="sm:min-w-44" />
+        <div className="border-t border-border-subtle pt-3 flex items-center justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">Clamp output to Max output</p>
+            <p className="text-xs text-text-muted mt-0.5">When a client sends an output cap above a model&apos;s Max output, lower it to that ceiling before dispatch so the upstream cannot reject the request. Applies to models with an explicit Max output.</p>
+          </div>
+          <Toggle
+            checked={catalog.clampMaxOutput === true}
+            onChange={changeClamp}
+            disabled={busy === "clamp"}
+            aria-label="Clamp output to Max output"
+          />
         </div>
       </div>
 
