@@ -6,6 +6,8 @@ import {
   normalizeLimitType,
   normalizeLimitValue,
 } from "@/shared/constants/apiKeyLimits";
+import { keyAccessFromColumns, keyAccessToColumns } from "@/shared/utils/keyAccess.js";
+import { KEY_ACCESS_UNRESTRICTED } from "@/shared/constants/keyAccess.js";
 
 function rowToKey(row) {
   if (!row) return null;
@@ -23,6 +25,7 @@ function rowToKey(row) {
     allowedModels: row.allowedModels ? parseJson(row.allowedModels, null) : null,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt || null,
+    access: keyAccessFromColumns(row.accessRestricted, row.accessAllow),
   };
 }
 
@@ -38,6 +41,7 @@ export async function getApiKeyById(id) {
   return rowToKey(row);
 }
 
+// Used by the /v1 handlers to read the presented key's access settings.
 export async function getApiKeyByKey(key) {
   if (!key) return null;
   const db = await getAdapter();
@@ -69,9 +73,11 @@ export async function createApiKey(name, machineId, options = {}) {
     allowedModels,
     createdAt: now,
     updatedAt: now,
+    access: { restricted: false, allow: [] },
   };
+  const cols = keyAccessToColumns(KEY_ACCESS_UNRESTRICTED);
   db.run(
-    `INSERT INTO apiKeys(id, key, name, machineId, isActive, limitType, tokenLimit, usedTokens, requestLimit, usedRequests, allowedModels, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO apiKeys(id, key, name, machineId, isActive, limitType, tokenLimit, usedTokens, requestLimit, usedRequests, allowedModels, createdAt, updatedAt, accessRestricted, accessAllow) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       apiKey.id,
       apiKey.key,
@@ -86,6 +92,8 @@ export async function createApiKey(name, machineId, options = {}) {
       allowedModels ? stringifyJson(allowedModels) : null,
       apiKey.createdAt,
       apiKey.updatedAt,
+      cols.accessRestricted,
+      cols.accessAllow,
     ]
   );
   return apiKey;
@@ -123,8 +131,9 @@ export async function updateApiKey(id, data) {
     const usedTokens = merged.usedTokens != null ? Math.max(0, Number(merged.usedTokens) || 0) : 0;
     const usedRequests = merged.usedRequests != null ? Math.max(0, Number(merged.usedRequests) || 0) : 0;
     const allowedModels = normalizeAllowedModels(merged.allowedModels);
+    const cols = keyAccessToColumns(merged.access);
     db.run(
-      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, limitType = ?, tokenLimit = ?, usedTokens = ?, requestLimit = ?, usedRequests = ?, allowedModels = ?, updatedAt = ? WHERE id = ?`,
+      `UPDATE apiKeys SET key = ?, name = ?, machineId = ?, isActive = ?, limitType = ?, tokenLimit = ?, usedTokens = ?, requestLimit = ?, usedRequests = ?, allowedModels = ?, updatedAt = ?, accessRestricted = ?, accessAllow = ? WHERE id = ?`,
       [
         merged.key,
         merged.name,
@@ -137,6 +146,8 @@ export async function updateApiKey(id, data) {
         data.resetUsage ? 0 : usedRequests,
         allowedModels ? stringifyJson(allowedModels) : null,
         merged.updatedAt,
+        cols.accessRestricted,
+        cols.accessAllow,
         id,
       ]
     );
@@ -148,6 +159,7 @@ export async function updateApiKey(id, data) {
       requestLimit,
       usedRequests: data.resetUsage ? 0 : usedRequests,
       allowedModels,
+      access: keyAccessFromColumns(cols.accessRestricted, cols.accessAllow),
     };
     delete result.resetUsage;
     delete result.rotateKey;

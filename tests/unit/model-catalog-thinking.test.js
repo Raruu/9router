@@ -57,9 +57,12 @@ describe("catalog-driven thinking levels", () => {
   });
 
   it("maps a user format override to that format's level vocabulary", () => {
+    // claude-sonnet-4.6 natively speaks claude-adaptive; the override swaps in
+    // the zai (binary on/off) vocabulary. glm-5.3-flash would not work here —
+    // its z.ai entry cannot disable thinking, so "none" is filtered out.
     setCatalogSource(sourceFor({ reasoning: true, thinkingFormatOverride: "zai" }));
 
-    expect(getThinkingLevels("openrouter", "glm-5.3-flash")).toEqual(["none", "thinking"]);
+    expect(getThinkingLevels("openrouter", "claude-sonnet-4.6")).toEqual(["none", "thinking"]);
   });
 
   it("returns null when the model cannot reason", () => {

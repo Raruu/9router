@@ -79,8 +79,8 @@ describe("combo capability merge", () => {
 
   it("keeps thinking disableable when any member can turn it off", () => {
     const merged = mergeMemberCapabilities([
-      caps("nara-router/glm-5.3-flash-free"), // thinkingCanDisable: false
-      caps("vs-llm/glm-5.3-flash"),           // thinkingCanDisable: true
+      caps("nara-router/glm-5.3-flash-free"), // thinkingCanDisable: false (z.ai 5.3 line)
+      caps("vs-llm/glm-4.7"),                 // thinkingCanDisable: true
     ]);
 
     expect(merged.thinkingCanDisable).toBe(true);
