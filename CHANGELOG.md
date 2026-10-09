@@ -1,4 +1,7 @@
-# v0.5.99 (2026-10-08)
+# v0.5.99-1 (2026-10-09)
+
+Merged upstream v0.5.99 into the fork. This section includes the full upstream
+release notes and the fork-side merge work.
 
 ## Features
 - **Antigravity**: refresh model catalog with Gemini 3.8 Flash (High/Medium/Low), Gemini 3.6 Flash, and Gemini 3.1 Pro High; remove deprecated 3.5/3-flash models; update MITM default to `gemini-3.8-flash-medium`
@@ -26,6 +29,52 @@
 - **Ollama**: report `prompt_eval_cached_count` as cached tokens in usage tracking
 - **Muse**: route Responses-only models to declared transport and nest reasoning effort
 - **TTS**: accept server model and voice in self-hosted example
+
+## Fork merge notes
+- Conflict resolutions kept both sides: `package.json` / `cli/package.json`
+  stay on the fork version (`0.5.99-1`) and keep the fork's `@raruu/9router`
+  name, and `CHANGELOG.md` keeps the fork section layout (upstream's notes
+  folded into this entry). The CLI gains upstream's `show` command, `--save`,
+  Pi and Oh My Pi support alongside the fork's tweaks.
+- **Both per-key systems coexist.** Upstream's access control (restrict a key
+  to selected combos/models; `accessRestricted`/`accessAllow` columns, the
+  `keyAccess` engine, gates in every `/v1` handler) lands next to the fork's
+  per-key limits + `allowedModels` (its own columns, gates and `/v1/models`
+  filtering). Every handler runs both gates; `/v1/models` applies both
+  filters. A key restricted by either system can only call what both allow.
+- **The Endpoint page keeps the fork's key editor.** The limits /
+  allowed-models dialogs, reset-usage and rotate-key actions supersede
+  upstream's `KeyAccessControls` UI, which is not rendered (its engine,
+  columns and API remain wired for upstream's tests and handler gates).
+  Upstream's mobile layout tweaks on the endpoint page were dropped with it.
+- **Schema 5→6** adds the access columns next to the fork's limit columns;
+  the pre-change safety backup triggers as `schema-5-to-6` on upgrade.
+- **`systemoneCore` URL precedence**: the fork's compat-node kind endpoint
+  (`kindBaseUrls.systemone` or the node's baseUrl) → per-connection baseUrl →
+  registry `systemoneConfig.baseUrl`, now followed by upstream's
+  `{accountId}`/`{model}` placeholder substitution and the
+  `getModelUpstreamId` body rewrite (Cloudflare `clef-flash`).
+- **`capabilities.js` keeps the fork's catalog machinery**: the `qoder` table
+  survives and upstream's `minimax-code` table lands beside it. Upstream's
+  GLM-5.3 `thinkingCanDisable: false` fix (#4409, per z.ai docs the 5.3 line
+  rejects disabling thinking) supersedes the fork's pattern on the plain
+  5.3 entry; the fork's multimodal `*glm-5.3-flash*` pattern row survives.
+- **`chatCore` carries both paths**: the fork's MAXOUT clamp before dispatch
+  beside upstream's `modelTargetTransport` fallback for format-mismatched
+  models and the Responses forced-SSE→JSON path.
+- **`apiKeysRepo` / `db/index.js` carry both column sets** through
+  `rowToKey`, create/update (fork's transaction, rotation, limits + access
+  columns) and backup export/import (a backup without `access` restores
+  unrestricted; malformed `access` is refused).
+- Test adaptations: `key-access-handlers` / `codex-image-usage-persistence`
+  mocks extended with the fork's auth seams; `key-access-migration` fixture
+  stamped with the fork's migration chain (schema 4 / backup 5) and the
+  backup-name assertion moved to `schema-5-to-6`;
+  `combo-capabilities-merge` + `model-catalog-thinking` updated for #4409
+  (a GLM-5.3 member can no longer disable thinking).
+- Baselines regenerated after the merge: providers 93 (bedrock, bedrock-xai,
+  minimax-code, minimax-code-global added; kimi gains its `/responses`
+  transport), alias map gains `mm`/`mmg`, OAuth URLs unchanged.
 
 # v0.5.95-5 (2026-10-07)
 
