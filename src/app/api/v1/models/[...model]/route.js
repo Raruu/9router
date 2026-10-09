@@ -1,5 +1,6 @@
 import { buildModelsList } from "../route.js";
 import { filterModelsForKey } from "@/sse/services/auth.js";
+import { getKeyAccessContext, filterModelsListForKey } from "@/sse/services/keyAccess.js";
 import { getSettings } from "@/lib/localDb";
 
 // URL slug → service kind(s). `web` covers both webSearch and webFetch.
@@ -57,15 +58,16 @@ export async function GET(request, { params }) {
     const identifier = path.filter(Boolean).join("/");
     const kindFilter = path.length === 1 ? KIND_SLUG_MAP[identifier] : null;
     const limits = { ...(await comboStrategies()) };
+    const keyAccess = await getKeyAccessContext(request);
 
     if (kindFilter) {
-      const data = await filterModelsForKey(request, await buildModelsList(kindFilter, limits));
+      const data = await filterModelsListForKey(keyAccess, await filterModelsForKey(request, await buildModelsList(kindFilter, limits)));
       return json({ object: "list", data });
     }
 
     // Match the same LLM catalog exposed by GET /v1/models. A catch-all
     // parameter is required because provider-prefixed IDs contain a slash.
-    const models = await filterModelsForKey(request, await buildModelsList([LLM_KIND], limits));
+    const models = await filterModelsListForKey(keyAccess, await filterModelsForKey(request, await buildModelsList([LLM_KIND], limits)));
     const matchedModel = models.find((candidate) => candidate.id === identifier);
 
     if (!matchedModel) {

@@ -1,3 +1,81 @@
+# v0.5.99-1 (2026-10-09)
+
+Merged upstream v0.5.99 into the fork. This section includes the full upstream
+release notes and the fork-side merge work.
+
+## Features
+- **Antigravity**: refresh model catalog with Gemini 3.8 Flash (High/Medium/Low), Gemini 3.6 Flash, and Gemini 3.1 Pro High; remove deprecated 3.5/3-flash models; update MITM default to `gemini-3.8-flash-medium`
+- **Antigravity**: add Claude Sonnet 5.5 and Opus 5.5 support with reasoning effort variants, pricing, and family quota routing
+- **Bedrock**: add Amazon Bedrock (`bedrock` and `bedrock-xai`) provider with static keys, AWS SSO profiles, native SigV4 signer, and shared EventStream decoder (#4157)
+- **Hermes**: per-profile configuration across API, Dashboard card, and CLI menu with bulk apply, scoped reset, and auxiliary roles (#4660)
+- **API Keys**: per-API-key access control — restrict keys to allowed combos and models via interactive modal
+- **ElevenLabs**: add Scribe speech-to-text support (#4537)
+- **Proxy Pools**: add Netlify serverless relay proxy pool with digest-deploy API and dashboard management modal
+- **Providers**: add MiniMax Code (`mcode`) credits provider
+- **System One**: support Cloudflare AI `clef-flash` endpoint
+- **Codebuddy CN**: sync catalog with 2026-09-30 server config
+- **Dashboard**: open 9Remote sidebar item directly to website
+
+## Fixes
+- **Dashboard**: fix mobile layouts for API Keys card (alignment, code wrap), header breadcrumbs (overflow collision), model chips (full width, break-all), and Claude CLI settings
+- **Gemini**: do not treat properties map as schema node when tool parameter is named `properties` (#4620); rename `$ref` keys in `functionResponse` payloads
+- **Translator**: uniquify duplicate `tool_call_ids` for Gemini (#4532)
+- **Capabilities**: mark GLM-5.3 as unable to disable thinking (#4656); correct GLM-5.2/5.3 context window to 1M (#4544)
+- **Combos**: show compatible node models in picker without an active connection (#4659)
+- **CLI**: take `connect` models from server; add `show`, `--save`, Pi and Oh My Pi; store full model IDs in TUI combos
+- **Kimi**: route Responses clients to Kimi Code `/responses` endpoint
+- **Cursor**: forward reasoning effort to AgentService Run; reject empty turns without successful stop
+- **Codex**: preserve explicit tool strict flags; track exact image token usage
+- **Ollama**: report `prompt_eval_cached_count` as cached tokens in usage tracking
+- **Muse**: route Responses-only models to declared transport and nest reasoning effort
+- **TTS**: accept server model and voice in self-hosted example
+
+## Fork merge notes
+- Conflict resolutions kept both sides: `package.json` / `cli/package.json`
+  stay on the fork version (`0.5.99-1`) and keep the fork's `@raruu/9router`
+  name, and `CHANGELOG.md` keeps the fork section layout (upstream's notes
+  folded into this entry). The CLI gains upstream's `show` command, `--save`,
+  Pi and Oh My Pi support alongside the fork's tweaks.
+- **Both per-key systems coexist.** Upstream's access control (restrict a key
+  to selected combos/models; `accessRestricted`/`accessAllow` columns, the
+  `keyAccess` engine, gates in every `/v1` handler) lands next to the fork's
+  per-key limits + `allowedModels` (its own columns, gates and `/v1/models`
+  filtering). Every handler runs both gates; `/v1/models` applies both
+  filters. A key restricted by either system can only call what both allow.
+- **The Endpoint page keeps the fork's key editor.** The limits /
+  allowed-models dialogs, reset-usage and rotate-key actions supersede
+  upstream's `KeyAccessControls` UI, which is not rendered (its engine,
+  columns and API remain wired for upstream's tests and handler gates).
+  Upstream's mobile layout tweaks on the endpoint page were dropped with it.
+- **Schema 5→6** adds the access columns next to the fork's limit columns;
+  the pre-change safety backup triggers as `schema-5-to-6` on upgrade.
+- **`systemoneCore` URL precedence**: the fork's compat-node kind endpoint
+  (`kindBaseUrls.systemone` or the node's baseUrl) → per-connection baseUrl →
+  registry `systemoneConfig.baseUrl`, now followed by upstream's
+  `{accountId}`/`{model}` placeholder substitution and the
+  `getModelUpstreamId` body rewrite (Cloudflare `clef-flash`).
+- **`capabilities.js` keeps the fork's catalog machinery**: the `qoder` table
+  survives and upstream's `minimax-code` table lands beside it. Upstream's
+  GLM-5.3 `thinkingCanDisable: false` fix (#4409, per z.ai docs the 5.3 line
+  rejects disabling thinking) supersedes the fork's pattern on the plain
+  5.3 entry; the fork's multimodal `*glm-5.3-flash*` pattern row survives.
+- **`chatCore` carries both paths**: the fork's MAXOUT clamp before dispatch
+  beside upstream's `modelTargetTransport` fallback for format-mismatched
+  models and the Responses forced-SSE→JSON path.
+- **`apiKeysRepo` / `db/index.js` carry both column sets** through
+  `rowToKey`, create/update (fork's transaction, rotation, limits + access
+  columns) and backup export/import (a backup without `access` restores
+  unrestricted; malformed `access` is refused).
+- Test adaptations: `key-access-handlers` / `codex-image-usage-persistence`
+  mocks extended with the fork's auth seams; `key-access-migration` fixture
+  stamped with the fork's migration chain (schema 4 / backup 5) and the
+  backup-name assertion moved to `schema-5-to-6`;
+  `combo-capabilities-merge` + `model-catalog-thinking` updated for #4409
+  (a GLM-5.3 member can no longer disable thinking).
+- Baselines regenerated after the merge: providers 93 (bedrock, bedrock-xai,
+  minimax-code, minimax-code-global added; kimi gains its `/responses`
+  transport), alias map gains `mm`/`mmg`, OAuth URLs unchanged.
+
 # v0.5.95-5 (2026-10-07)
 
 ## Features
@@ -115,6 +193,10 @@ Merged upstream v0.5.95 into the fork. This section includes the full upstream
 release notes and the fork-side merge work.
 
 ## Features
+- **Hermes**: sync the auxiliary role picker with Hermes 0.21.5 (`hermes_cli/config_defaults.py`) — add TTS Audio Tags, Triage Specifier, Kanban Decomposer, Profile Describer, Review and Goal Judge; drop Web Extract, which stopped calling an LLM
+- **CLI**: Hermes profile selection in the settings menu — per-profile status header, Quick Setup and Reset scoped to the picked profile, plus "Apply to All Profiles"
+- **Dashboard**: per-profile Hermes config — profile selector with status dots and run command, Apply/Reset scoped to the selected profile, per-profile Manual Config paths, and an "Apply to All Profiles" action
+- **Hermes**: profile-aware settings API — target a profile with `?profile=`/body, list them via `GET /api/cli-tools/hermes-profiles`, and apply endpoint + API key to every profile in one call (`applyToAll`)
 - **Providers**: add Meta Muse provider with OAuth login and model catalog; add v1m System One provider
 - **GLM**: add Z.ai OAuth login to GLM Coding (dual-auth)
 - **Codex**: add GPT-6.1 Sol; expose 1M context variants for GPT-6 and GPT-5.6; add gpt-daybreak/reserve models and route bare `gpt-5.x`/`gpt-6.x` slugs to codex
@@ -134,6 +216,7 @@ release notes and the fork-side merge work.
   the refresh token on every refresh and revokes the whole session on reuse, so
   the old pre-rotation logged accounts out on auto-ping; the DB token snapshot
   is re-read before refreshing so a stale copy cannot reuse a rotated token
+- **Hermes**: stop breaking the config write when an earlier save left the `model: ""` sentinel behind (duplicate-key handling in `config.yaml`)
 - **Claude**: preserve intentional prefill from non-messages[] source formats; keep a trailing user turn so cleanup never yields assistant prefill
 - **Claude**: cache a tool loop's final tool results with the 4th breakpoint
 - **Claude**: resolve Sonnet 5.x to adaptive thinking so no forged thinking placeholders are sent; inject unsigned thinking placeholders for opencode-go DeepSeek `/messages` (#4436)

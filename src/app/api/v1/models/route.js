@@ -9,6 +9,7 @@ import {
 import { getProviderConnections, getCombos, getCustomModels, getModelAliases, getSettings } from "@/lib/localDb";
 import { getDisabledModels } from "@/lib/disabledModelsDb";
 import { hasValidCliToken } from "@/lib/auth/cliToken";
+import { getKeyAccessContext, filterModelsListForKey } from "@/sse/services/keyAccess.js";
 import { resolveKiroModels } from "open-sse/services/kiroModels.js";
 import { resolveKimchiModels } from "open-sse/services/kimchiModels.js";
 import { resolveQoderModels, routableQoderModels } from "open-sse/services/qoderModels.js";
@@ -774,8 +775,12 @@ export async function GET(request) {
       const seen = new Set(llmModels.map((entry) => entry.id));
       data = [...llmModels, ...nonLlmModels.filter((entry) => !seen.has(entry.id))];
     }
+    // Both per-key filters apply: the fork's allowedModels patterns, then the
+    // upstream access allow-list (resolved combos/models).
     const { filterModelsForKey } = await import("@/sse/services/auth.js");
-    return Response.json({ object: "list", data: await filterModelsForKey(request, data) }, {
+    data = await filterModelsForKey(request, data);
+    data = await filterModelsListForKey(await getKeyAccessContext(request), data);
+    return Response.json({ object: "list", data }, {
       headers: { "Access-Control-Allow-Origin": "*" },
     });
   } catch (error) {
