@@ -6,6 +6,8 @@ import {
   isRetryableStatus,
   resolveProviderRetries,
   shouldRetrySameKey,
+  resolveStatusList,
+  RETRYABLE_STATUS,
   MAX_MEMBER_RETRIES,
   MAX_RETRY_WAIT_MS,
   DEFAULT_MEMBER_RETRIES,
@@ -13,6 +15,9 @@ import {
   MIN_RETRY_BACKOFF_MS,
   RETRY_MODE_MEMBER,
   RETRY_MODE_PER_KEY,
+  RETRY_STATUS_ALL,
+  RETRY_STATUS_ONLY,
+  RETRY_STATUS_EXCEPT,
 } from "../../open-sse/config/retries.js";
 import { handleComboChat } from "../../open-sse/services/combo.js";
 import { checkFallbackError } from "../../open-sse/services/accountFallback.js";
@@ -46,6 +51,8 @@ describe("resolveProviderRetries", () => {
       tries: 3,
       maxBackoffMs: DEFAULT_RETRY_BACKOFF_MS,
       mode: RETRY_MODE_MEMBER,
+      statusMode: RETRY_STATUS_ALL,
+      statuses: RETRYABLE_STATUS,
     });
   });
 
@@ -82,6 +89,46 @@ describe("resolveProviderRetries", () => {
     expect(resolveProviderRetries({ enabled: true, maxBackoffSeconds: 0 }).maxBackoffMs).toBe(MIN_RETRY_BACKOFF_MS);
     expect(resolveProviderRetries({ enabled: true, maxBackoffSeconds: 999 }).maxBackoffMs).toBe(MAX_RETRY_WAIT_MS);
     expect(resolveProviderRetries({ enabled: true, maxBackoffSeconds: "invalid" }).maxBackoffMs).toBe(DEFAULT_RETRY_BACKOFF_MS);
+  });
+});
+
+describe("resolveStatusList", () => {
+  it("parses comma/space lists, dedupes, sorts, and drops junk", () => {
+    expect(resolveStatusList("502, 503, 504")).toEqual([502, 503, 504]);
+    expect(resolveStatusList("504 502 ,502 ,oops,399,600,abc")).toEqual([502, 504]);
+    expect(resolveStatusList([500, 502, 500])).toEqual([500, 502]);
+    expect(resolveStatusList("500.5")).toEqual([]);
+    expect(resolveStatusList("")).toEqual([]);
+    expect(resolveStatusList(null)).toEqual([]);
+  });
+});
+
+describe("resolveProviderRetries status scope", () => {
+  it("defaults to the full transient set for all/unknown modes", () => {
+    expect(resolveProviderRetries({ enabled: true }).statuses).toEqual(RETRYABLE_STATUS);
+    expect(resolveProviderRetries({ enabled: true, statusMode: "weird" }).statusMode).toBe(RETRY_STATUS_ALL);
+  });
+
+  it("replaces the set in only mode", () => {
+    const cfg = resolveProviderRetries({ enabled: true, statusMode: RETRY_STATUS_ONLY, statusList: "500, 502" });
+    expect(cfg.statusMode).toBe(RETRY_STATUS_ONLY);
+    expect(cfg.statuses).toEqual([500, 502]);
+  });
+
+  it("falls back to the transient set when only mode has no valid codes", () => {
+    expect(resolveProviderRetries({ enabled: true, statusMode: RETRY_STATUS_ONLY, statusList: "nope" }).statuses)
+      .toEqual(RETRYABLE_STATUS);
+  });
+
+  it("subtracts the list in except mode", () => {
+    const cfg = resolveProviderRetries({ enabled: true, statusMode: RETRY_STATUS_EXCEPT, statusList: [429] });
+    expect(cfg.statusMode).toBe(RETRY_STATUS_EXCEPT);
+    expect(cfg.statuses).toEqual([502, 503, 504]);
+  });
+
+  it("keeps the whole transient set when except lists nothing", () => {
+    expect(resolveProviderRetries({ enabled: true, statusMode: RETRY_STATUS_EXCEPT, statusList: [] }).statuses)
+      .toEqual(RETRYABLE_STATUS);
   });
 });
 
@@ -123,6 +170,12 @@ describe("shouldRetrySameKey", () => {
     expect(shouldRetrySameKey({ ...base, status: 500 })).toBe(false);
     expect(shouldRetrySameKey({ ...base, cooldownMs: 16001 })).toBe(false);
     expect(shouldRetrySameKey({ ...base, cooldownMs: undefined })).toBe(false);
+  });
+
+  it("honors a narrowed statuses set", () => {
+    expect(shouldRetrySameKey({ ...base, statuses: [502, 503] })).toBe(false);
+    expect(shouldRetrySameKey({ ...base, status: 502, statuses: [502, 503] })).toBe(true);
+    expect(shouldRetrySameKey({ ...base, status: 500, statuses: [502, 500] })).toBe(true);
   });
 
   it("fails closed on malformed budgets", () => {
@@ -171,6 +224,64 @@ describe("combo retry account lock backoff", () => {
       vi.useRealTimers();
     }
   });
+
+  it("caps a transient 502 lock to the max backoff", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-11T00:00:00.000Z"));
+    try {
+      authMocks.getProviderConnections.mockResolvedValue([{
+        id: "custom-a",
+        provider: "custom",
+        name: "custom-a",
+        backoffLevel: 0,
+      }]);
+      authMocks.updateProviderConnection.mockClear();
+
+      // Connect timeout surfaces as 502. The account lock is the 30s transient
+      // default, but the provider's max backoff caps it so the retry can fire.
+      const capped = await markAccountUnavailable(
+        "custom-a", 502, "fetch connect timeout", "custom", "model-a", null,
+        { maxBackoffMs: 5000, retryableStatuses: [429, 502, 503, 504] },
+      );
+      expect(capped.cooldownMs).toBe(5000);
+      expect(authMocks.updateProviderConnection).toHaveBeenLastCalledWith(
+        "custom-a",
+        expect.objectContaining({ "modelLock_model-a": "2026-09-11T00:00:05.000Z" }),
+      );
+
+      // A non-eligible status keeps its full lock even with the same options,
+      // so an auth lock is never shortened by combo retries.
+      const authLock = await markAccountUnavailable(
+        "custom-a", 401, "unauthorized", "custom", "model-a", null,
+        { maxBackoffMs: 5000, retryableStatuses: [429, 502, 503, 504] },
+      );
+      expect(authLock.cooldownMs).toBe(2 * 60 * 1000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the full transient lock when the status is outside the only scope", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-09-11T00:00:00.000Z"));
+    try {
+      authMocks.getProviderConnections.mockResolvedValue([{
+        id: "custom-a",
+        provider: "custom",
+        name: "custom-a",
+        backoffLevel: 0,
+      }]);
+      authMocks.updateProviderConnection.mockClear();
+
+      const outside = await markAccountUnavailable(
+        "custom-a", 502, "fetch connect timeout", "custom", "model-a", null,
+        { maxBackoffMs: 5000, retryableStatuses: [429, 503] },
+      );
+      expect(outside.cooldownMs).toBe(30 * 1000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 
 const silentLog = { info: () => {}, warn: () => {} };
@@ -207,6 +318,55 @@ const transientSignal = (over = {}) => ({
   status: 429,
   retryAfterMs: 0,
   ...over,
+});
+
+describe("handleComboChat status scope", () => {
+  it("advances without a member retry when the status is excluded", async () => {
+    const calls = [];
+    const res = await handleComboChat({
+      body: {},
+      models: ["p1/a", "p2/b"],
+      handleSingleModel: async (b, m) => {
+        calls.push(m);
+        return m === "p2/b"
+          ? okResponse()
+          : failResponse({ signal: transientSignal({ status: 429 }) });
+      },
+      log: silentLog,
+      comboName: "retry-except-429",
+      resolveMemberRetries: () => resolveProviderRetries({
+        enabled: true,
+        tries: 3,
+        statusMode: RETRY_STATUS_EXCEPT,
+        statusList: [429],
+      }),
+    });
+    expect(res.ok).toBe(true);
+    expect(calls).toEqual(["p1/a", "p2/b"]);
+  });
+
+  it("retries a status named in only mode", async () => {
+    const calls = [];
+    const res = await handleComboChat({
+      body: {},
+      models: ["p1/a", "p2/b"],
+      handleSingleModel: async (b, m) => {
+        calls.push(m);
+        if (m === "p2/b" || calls.filter((c) => c === "p1/a").length > 1) return okResponse();
+        return failResponse({ signal: transientSignal({ status: 502 }) });
+      },
+      log: silentLog,
+      comboName: "retry-only-502",
+      resolveMemberRetries: () => resolveProviderRetries({
+        enabled: true,
+        tries: 1,
+        statusMode: RETRY_STATUS_ONLY,
+        statusList: [502],
+      }),
+    });
+    expect(res.ok).toBe(true);
+    expect(calls).toEqual(["p1/a", "p1/a"]);
+  });
 });
 
 describe("handleComboChat same-member retries", () => {
@@ -512,6 +672,27 @@ describe("handleComboChat same-member wait lines", () => {
       vi.useRealTimers();
     }
   });
+
+  it("logs a skipped retry when the 502 lock outlasts the max backoff", async () => {
+    const { lines, log } = captureLog();
+    const calls = [];
+    const res = await handleComboChat({
+      body: {},
+      models: ["p1/a", "p2/b"],
+      handleSingleModel: async (b, m) => {
+        calls.push(m);
+        return m === "p2/b"
+          ? okResponse()
+          : failResponse({ status: 503, signal: transientSignal({ status: 502, retryAfterMs: 30_000 }) });
+      },
+      log,
+      comboName: "retry-skip-log",
+      resolveMemberRetries: () => resolveProviderRetries({ enabled: true, tries: 2, maxBackoffSeconds: 5 }),
+    });
+    expect(res.ok).toBe(true);
+    expect(calls).toEqual(["p1/a", "p2/b"]);
+    expect(lines).toContain("warn [COMBO] ↻ Model p1/a transient 502, retry skipped (wait 30s > max backoff 5s) → next");
+  });
 });
 
 describe("provider combo retries after restart", () => {
@@ -582,6 +763,8 @@ describe("provider combo retries after restart", () => {
       tries: 2,
       maxBackoffMs: 12_000,
       mode: RETRY_MODE_MEMBER,
+      statusMode: RETRY_STATUS_ALL,
+      statuses: RETRYABLE_STATUS,
     });
 
     // Once the pre-restart lock expires, the next 429 starts at level 1 (2s),

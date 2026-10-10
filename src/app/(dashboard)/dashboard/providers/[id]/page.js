@@ -59,12 +59,38 @@ const RETRY_MODE_OPTIONS = [
   { value: RETRY_MODE_MEMBER, label: "Per member (all keys, then wait)" },
   { value: RETRY_MODE_PER_KEY, label: "Per key (each key on its own)" },
 ];
+const RETRY_STATUS_ALL = "all";
+const RETRY_STATUS_ONLY = "only";
+const RETRY_STATUS_EXCEPT = "except";
+const RETRY_STATUS_MODE_OPTIONS = [
+  { value: RETRY_STATUS_ALL, label: "All transient errors" },
+  { value: RETRY_STATUS_ONLY, label: "Only these errors" },
+  { value: RETRY_STATUS_EXCEPT, label: "All except these" },
+];
 
 function parseRetryTries(raw) {
   if (raw === "" || raw == null) return null;
   const n = Number(raw);
   if (!Number.isFinite(n)) return undefined;
   return Math.min(RETRY_MAX_TRIES, Math.max(RETRY_MIN_TRIES, Math.floor(n)));
+}
+
+// Parse a comma/space-separated list of HTTP status codes. Returns a sorted,
+// deduped array; invalid entries are dropped (fail-open at resolve time).
+function parseRetryStatusList(raw) {
+  if (raw === "" || raw == null) return [];
+  const codes = new Set();
+  for (const part of String(raw).split(/[\s,]+/)) {
+    if (part === "") continue;
+    const n = Number(part);
+    if (!Number.isInteger(n) || n < 400 || n > 599) continue;
+    codes.add(n);
+  }
+  return [...codes].sort((a, b) => a - b);
+}
+
+function formatRetryStatusList(list) {
+  return Array.isArray(list) ? list.join(", ") : "";
 }
 
 function parseRetryBackoffSec(raw) {
@@ -130,7 +156,7 @@ export default function ProviderDetailPage() {
   const [providerStickyLimit, setProviderStickyLimit] = useState("");
   const [thinkingMode, setThinkingMode] = useState("auto");
   const [timeoutInputs, setTimeoutInputs] = useState({ connect: "", firstChunk: "", stall: "" });
-  const [retryCfg, setRetryCfg] = useState({ enabled: false, tries: "", maxBackoffSeconds: "", mode: RETRY_MODE_MEMBER });
+  const [retryCfg, setRetryCfg] = useState({ enabled: false, tries: "", maxBackoffSeconds: "", mode: RETRY_MODE_MEMBER, statusMode: RETRY_STATUS_ALL, statusList: "" });
   const [autoPing, setAutoPing] = useState({ enabled: false, connections: {} });
   const [suggestedModels, setSuggestedModels] = useState([]);
   const [liveModels, setLiveModels] = useState([]);
@@ -407,6 +433,10 @@ export default function ProviderDetailPage() {
         tries: retryCfgRaw.tries != null ? String(retryCfgRaw.tries) : "",
         maxBackoffSeconds: retryCfgRaw.maxBackoffSeconds != null ? String(retryCfgRaw.maxBackoffSeconds) : "",
         mode: retryCfgRaw.mode === RETRY_MODE_PER_KEY ? RETRY_MODE_PER_KEY : RETRY_MODE_MEMBER,
+        statusMode: retryCfgRaw.statusMode === RETRY_STATUS_ONLY
+          ? RETRY_STATUS_ONLY
+          : retryCfgRaw.statusMode === RETRY_STATUS_EXCEPT ? RETRY_STATUS_EXCEPT : RETRY_STATUS_ALL,
+        statusList: formatRetryStatusList(retryCfgRaw.statusList),
       });
       const autoPingSettingsKey = AUTO_PING_SETTINGS_KEYS[providerId];
       const apCfg = autoPingSettingsKey ? settingsData[autoPingSettingsKey] || {} : {};
@@ -584,12 +614,20 @@ export default function ProviderDetailPage() {
       if (!next.enabled) {
         delete updated[providerId];
       } else {
-        updated[providerId] = {
+        const statusMode = next.statusMode === RETRY_STATUS_ONLY
+          ? RETRY_STATUS_ONLY
+          : next.statusMode === RETRY_STATUS_EXCEPT ? RETRY_STATUS_EXCEPT : RETRY_STATUS_ALL;
+        const entry = {
           enabled: true,
           tries: next.tries,
           maxBackoffSeconds: next.maxBackoffSeconds,
           mode: next.mode === RETRY_MODE_PER_KEY ? RETRY_MODE_PER_KEY : RETRY_MODE_MEMBER,
+          statusMode,
         };
+        // Only persist the scope list when it actually narrows the set; keep
+        // "all" configs free of an empty/irrelevant array.
+        if (statusMode !== RETRY_STATUS_ALL) entry.statusList = parseRetryStatusList(next.statusList);
+        updated[providerId] = entry;
       }
       await fetch("/api/settings", {
         method: "PATCH",
@@ -609,9 +647,11 @@ export default function ProviderDetailPage() {
       tries: enabled ? String(tries) : retryCfg.tries,
       maxBackoffSeconds: enabled ? String(maxBackoffSeconds) : retryCfg.maxBackoffSeconds,
       mode: retryCfg.mode,
+      statusMode: retryCfg.statusMode,
+      statusList: retryCfg.statusList,
     };
     setRetryCfg(next);
-    saveProviderRetries({ enabled, tries: enabled ? tries : 0, maxBackoffSeconds, mode: retryCfg.mode });
+    saveProviderRetries({ enabled, tries: enabled ? tries : 0, maxBackoffSeconds, mode: retryCfg.mode, statusMode: retryCfg.statusMode, statusList: retryCfg.statusList });
   };
 
   const handleRetryTriesChange = (raw) => {
@@ -620,7 +660,7 @@ export default function ProviderDetailPage() {
     const tries = parseRetryTries(raw);
     if (tries === undefined || tries === null) return;
     const maxBackoffSeconds = parseRetryBackoffSec(retryCfg.maxBackoffSeconds) ?? RETRY_DEFAULT_BACKOFF_SEC;
-    saveProviderRetries({ enabled: true, tries, maxBackoffSeconds, mode: retryCfg.mode });
+    saveProviderRetries({ enabled: true, tries, maxBackoffSeconds, mode: retryCfg.mode, statusMode: retryCfg.statusMode, statusList: retryCfg.statusList });
   };
 
   const handleRetryBackoffChange = (raw) => {
@@ -629,7 +669,7 @@ export default function ProviderDetailPage() {
     const maxBackoffSeconds = parseRetryBackoffSec(raw);
     if (maxBackoffSeconds === undefined || maxBackoffSeconds === null) return;
     const tries = parseRetryTries(retryCfg.tries) ?? RETRY_DEFAULT_TRIES;
-    saveProviderRetries({ enabled: true, tries, maxBackoffSeconds, mode: retryCfg.mode });
+    saveProviderRetries({ enabled: true, tries, maxBackoffSeconds, mode: retryCfg.mode, statusMode: retryCfg.statusMode, statusList: retryCfg.statusList });
   };
 
   const handleRetryModeChange = (mode) => {
@@ -637,7 +677,23 @@ export default function ProviderDetailPage() {
     if (!retryCfg.enabled) return;
     const tries = parseRetryTries(retryCfg.tries) ?? RETRY_DEFAULT_TRIES;
     const maxBackoffSeconds = parseRetryBackoffSec(retryCfg.maxBackoffSeconds) ?? RETRY_DEFAULT_BACKOFF_SEC;
-    saveProviderRetries({ enabled: true, tries, maxBackoffSeconds, mode });
+    saveProviderRetries({ enabled: true, tries, maxBackoffSeconds, mode, statusMode: retryCfg.statusMode, statusList: retryCfg.statusList });
+  };
+
+  const handleRetryStatusModeChange = (statusMode) => {
+    setRetryCfg({ ...retryCfg, statusMode });
+    if (!retryCfg.enabled) return;
+    const tries = parseRetryTries(retryCfg.tries) ?? RETRY_DEFAULT_TRIES;
+    const maxBackoffSeconds = parseRetryBackoffSec(retryCfg.maxBackoffSeconds) ?? RETRY_DEFAULT_BACKOFF_SEC;
+    saveProviderRetries({ enabled: true, tries, maxBackoffSeconds, mode: retryCfg.mode, statusMode, statusList: retryCfg.statusList });
+  };
+
+  const handleRetryStatusListChange = (raw) => {
+    setRetryCfg({ ...retryCfg, statusList: raw });
+    if (!retryCfg.enabled) return;
+    const tries = parseRetryTries(retryCfg.tries) ?? RETRY_DEFAULT_TRIES;
+    const maxBackoffSeconds = parseRetryBackoffSec(retryCfg.maxBackoffSeconds) ?? RETRY_DEFAULT_BACKOFF_SEC;
+    saveProviderRetries({ enabled: true, tries, maxBackoffSeconds, mode: retryCfg.mode, statusMode: retryCfg.statusMode, statusList: raw });
   };
 
   const saveAutoPing = async (next) => {
@@ -2412,8 +2468,9 @@ const ids = [];
           <h2 className="text-lg font-semibold">Combo Retries</h2>
           <p className="text-sm text-text-muted">
             When this provider fails inside a combo with a transient error (rate limit, overloaded, network),
-            retry before moving to the next provider. Off by default. Local exponential backoff is capped per
-            retry; genuine provider reset times beyond the cap still skip to the next member.
+            retry before moving to the next provider. Off by default. The account lock is capped to the
+            max backoff so the retry can fire; genuine provider reset times beyond the cap still skip to
+            the next member.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-4">
@@ -2463,6 +2520,31 @@ const ids = [];
                 onChange={(e) => handleRetryBackoffChange(e.target.value)}
                 hint="Maximum local wait per retry in seconds (1–30)."
               />
+              <Select
+                label="Retry which errors"
+                value={retryCfg.statusMode}
+                onChange={(e) => handleRetryStatusModeChange(e.target.value)}
+                options={RETRY_STATUS_MODE_OPTIONS}
+                className="flex-1 min-w-48"
+                selectClassName="min-w-56"
+                hint={retryCfg.statusMode === RETRY_STATUS_ONLY
+                  ? "Retry only the listed status codes; everything else skips to the next member."
+                  : retryCfg.statusMode === RETRY_STATUS_EXCEPT
+                    ? "Retry the usual transient errors except the listed status codes."
+                    : "Retry any transient error (rate limit, overloaded, network)."
+                }
+              />
+              {retryCfg.statusMode !== RETRY_STATUS_ALL && (
+                <Input
+                  label="Status codes"
+                  type="text"
+                  className="flex-1 min-w-48"
+                  placeholder="502, 503, 504"
+                  value={retryCfg.statusList}
+                  onChange={(e) => handleRetryStatusListChange(e.target.value)}
+                  hint="Comma-separated HTTP error codes (400–599)."
+                />
+              )}
             </>
           )}
         </div>

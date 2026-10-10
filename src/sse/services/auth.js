@@ -1,6 +1,7 @@
 import { getProviderConnections, validateApiKey, updateProviderConnection, getSettings, getProxyPools } from "@/lib/localDb";
 import { resolveConnectionProxyConfig, pickProxyPoolId } from "@/lib/network/connectionProxy";
 import { formatRetryAfter, checkFallbackError, isModelLockActive, buildModelLockUpdate, getEarliestModelLockUntil } from "open-sse/services/accountFallback.js";
+import { isRetryableStatus } from "open-sse/config/retries.js";
 import { MAX_RATE_LIMIT_COOLDOWN_MS } from "open-sse/config/errorConfig.js";
 import { providerDisplayLabel } from "open-sse/utils/providerLabel.js";
 import { resolveProviderId, FREE_PROVIDERS } from "@/shared/constants/providers.js";
@@ -287,10 +288,15 @@ export async function markAccountUnavailable(connectionId, status, errorText, pr
     newBackoffLevel = 0;
   } else {
     ({ shouldFallback, cooldownMs, newBackoffLevel } = checkFallbackError(status, errorText, backoffLevel, resolveProviderId(provider)));
-    // Combo retries may cap locally generated exponential backoff so every
-    // configured attempt remains usable. Exact provider reset timestamps take
-    // the branches above and are intentionally never shortened.
-    if (newBackoffLevel != null && Number.isFinite(options.maxBackoffMs)) {
+    // Combo retries may cap the account lock so every configured attempt remains
+    // usable. Applies to any retry-eligible status (the transient set, or the
+    // provider's only/except scope), not just exponential rate-limit backoff:
+    // a 502 connect timeout otherwise locks for the 30s transient default and
+    // outlasts a shorter max backoff, silently skipping the retry. Exact
+    // provider reset timestamps take the branch above and are never shortened.
+    const retryStatuses = Array.isArray(options.retryableStatuses) ? options.retryableStatuses : null;
+    const retryEligible = retryStatuses ? retryStatuses.includes(status) : isRetryableStatus(status);
+    if (retryEligible && Number.isFinite(options.maxBackoffMs)) {
       cooldownMs = Math.min(cooldownMs, Math.max(0, options.maxBackoffMs));
     }
   }
