@@ -1,3 +1,23 @@
+# v0.5.99-2 (2026-10-10)
+
+## Features
+- **Providers**: manually lock or unlock a connection from its row — locking
+  opens a duration dialog (minutes/hours/days, 1 min–30 days) and blocks every
+  model on that connection (account-level `modelLock___all`) until the timer
+  expires; unlocking clears every model lock and resets the connection's health
+  state
+- **Combos**: per-provider retry scope — "Only these errors" / "All except
+  these" limits Combo Retries to, or excludes, specific HTTP status codes
+  across member and per-key modes
+
+## Fixes
+- **Combos**: a 502 (e.g. a fetch connect timeout) locked the account for the
+  30s transient default, which outlasted a provider's smaller Max backoff, so
+  the configured retry was silently skipped; the lock is now capped to Max
+  backoff for any retry-eligible status, exact provider resets and
+  non-retryable statuses stay untouched, and the console logs a "retry
+  skipped" line plus the real underlying status instead of the wrapper 503
+
 # v0.5.99-1 (2026-10-09)
 
 Merged upstream v0.5.99 into the fork. This section includes the full upstream
