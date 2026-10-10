@@ -20,6 +20,7 @@ import ModelRow from "./ModelRow";
 import PassthroughModelsSection from "./PassthroughModelsSection";
 import CompatibleModelsSection from "./CompatibleModelsSection";
 import ConnectionRow from "./ConnectionRow";
+import LockConnectionModal from "./LockConnectionModal";
 import { persistPriorityOrder } from "../utils";
 import AddApiKeyModal from "./AddApiKeyModal";
 import EditCompatibleNodeModal from "./EditCompatibleNodeModal";
@@ -165,6 +166,7 @@ export default function ProviderDetailPage() {
   const [kiloFreeModels, setKiloFreeModels] = useState([]);
   const [disabledModelIds, setDisabledModelIds] = useState([]);
   const [confirmState, setConfirmState] = useState(null);
+  const [showLockModal, setShowLockModal] = useState(false);
   const [showAgRiskModal, setShowAgRiskModal] = useState(false);
   const [oneByOneRunning, setOneByOneRunning] = useState(false);
   const [oneByOneStopping, setOneByOneStopping] = useState(false);
@@ -1540,6 +1542,49 @@ const ids = [];
     }
   };
 
+  const handleLockConnection = (conn) => {
+    setSelectedConnection(conn);
+    setShowLockModal(true);
+  };
+
+  const handleLockConfirm = async (durationMs) => {
+    if (!selectedConnection) return;
+    try {
+      const res = await fetch(`/api/providers/${selectedConnection.id}/lock`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "lock", durationMs }),
+      });
+      if (res.ok) {
+        setShowLockModal(false);
+        await fetchConnections();
+      }
+    } catch (error) {
+      console.log("Error locking connection:", error);
+    }
+  };
+
+  const handleUnlockConnection = (conn) => {
+    setConfirmState({
+      title: "Unlock Connection",
+      message: `Unlock this connection? Every model lock on it will be cleared and it can serve requests again.`,
+      confirmText: "Unlock",
+      onConfirm: async () => {
+        setConfirmState(null);
+        try {
+          const res = await fetch(`/api/providers/${conn.id}/lock`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "unlock" }),
+          });
+          if (res.ok) await fetchConnections();
+        } catch (error) {
+          console.log("Error unlocking connection:", error);
+        }
+      },
+    });
+  };
+
   const moveQueueRef = useRef(Promise.resolve());
   // Blocks new moves while a failure-path refetch restores a trustworthy base.
   const connectionsResyncingRef = useRef(false);
@@ -1737,6 +1782,8 @@ const ids = [];
                 onMoveUp={() => handleSwapPriority(index, index - 1)}
                 onMoveDown={() => handleSwapPriority(index, index + 1)}
                 onToggleActive={(isActive) => handleUpdateConnectionStatus(conn.id, isActive)}
+                onLock={() => handleLockConnection(conn)}
+                onUnlock={() => handleUnlockConnection(conn)}
                 autoPing={AUTO_PING_SETTINGS_KEYS[providerId] && conn.authType === "oauth" ? {
                   on: autoPing.connections[conn.id] === true,
                   onToggle: (on) => handleAutoPingConnection(conn.id, on),
@@ -2839,6 +2886,14 @@ const ids = [];
         confirmText="I Understand, Continue"
         cancelText="Cancel"
         variant="danger"
+      />
+
+      {/* Lock Connection Modal */}
+      <LockConnectionModal
+        isOpen={showLockModal}
+        connection={selectedConnection}
+        onConfirm={handleLockConfirm}
+        onClose={() => setShowLockModal(false)}
       />
 
       {/* Confirm Modal */}
