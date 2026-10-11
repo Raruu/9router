@@ -375,6 +375,18 @@ export default function RequestDetailsTab() {
                 <span className="text-text-muted">Model:</span>{" "}
                 <span className="text-text-main font-mono">{selectedDetail.model}</span>
               </div>
+              {selectedDetail.thinking && (
+                <div>
+                  <span className="text-text-muted">Thinking:</span>{" "}
+                  <span className="text-text-main font-mono">
+                    {selectedDetail.thinking.classifier
+                      ? `system one (${selectedDetail.thinking.classifier}) → ${selectedDetail.thinking.applied || selectedDetail.thinking.requested || "?"}${selectedDetail.thinking.fallback ? " (fallback)" : ""}`
+                      : selectedDetail.thinking.requested && selectedDetail.thinking.applied && selectedDetail.thinking.requested !== selectedDetail.thinking.applied
+                        ? `${selectedDetail.thinking.requested} → ${selectedDetail.thinking.applied} (fallback)`
+                        : selectedDetail.thinking.applied || selectedDetail.thinking.requested}
+                  </span>
+                </div>
+              )}
               <div>
                 <span className="text-text-muted">Status:</span>{" "}
                 <span className={cn(

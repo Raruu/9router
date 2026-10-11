@@ -18,7 +18,7 @@ import { handleBypassRequest } from "../utils/bypassHandler.js";
 import { trackPendingRequest, appendRequestLog, saveRequestDetail } from "@/lib/usageDb.js";
 import { getExecutor } from "../executors/index.js";
 import { supportsGrokCliReasoningEffort } from "../config/grokCli.js";
-import { buildRequestDetail, extractRequestConfig } from "./chatCore/requestDetail.js";
+import { buildRequestDetail, extractRequestConfig, buildThinkingTrace } from "./chatCore/requestDetail.js";
 import { handleForcedSSEToJson } from "./chatCore/sseToJsonHandler.js";
 import { handleNonStreamingResponse } from "./chatCore/nonStreamingHandler.js";
 import { handleStreamingResponse, buildOnStreamComplete } from "./chatCore/streamingHandler.js";
@@ -63,8 +63,14 @@ export function stripContinuityFields(body) {
   return body;
 }
 
-export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, responseModelOverride, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, timeoutOverrides, providerOverrides }) {
+export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, responseModelOverride, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, timeoutOverrides, providerOverrides, classifierDecision }) {
   const { provider, model } = modelInfo;
+
+  // Thinking observability: the client's requested intent is captured BEFORE
+  // translateRequest mutates `body` in place (same-format requests), so a
+  // Usage → Details row can show `requested → applied` (e.g. max → high when a
+  // member clamped it) and which classifier profile chose the level.
+  const requestedThinking = extractThinking(body);
   // Console-only label: compatible nodes log their user-facing prefix instead of
   // the generated id. Every stored key below still uses the raw `provider`.
   const displayProvider = providerDisplayLabel(provider, credentials?.providerSpecificData);
@@ -266,6 +272,16 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     log.line(reqTag, "▶", parts.join(" · "));
   }
 
+  // Thinking trace for Usage → Details: the client's requested intent vs what
+  // the upstream body actually carries (post clamp/mapping), plus the classifier
+  // profile that picked the level when one did. undefined when neither exists,
+  // so old-style rows stay byte-identical.
+  const thinkingTrace = buildThinkingTrace({
+    requested: requestedThinking,
+    applied: extractThinking(translatedBody),
+    classifier: classifierDecision,
+  });
+
   // TTS models don't support tool messages/function calling
   if (getModelType(alias, model) === "tts" && translatedBody.messages) {
     translatedBody.messages = translatedBody.messages.filter(msg => msg.role !== "tool");
@@ -444,6 +460,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       providerRequest: translatedBody || null,
       response: { error: error.message || String(error), status: error.name === "AbortError" ? 499 : 502, thinking: null },
       pxpipe: pxpipeSummary,
+      thinking: thinkingTrace,
       status: "error"
     })).catch(() => { });
 
@@ -521,6 +538,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       providerRequest: finalBody || translatedBody || null,
       response: { error: message, status: statusCode, thinking: null },
       pxpipe: pxpipeSummary,
+      thinking: thinkingTrace,
       status: "error"
     })).catch(() => { });
 
@@ -533,7 +551,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     return createErrorResult(statusCode, errMsg, resetsAtMs, upstreamResponseHeaders(providerResponse.headers));
   }
 
-  const sharedCtx = { provider, displayProvider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, responseModelOverride, pxpipe: pxpipeSummary, reqTag, log, timeoutOverrides };
+  const sharedCtx = { provider, displayProvider, model, body, stream, translatedBody, finalBody, requestStartTime, connectionId, apiKey, clientRawRequest, onRequestSuccess, responseModelOverride, pxpipe: pxpipeSummary, reqTag, log, timeoutOverrides, thinking: thinkingTrace };
   const appendLog = (extra) => appendRequestLog({ model, provider, connectionId, ...extra }).catch(() => { });
   const trackDone = () => trackPendingRequest(model, provider, connectionId, false);
 

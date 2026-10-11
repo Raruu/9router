@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   getProviderConnections: vi.fn(),
   getProviderNodes: vi.fn(),
   getSettings: vi.fn(),
+  getActiveClassifierNames: vi.fn(),
   getPricingForModel: vi.fn(),
   getUserPricingTables: vi.fn(),
 }));
@@ -27,6 +28,7 @@ vi.mock("@/lib/localDb", () => ({
   getProviderConnections: mocks.getProviderConnections,
   getProviderNodes: mocks.getProviderNodes,
   getSettings: mocks.getSettings,
+  getActiveClassifierNames: mocks.getActiveClassifierNames,
 }));
 
 vi.mock("@/lib/db/repos/pricingRepo.js", () => ({
@@ -71,6 +73,7 @@ describe("GET /api/models/detail", () => {
     mocks.getProviderConnections.mockResolvedValue([]);
     mocks.getProviderNodes.mockResolvedValue([]);
     mocks.getSettings.mockResolvedValue({ comboStrategies: {} });
+    mocks.getActiveClassifierNames.mockResolvedValue([]);
     mocks.getPricingForModel.mockResolvedValue(null);
     mocks.getUserPricingTables.mockResolvedValue({});
   });
@@ -253,6 +256,7 @@ describe("GET /api/models/detail — combos", () => {
     mocks.getProviderConnections.mockResolvedValue([]);
     mocks.getProviderNodes.mockResolvedValue([]);
     mocks.getSettings.mockResolvedValue({ comboStrategies: {} });
+    mocks.getActiveClassifierNames.mockResolvedValue([]);
     mocks.getPricingForModel.mockResolvedValue(null);
     mocks.getUserPricingTables.mockResolvedValue({});
   });

@@ -15,11 +15,11 @@ const originalDataDir = process.env.DATA_DIR;
 
 function writeLegacyDb(dir) {
   // The apiKeys DDL as it was before the access columns + a stamped _meta:
-  // migration chain complete (4), backup schema 5 (fork's previous release).
+  // migration chain complete (5), backup schema 6 (fork's previous release).
   fs.mkdirSync(path.join(dir, "db"), { recursive: true });
   const db = new DatabaseSync(path.join(dir, "db", "data.sqlite"));
   db.exec(`CREATE TABLE _meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
-  db.exec(`INSERT INTO _meta(key, value) VALUES ('schemaVersion', '4'), ('backupSchemaVersion', '5')`);
+  db.exec(`INSERT INTO _meta(key, value) VALUES ('schemaVersion', '5'), ('backupSchemaVersion', '6')`);
   db.exec(`CREATE TABLE apiKeys (id TEXT PRIMARY KEY, key TEXT UNIQUE NOT NULL, name TEXT, machineId TEXT, isActive INTEGER DEFAULT 1, createdAt TEXT NOT NULL)`);
   const ins = db.prepare(`INSERT INTO apiKeys(id, key, name, machineId, isActive, createdAt) VALUES (?, ?, ?, ?, ?, ?)`);
   ins.run("k1", "sk-legacy-one", "Default Key", "m", 1, "2026-09-01T00:00:00.000Z");
@@ -66,7 +66,7 @@ describe("apiKeys access columns: upgrade from the previous schema", () => {
 
     // The schema bump took the pre-change safety backup.
     const backups = fs.readdirSync(path.join(tempDir, "db", "backups"));
-    expect(backups.some((d) => d.startsWith("schema-5-to-6"))).toBe(true);
+    expect(backups.some((d) => d.startsWith("schema-6-to-7"))).toBe(true);
   });
 
   it("persists access through update, new keys default to unrestricted", async () => {

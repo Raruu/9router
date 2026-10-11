@@ -20,6 +20,7 @@ export async function handleSystemoneCore({
   credentials,
   log,
   onRequestSuccess,
+  timeoutMs,
 }) {
   const { provider, model } = modelInfo;
   const cfg = PROVIDER_MEDIA[provider]?.systemoneConfig;
@@ -73,12 +74,13 @@ export async function handleSystemoneCore({
 
   let providerResponse;
   try {
+    const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : FETCH_CONNECT_TIMEOUT_MS;
     providerResponse = await fetch(targetUrl, {
       method: "POST",
       headers,
       body: JSON.stringify(requestBody),
       ...(typeof AbortSignal?.timeout === "function"
-        ? { signal: AbortSignal.timeout(FETCH_CONNECT_TIMEOUT_MS) }
+        ? { signal: AbortSignal.timeout(timeout) }
         : {}),
     });
   } catch (error) {

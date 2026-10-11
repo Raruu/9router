@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { getCombos, getComboByName, getCustomModels, getModelAliases, getProviderConnections, getProviderNodes, getSettings } from "@/lib/localDb";
+import { getCombos, getComboByName, getCustomModels, getModelAliases, getProviderConnections, getProviderNodes, getSettings, getActiveClassifierNames } from "@/lib/localDb";
 import { getPricingForModel, getUserPricingTables } from "@/lib/db/repos/pricingRepo.js";
 import { buildProviderIdByPrefix } from "@/lib/providerPrefixMap";
 import { PROVIDER_MODELS, getModelKind } from "@/shared/constants/models";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
-import { comboCapabilities, comboEffortTiers, mergeMemberCapabilities, resolveComboMember } from "open-sse/providers/comboCapabilities.js";
+import { comboCapabilities, comboEffortTiers, mergeMemberCapabilities, resolveComboMember, withClassifierTiers } from "open-sse/providers/comboCapabilities.js";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 
 const LLM_KIND = "llm";
@@ -45,7 +45,7 @@ function findRegistryModel(prefix, providerId, modelId) {
   return list.find((m) => m.id === modelId) || null;
 }
 
-function buildModelDetail({ prefix, providerId, modelId, registryModel, capabilities, pricing, pricingSource, nodeNameById, catalogRef }) {
+function buildModelDetail({ prefix, providerId, modelId, registryModel, capabilities, pricing, pricingSource, nodeNameById, catalogRef, ctx }) {
   const providerInfo = AI_PROVIDERS[providerId];
   const kind = registryModel ? getModelKind(registryModel, LLM_KIND) : LLM_KIND;
   const detail = {
@@ -73,6 +73,14 @@ function buildModelDetail({ prefix, providerId, modelId, registryModel, capabili
   };
   if (capabilities.reasoning) {
     detail.thinkingLevels = getThinkingLevels(providerId, modelId) || null;
+    // Advertise Thinking Effort Classifier profiles next to the real levels —
+    // the modal's Levels row reads capabilities.effort_tiers first. Only set
+    // when at least one classifier is active, so installs without one are
+    // byte-identical to before.
+    if (ctx?.classifierNames?.length) {
+      const tiers = withClassifierTiers(detail.thinkingLevels, ctx.classifierNames);
+      if (tiers) detail.capabilities = { ...capabilities, effort_tiers: tiers };
+    }
   }
   const registry = {};
   if (registryModel?.contextLength) registry.contextLength = registryModel.contextLength;
@@ -113,6 +121,7 @@ async function modelDetail(fullId, ctx) {
     pricingSource,
     nodeNameById: ctx.nodeNameById,
     catalogRef: customModel?.catalogRef,
+    ctx,
   });
 }
 
@@ -191,7 +200,7 @@ async function comboDetail(combo, ctx) {
   // Attached post-merge so a mixed-format combo keeps its levels even when the
   // merged thinkingFormat falls back to the neutral default.
   if (capabilities?.reasoning) {
-    const effortTiers = comboEffortTiers(combo, ctx);
+    const effortTiers = withClassifierTiers(comboEffortTiers(combo, ctx), ctx.classifierNames);
     if (effortTiers) capabilities.effort_tiers = effortTiers;
   }
 
@@ -215,13 +224,14 @@ async function comboDetail(combo, ctx) {
 }
 
 async function buildContext() {
-  const [connections, combos, customModels, modelAliases, settings, nodes] = await Promise.all([
+  const [connections, combos, customModels, modelAliases, settings, nodes, classifierNames] = await Promise.all([
     getProviderConnections().catch(() => []),
     getCombos().catch(() => []),
     getCustomModels().catch(() => []),
     getModelAliases().catch(() => ({})),
     getSettings().catch(() => ({})),
     getProviderNodes().catch(() => []),
+    getActiveClassifierNames().catch(() => []),
   ]);
 
   const nodeNameById = new Map();
@@ -247,6 +257,7 @@ async function buildContext() {
     comboStrategies: settings?.comboStrategies || {},
     comboLimitStrategy: settings?.comboLimitStrategy,
     comboEffortStrategy: settings?.comboEffortStrategy,
+    classifierNames,
   };
 }
 

@@ -33,6 +33,7 @@ import { updateProviderCredentials, checkAndRefreshToken } from "../services/tok
 import { getProjectIdForConnection } from "open-sse/services/projectId.js";
 import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
 import { getKeyAccessContext, enforceKeyAccess, filterAdapterModels } from "../services/keyAccess.js";
+import { applyThinkingClassifier } from "../services/thinkingClassifier.js";
 
 /**
  * Handle chat completion request
@@ -106,6 +107,14 @@ export async function handleChat(request, clientRawRequest = null) {
   const bypassResponse = handleBypassRequest(body, modelStr, userAgent, !!settings.ccFilterNaming);
   if (bypassResponse) return bypassResponse.response || bypassResponse;
 
+  // Thinking Effort Classifier: a client selects a classifier profile by sending
+  // its name as the effort value (advertised in capabilities.effort_tiers). The
+  // name is replaced here, before combo expansion, so every member of a combo
+  // gets the same decided level; the per-member thinking clamp then applies as
+  // usual. Fail-open: an unknown/inactive name or a classifier error falls back
+  // to the profile's fallbackLevel, and no name at all is a no-op.
+  const classifierDecision = await applyThinkingClassifier(body, log);
+
   const requiredCapabilities = detectRequiredCapabilities(body);
 
   // Check if model is a combo (has multiple models with fallback)
@@ -129,7 +138,7 @@ export async function handleChat(request, clientRawRequest = null) {
             const { tools, tool_choice, ...cleanBody } = clientRawRequest.body || {};
             cleanRawReq = { ...clientRawRequest, body: cleanBody };
           }
-          return handleSingleModelChat(b, m, cleanRawReq, request, apiKey, modelStr);
+          return handleSingleModelChat(b, m, cleanRawReq, request, apiKey, modelStr, false, null, classifierDecision);
         },
         log,
         comboName: modelStr,
@@ -145,7 +154,7 @@ export async function handleChat(request, clientRawRequest = null) {
       body,
       models: augmentedModels,
       handleSingleModel: withCapacityAdapterStripping(
-        (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, modelStr, true),
+        (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, modelStr, true, null, classifierDecision),
         adapterAdded
       ),
       log,
@@ -168,7 +177,7 @@ export async function handleChat(request, clientRawRequest = null) {
       body,
       models: soloAugmented,
       handleSingleModel: withCapacityAdapterStripping(
-        (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, null, true),
+        (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, null, true, null, classifierDecision),
         adapterAdded
       ),
       log,
@@ -178,7 +187,7 @@ export async function handleChat(request, clientRawRequest = null) {
     });
   }
 
-  return handleSingleModelChat(body, modelStr, clientRawRequest, request, apiKey, contextMarker ? `${modelStr.slice(modelStr.indexOf("/") + 1)}[${contextMarker}]` : null);
+  return handleSingleModelChat(body, modelStr, clientRawRequest, request, apiKey, contextMarker ? `${modelStr.slice(modelStr.indexOf("/") + 1)}[${contextMarker}]` : null, false, null, classifierDecision);
 }
 
 /**
@@ -266,7 +275,7 @@ async function memberContextResolver(settings) {
     return null;
   }
 }
-async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, responseModelOverride = null, comboRetryContext = false, requestedModel = null) {
+async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, responseModelOverride = null, comboRetryContext = false, requestedModel = null, classifierDecision = null) {
   const modelInfo = await getModelInfo(modelStr);
 
   // If provider is null, this might be a combo name - check and handle
@@ -297,7 +306,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
               const { tools, tool_choice, ...cleanBody } = clientRawRequest.body || {};
               cleanRawReq = { ...clientRawRequest, body: cleanBody };
             }
-            return handleSingleModelChat(b, m, cleanRawReq, request, apiKey, nestedOverride);
+            return handleSingleModelChat(b, m, cleanRawReq, request, apiKey, nestedOverride, false, null, classifierDecision);
           },
           log,
           comboName: modelStr,
@@ -313,7 +322,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         body,
         models: augmentedModels,
         handleSingleModel: withCapacityAdapterStripping(
-          (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, nestedOverride, true),
+          (b, m) => handleSingleModelChat(b, m, clientRawRequest, request, apiKey, nestedOverride, true, null, classifierDecision),
           adapterAdded
         ),
         log,
@@ -429,6 +438,8 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         pxpipeTransform: chatSettings.pxpipeEnabled ? await getPxpipeTransform() : null,
         onPxpipeEvent: appendPxpipeEvent,
         providerThinking,
+        // Thinking Effort Classifier decision (profile name + level), or null.
+        classifierDecision,
         // Per-provider user overrides (custom headers / connect timeout) from settings
         providerOverrides: (chatSettings.providerOverrides || {})[provider] || null,
         // Per-provider timeout overrides (ms); empty object means global defaults.

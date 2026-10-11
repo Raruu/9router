@@ -167,6 +167,22 @@ export function comboEffortTiers(combo, ctx) {
   const strategy = ctx?.comboEffortStrategy === "intersection" ? "intersection" : "union";
   return mergeEffortTiers(collectComboMemberLevels(combo, ctx), strategy);
 }
+
+// Append Thinking Effort Classifier profile names to a level list. Classifier
+// names are not effort levels — they are *selectors* a client sends as its
+// effort value (e.g. `reasoning_effort: "laya"`) to have the gateway classify
+// the prompt and pick a level. Advertised after the real levels so a client
+// that ignores unknown tiers still sees the plain options first; ordering
+// matches sortEffortTiers' "known levels first, extras in first-seen order".
+// Returns the base list unchanged when no classifier is active, so installs
+// without classifiers advertise exactly what they did before.
+export function withClassifierTiers(baseTiers, classifierNames) {
+  const names = (Array.isArray(classifierNames) ? classifierNames : [])
+    .filter((name) => typeof name === "string" && name);
+  if (names.length === 0) return baseTiers ?? null;
+  const base = Array.isArray(baseTiers) ? baseTiers : [];
+  return sortEffortTiers([...base, ...names]);
+}
 // null means "no clamp", so a member without a range constrains nothing; the
 // combo's range spans every member that does clamp.
 function unionThinkingRanges(ranges) {

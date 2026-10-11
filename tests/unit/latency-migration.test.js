@@ -31,7 +31,7 @@ describe("Latency migration v2", () => {
     // Schema version should include the latest migration.
     const row = db.get(`SELECT value FROM _meta WHERE key='schemaVersion'`);
     expect(parseInt(row.value, 10)).toBe(latestVersion());
-    expect(latestVersion()).toBe(4);
+    expect(latestVersion()).toBe(5);
 
     // usageHistory should have new latency columns
     const cols = db.all(`PRAGMA table_info(usageHistory)`);

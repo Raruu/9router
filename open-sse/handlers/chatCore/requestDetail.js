@@ -6,6 +6,7 @@ const OPTIONAL_PARAMS = [
   "temperature", "top_p", "top_k",
   "max_tokens", "max_completion_tokens",
   "thinking", "reasoning", "enable_thinking",
+  "reasoning_effort", "output_config",
   "presence_penalty", "frequency_penalty",
   "seed", "stop", "tools", "tool_choice",
   "response_format", "prediction", "store", "metadata",
@@ -79,6 +80,31 @@ export function extractUsageFromResponse(responseBody) {
   return null;
 }
 
+// Human-readable summary of a thinking intent ("off" | "auto" | "8192" | "high").
+// Mirrors the console fmtThink so the Details drawer and the log agree.
+export function describeThinkingIntent(intent) {
+  if (!intent || typeof intent !== "object") return null;
+  if (intent.mode === "none") return "off";
+  if (intent.mode === "auto") return "auto";
+  if (intent.mode === "budget") return Number.isFinite(intent.budget) ? String(intent.budget) : null;
+  if (intent.mode === "level" && typeof intent.level === "string") return intent.level;
+  return null;
+}
+
+// Observability payload for the Details drawer: what the client asked for, what
+// was actually written to the upstream body (after per-model clamps/mappings),
+// and which classifier profile picked the level (null when none did).
+export function buildThinkingTrace({ requested, applied, classifier }) {
+  const requestedLabel = describeThinkingIntent(requested);
+  const appliedLabel = describeThinkingIntent(applied);
+  if (!requestedLabel && !appliedLabel && !classifier) return undefined;
+  return {
+    ...(requestedLabel ? { requested: requestedLabel } : {}),
+    ...(appliedLabel ? { applied: appliedLabel } : {}),
+    ...(classifier ? { classifier: classifier.profile, requestedTier: classifier.requested, fallback: classifier.fallback === true } : {}),
+  };
+}
+
 export function buildRequestDetail(base, overrides = {}) {
   return {
     provider: base.provider || "unknown",
@@ -92,6 +118,7 @@ export function buildRequestDetail(base, overrides = {}) {
     providerResponse: base.providerResponse || null,
     response: base.response || {},
     pxpipe: base.pxpipe || undefined,
+    thinking: base.thinking || undefined,
     status: base.status || "success",
     ...overrides
   };
