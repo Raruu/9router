@@ -274,9 +274,12 @@ function getMemberRetryConfig(resolveMemberRetries, result) {
     if (typeof resolveMemberRetries !== "function") return null;
     const signal = result?.retrySignal;
     if (!signal || typeof signal !== "object" || !signal.providerId) return null;
-    if (!isRetryableStatus(signal.status)) return null;
     const cfg = resolveMemberRetries(signal.providerId);
     if (!cfg || cfg.enabled !== true) return null;
+    // The resolved config carries the effective retryable statuses (all / only /
+    // except scope); an absent list falls back to the default transient set.
+    const statuses = Array.isArray(cfg.statuses) ? cfg.statuses : null;
+    if (!(statuses ? statuses.includes(signal.status) : isRetryableStatus(signal.status))) return null;
     // Per-key mode spends its budget inside the member's account loop; once
     // every key is exhausted the combo advances instead of waiting again.
     if (cfg.mode === RETRY_MODE_PER_KEY) return null;
@@ -285,7 +288,7 @@ function getMemberRetryConfig(resolveMemberRetries, result) {
     const maxBackoffMs = Number.isFinite(cfg.maxBackoffMs)
       ? Math.min(MAX_RETRY_WAIT_MS, Math.max(0, cfg.maxBackoffMs))
       : MAX_RETRY_WAIT_MS;
-    return { tries, maxBackoffMs };
+    return { tries, maxBackoffMs, statuses };
   } catch {
     return null;
   }
@@ -441,16 +444,21 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       const { cooldownMs } = checkFallbackError(result.status, errorText);
 
       // Same-member retry on transient failures when the serving provider opted in.
+      // `underlying` is the real provider status (e.g. 502 from a connect timeout);
+      // the outer result.status can be a wrapper (e.g. 503 from rate-locked accounts).
+      const underlying = result.retrySignal?.status ?? result.status;
       const retryConfig = getMemberRetryConfig(resolveMemberRetries, result);
       if (retryConfig && attempt < retryConfig.tries) {
         const waitMs = getRetryWaitMs(result);
         if (waitMs <= retryConfig.maxBackoffMs) {
           attempt += 1;
-          const signal = result.retrySignal || {};
-          log.info("COMBO", `↻ Model ${modelStr} transient ${signal.status}, retry ${attempt}/${retryConfig.tries} after ${formatWaitMs(waitMs)}`);
+          log.info("COMBO", `↻ Model ${modelStr} transient ${underlying}, retry ${attempt}/${retryConfig.tries} after ${formatWaitMs(waitMs)}`);
           if (waitMs > 0) await new Promise(r => setTimeout(r, waitMs));
           continue;
         }
+        // Configured but the account lock outlasts the wait cap: surface the skip
+        // so the console shows a retry was considered, not silently dropped.
+        log.warn("COMBO", `↻ Model ${modelStr} transient ${underlying}, retry skipped (wait ${formatWaitMs(waitMs)} > max backoff ${formatWaitMs(retryConfig.maxBackoffMs)}) → next`);
       }
 
       // For transient errors (503/502/504), wait for cooldown before falling through
@@ -465,7 +473,7 @@ export async function handleComboChat({ body, models, handleSingleModel, log, co
       // Fallback to next model
       lastError = errorText || String(result.status);
       if (!lastStatus) lastStatus = result.status;
-      log.warn("COMBO", `Model ${modelStr} failed, trying next`, { status: result.status });
+      log.warn("COMBO", `Model ${modelStr} failed, trying next`, { status: underlying });
       advancing = true;
     } catch (error) {
       // Catch unexpected exceptions to ensure fallback continues

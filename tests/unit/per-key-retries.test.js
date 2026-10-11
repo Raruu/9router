@@ -200,4 +200,29 @@ describe("per-key combo retries", () => {
     expect(mocks.handleChatCore).toHaveBeenCalledTimes(1);
     expect(res.status).toBe(503);
   });
+
+  it("skips the per-key retry when the status is outside the scope", async () => {
+    vi.useFakeTimers();
+    mocks.getSettings.mockResolvedValue({
+      requireApiKey: false,
+      comboStrategy: "fallback",
+      providerRetries: {
+        p1: { enabled: true, tries: 2, maxBackoffSeconds: 16, mode: "per-key", statusMode: "except", statusList: [429] },
+      },
+    });
+    mocks.getComboModels.mockResolvedValue(["p1/m1"]);
+
+    mocks.getProviderCredentials
+      .mockResolvedValueOnce(cred("conn-1"))
+      .mockResolvedValue(allLocked());
+    mocks.handleChatCore.mockResolvedValue(fail429());
+
+    const promise = handleChat(chatRequest("combo-per-key-scope"));
+    await vi.runAllTimersAsync();
+    const res = await promise;
+
+    // 429 is excluded, so the key is not re-run even though per-key mode is on.
+    expect(mocks.handleChatCore).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(503);
+  });
 });

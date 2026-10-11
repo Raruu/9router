@@ -6,7 +6,7 @@ import PropTypes from "prop-types";
 import { Badge, Toggle, Tooltip } from "@/shared/components";
 import CooldownTimer from "./CooldownTimer";
 
-export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onDelete, oneByOneStatus = null, autoPing = null }) {
+export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst, isLast, onMoveUp, onMoveDown, onToggleActive, onUpdateProxy, onEdit, onDelete, onLock, onUnlock, oneByOneStatus = null, autoPing = null }) {
   const [showProxyDropdown, setShowProxyDropdown] = useState(false);
   const [updatingProxy, setUpdatingProxy] = useState(false);
   const proxyDropdownRef = useRef(null);
@@ -257,6 +257,14 @@ export default function ConnectionRow({ connection, proxyPools, isOAuth, isFirst
               </button>
             </Tooltip>
           )}
+          <button
+            onClick={isCooldown ? onUnlock : onLock}
+            className={`flex flex-col items-center rounded px-2 py-1 transition-colors ${isCooldown ? "text-orange-500 hover:bg-orange-500/10" : "text-text-muted hover:bg-black/5 hover:text-primary dark:hover:bg-white/5"}`}
+            title={isCooldown ? "Unlock this connection" : "Lock this connection"}
+          >
+            <span className="material-symbols-outlined text-[18px]">{isCooldown ? "lock_open" : "lock"}</span>
+            <span className="text-[10px] leading-tight">{isCooldown ? "Unlock" : "Lock"}</span>
+          </button>
           <button onClick={onEdit} className="flex flex-col items-center rounded px-2 py-1 text-text-muted hover:bg-black/5 hover:text-primary dark:hover:bg-white/5">
             <span className="material-symbols-outlined text-[18px]">edit</span>
             <span className="text-[10px] leading-tight">Edit</span>
@@ -306,6 +314,8 @@ ConnectionRow.propTypes = {
   onUpdateProxy: PropTypes.func,
   onEdit: PropTypes.func.isRequired,
   onDelete: PropTypes.func.isRequired,
+  onLock: PropTypes.func,
+  onUnlock: PropTypes.func,
   oneByOneStatus: PropTypes.shape({
     state: PropTypes.string,
     error: PropTypes.string,

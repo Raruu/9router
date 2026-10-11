@@ -473,7 +473,9 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
             provider,
             model,
             resetsAtMs,
-            providerRetryConfig ? { maxBackoffMs: providerRetryConfig.maxBackoffMs } : {},
+            providerRetryConfig
+              ? { maxBackoffMs: providerRetryConfig.maxBackoffMs, retryableStatuses: providerRetryConfig.statuses }
+              : {},
           );
 
       if (!failure.shouldFallback) return withRetrySignal(result.response, provider, result.status, 0);
@@ -485,6 +487,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         tries: providerRetryConfig?.tries,
         cooldownMs: failure.cooldownMs,
         maxBackoffMs: providerRetryConfig?.maxBackoffMs,
+        statuses: providerRetryConfig?.statuses,
       })) {
         keyAttempt += 1;
         log.warn("FALLBACK", `↻ KEY:${credentials.connectionName} transient ${result.status}, retry ${keyAttempt}/${providerRetryConfig.tries}`);
