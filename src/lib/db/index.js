@@ -42,6 +42,13 @@ export {
   createCombo, updateCombo, deleteCombo,
 } from "./repos/combosRepo.js";
 
+// Thinking effort classifiers (System One profiles)
+export {
+  getThinkingClassifiers, getThinkingClassifierById, getThinkingClassifierByName,
+  getActiveClassifierNames, createThinkingClassifier, updateThinkingClassifier,
+  deleteThinkingClassifier,
+} from "./repos/thinkingClassifiersRepo.js";
+
 // Aliases (model + custom + mitm)
 export {
   getModelAliases, setModelAlias, deleteModelAlias,
@@ -93,6 +100,7 @@ export async function exportDb() {
     proxyPools: db.all(`SELECT * FROM proxyPools`).map((r) => ({ ...parseJson(r.data, {}), id: r.id, isActive: r.isActive === 1, testStatus: r.testStatus, createdAt: r.createdAt, updatedAt: r.updatedAt })),
     apiKeys: db.all(`SELECT * FROM apiKeys`).map((r) => ({ id: r.id, key: r.key, name: r.name, machineId: r.machineId, isActive: r.isActive === 1, limitType: r.limitType || "none", tokenLimit: r.tokenLimit || 0, usedTokens: r.usedTokens || 0, requestLimit: r.requestLimit || 0, usedRequests: r.usedRequests || 0, allowedModels: r.allowedModels ? parseJson(r.allowedModels, null) : null, createdAt: r.createdAt, updatedAt: r.updatedAt, access: keyAccessFromColumns(r.accessRestricted, r.accessAllow) })),
     combos: db.all(`SELECT * FROM combos`).map((r) => ({ id: r.id, name: r.name, kind: r.kind, models: parseJson(r.models, []), createdAt: r.createdAt, updatedAt: r.updatedAt })),
+    thinkingClassifiers: db.all(`SELECT * FROM thinkingClassifiers`).map((r) => ({ ...parseJson(r.data, {}), id: r.id, name: r.name, isActive: r.isActive === 1, createdAt: r.createdAt, updatedAt: r.updatedAt })),
     modelAliases: {},
     customModels: [],
     mitmAlias: {},
@@ -123,6 +131,7 @@ export async function importDb(payload) {
     db.run(`DELETE FROM proxyPools`);
     db.run(`DELETE FROM apiKeys`);
     db.run(`DELETE FROM combos`);
+    db.run(`DELETE FROM thinkingClassifiers`);
     db.run(`DELETE FROM kv WHERE scope IN ('modelAliases', 'customModels', 'mitmAlias', 'pricing')`);
     db.run(`DELETE FROM userModelCatalog`);
     // OpenRouter is reconstructible and deliberately excluded from exports.
@@ -173,6 +182,14 @@ export async function importDb(payload) {
       db.run(
         `INSERT OR REPLACE INTO combos(id, name, kind, models, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?)`,
         [c.id, c.name, c.kind || null, stringifyJson(c.models || []), c.createdAt || new Date().toISOString(), c.updatedAt || new Date().toISOString()]
+      );
+    }
+    for (const c of payload.thinkingClassifiers || []) {
+      const { id, name, isActive, createdAt, updatedAt, ...rest } = c;
+      if (!id || !name) continue;
+      db.run(
+        `INSERT OR REPLACE INTO thinkingClassifiers(id, name, isActive, data, createdAt, updatedAt) VALUES(?, ?, ?, ?, ?, ?)`,
+        [id, name, isActive === false ? 0 : 1, stringifyJson(rest), createdAt || new Date().toISOString(), updatedAt || new Date().toISOString()]
       );
     }
     for (const [a, m] of Object.entries(payload.modelAliases || {})) {
