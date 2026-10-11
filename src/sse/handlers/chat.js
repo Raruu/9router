@@ -9,7 +9,7 @@ import {
   validateApiKeyWithRules,
 } from "../services/auth.js";
 import { handleAntigravityQuotaError, clearAntigravityStrikes } from "../services/antigravityQuota.js";
-import { getSettings, getProviderConnections, getCombos, getModelAliases } from "@/lib/localDb";
+import { getSettings, getProviderConnections, getProviderNodes, getCombos, getModelAliases } from "@/lib/localDb";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { handleChatCore } from "open-sse/handlers/chatCore.js";
 import { DEFAULT_HEADROOM_URL } from "@/lib/headroom/detect";
@@ -256,8 +256,9 @@ function memberRetryResolver(settings) {
 async function memberContextResolver(settings) {
   if (!settings?.comboContextFit) return null;
   try {
-    const [connections, combos, modelAliases] = await Promise.all([
+    const [connections, nodes, combos, modelAliases] = await Promise.all([
       getProviderConnections(),
+      getProviderNodes(),
       getCombos(),
       getModelAliases(),
     ]);
@@ -265,7 +266,7 @@ async function memberContextResolver(settings) {
     for (const combo of combos || []) {
       if (typeof combo?.name === "string" && !comboByName.has(combo.name)) comboByName.set(combo.name, combo);
     }
-    const ctx = { providerIdByPrefix: buildProviderIdByPrefix(connections), modelAliases, comboByName };
+    const ctx = { providerIdByPrefix: buildProviderIdByPrefix(connections, nodes), modelAliases, comboByName };
     return (member) => {
       try {
         return comboMemberCapabilities(member, ctx, 0, new Set())?.contextWindow || 0;

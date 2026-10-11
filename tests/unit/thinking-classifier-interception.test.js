@@ -38,6 +38,7 @@ vi.mock("open-sse/providers/thinkingLevels.js", () => ({
 
 vi.mock("@/lib/localDb", () => ({
   getProviderConnections: vi.fn(async () => []),
+  getProviderNodes: vi.fn(async () => []),
   getCombos: vi.fn(async () => []),
   getModelAliases: vi.fn(async () => ({})),
 }));

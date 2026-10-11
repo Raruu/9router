@@ -6,7 +6,7 @@ import {
   isAnthropicCompatibleProvider,
   isOpenAICompatibleProvider,
 } from "@/shared/constants/providers";
-import { getProviderConnections, getCombos, getCustomModels, getModelAliases, getSettings } from "@/lib/localDb";
+import { getProviderConnections, getProviderNodes, getCombos, getCustomModels, getModelAliases, getSettings } from "@/lib/localDb";
 import { getDisabledModels } from "@/lib/disabledModelsDb";
 import { hasValidCliToken } from "@/lib/auth/cliToken";
 import { getKeyAccessContext, filterModelsListForKey } from "@/sse/services/keyAccess.js";
@@ -332,6 +332,17 @@ export async function buildModelsList(kindFilter, options = {}) {
     console.log("Could not fetch providers, returning all models");
   }
 
+  // Provider nodes are fetched UNFILTERED: a custom node's connections can all
+  // be deactivated while its models and catalog pins remain, and a combo member
+  // pointing at that node must still resolve to its id (otherwise the member
+  // falls back to provider-agnostic rules and advertises the wrong levels).
+  let providerNodes = [];
+  try {
+    providerNodes = await getProviderNodes();
+  } catch (e) {
+    console.log("Could not fetch provider nodes");
+  }
+
   let combos = [];
   try {
     combos = await getCombos();
@@ -388,7 +399,7 @@ export async function buildModelsList(kindFilter, options = {}) {
     if (!comboByName.has(combo.name)) comboByName.set(combo.name, combo);
   }
   const capabilityContext = {
-    providerIdByPrefix: buildProviderIdByPrefix(connections),
+    providerIdByPrefix: buildProviderIdByPrefix(connections, providerNodes),
     modelAliases,
     comboByName,
     comboLimitStrategy: options.comboLimitStrategy,

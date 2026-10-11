@@ -333,6 +333,46 @@ describe("GET /api/models/detail — combos", () => {
     );
   });
 
+  it("flags a member whose prefix matches no provider (pin can never apply)", async () => {
+    mocks.getCombos.mockResolvedValue([
+      { name: "ghost", kind: "llm", models: ["deleted-node/gpt-6-astra"] },
+    ]);
+
+    const res = await GET(req("combo=ghost"));
+
+    const member = res.body.members[0];
+    // The row still resolves as a model string (the prefix is used verbatim),
+    // so it is NOT `unresolved` — but its catalog pin cannot be applied.
+    expect(member.unresolved).toBeUndefined();
+    expect(member.providerMissing).toBe(true);
+  });
+
+  it("does not flag a member whose prefix resolves via a node with no connections", async () => {
+    // The node layer is what makes this resolve — no connections at all.
+    mocks.getProviderNodes.mockResolvedValue([
+      { id: "openai-compatible-chat-inactive", type: "openai-compatible", prefix: "agent-router" },
+    ]);
+    mocks.getCombos.mockResolvedValue([
+      { name: "testing", kind: "llm", models: ["agent-router/gpt-6-astra"] },
+    ]);
+
+    const res = await GET(req("combo=testing"));
+
+    const member = res.body.members[0];
+    expect(member.unresolved).toBeUndefined();
+    expect(member.providerMissing).toBeUndefined();
+  });
+
+  it("does not flag a built-in member", async () => {
+    mocks.getCombos.mockResolvedValue([
+      { name: "plain", kind: "llm", models: ["anthropic/claude-opus-4.6"] },
+    ]);
+
+    const res = await GET(req("combo=plain"));
+
+    expect(res.body.members[0].providerMissing).toBeUndefined();
+  });
+
   it("resolves a nested combo member", async () => {
     mocks.getCombos.mockResolvedValue([
       { name: "outer", kind: "llm", models: ["inner"] },

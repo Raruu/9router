@@ -148,6 +148,10 @@ async function comboMemberDetail(member, ctx) {
     if (typeof aliasTarget === "string" && aliasTarget.includes("/")) {
       const detail = await modelDetail(aliasTarget, ctx);
       if (detail) {
+        // The alias target's own prefix can be unresolvable too — same
+        // pin-can-never-apply situation as a literal `prefix/model` member.
+        const targetPrefix = aliasTarget.slice(0, aliasTarget.indexOf("/"));
+        const targetProviderMissing = !ctx.providerIdByPrefix?.has(targetPrefix);
         return {
           raw,
           resolved: aliasTarget,
@@ -157,6 +161,7 @@ async function comboMemberDetail(member, ctx) {
           pricing: detail.pricing,
           pricingSource: detail.pricingSource,
           catalogRef: detail.catalogRef,
+          ...(targetProviderMissing ? { providerMissing: true } : {}),
         };
       }
     }
@@ -167,6 +172,12 @@ async function comboMemberDetail(member, ctx) {
   if (!parsed) {
     return { raw, resolved: null, name: trimmed, unresolved: true, capabilities: null, pricing: null };
   }
+  // A member whose prefix matches no provider still resolves as a row (the
+  // prefix is used verbatim as the provider id), but any catalog pin attached
+  // to the real provider can never apply — its capabilities fall back to
+  // provider-agnostic rules. Flag it so the members table can say why.
+  const prefix = trimmed.slice(0, trimmed.indexOf("/"));
+  const providerMissing = !ctx.providerIdByPrefix?.has(prefix);
   const detail = await modelDetail(trimmed, ctx);
   if (!detail) {
     return { raw, resolved: null, name: trimmed, unresolved: true, capabilities: null, pricing: null };
@@ -178,6 +189,7 @@ async function comboMemberDetail(member, ctx) {
     kind: detail.kind,
     capabilities: detail.capabilities,
     pricing: detail.pricing,
+    ...(providerMissing ? { providerMissing: true } : {}),
     pricingSource: detail.pricingSource,
     catalogRef: detail.catalogRef,
   };
@@ -249,7 +261,7 @@ async function buildContext() {
   }
 
   return {
-    providerIdByPrefix: buildProviderIdByPrefix(connections),
+    providerIdByPrefix: buildProviderIdByPrefix(connections, nodes),
     customModels,
     nodeNameById,
     modelAliases,

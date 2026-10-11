@@ -12,7 +12,7 @@ import { getProviderCredentials } from "@/sse/services/auth.js";
 import { checkAndRefreshToken } from "@/sse/services/tokenRefresh.js";
 import { getModelInfo } from "@/sse/services/model.js";
 import { getThinkingClassifierByName } from "@/lib/db/repos/thinkingClassifiersRepo.js";
-import { getProviderConnections, getCombos, getModelAliases } from "@/lib/localDb";
+import { getProviderConnections, getProviderNodes, getCombos, getModelAliases } from "@/lib/localDb";
 import { buildProviderIdByPrefix } from "@/lib/providerPrefixMap.js";
 import { saveRequestUsage } from "@/lib/usageDb.js";
 import { handleSystemoneCore } from "open-sse/handlers/systemoneCore.js";
@@ -211,8 +211,9 @@ export async function resolveTargetLevels(target) {
   try {
     const { modelStr, comboModels } = target || {};
     if (Array.isArray(comboModels) && comboModels.length > 0 && typeof modelStr === "string") {
-      const [connections, combos, modelAliases] = await Promise.all([
+      const [connections, nodes, combos, modelAliases] = await Promise.all([
         getProviderConnections(),
+        getProviderNodes(),
         getCombos(),
         getModelAliases(),
       ]);
@@ -220,7 +221,7 @@ export async function resolveTargetLevels(target) {
       for (const combo of combos || []) {
         if (typeof combo?.name === "string" && !comboByName.has(combo.name)) comboByName.set(combo.name, combo);
       }
-      const ctx = { providerIdByPrefix: buildProviderIdByPrefix(connections), modelAliases, comboByName };
+      const ctx = { providerIdByPrefix: buildProviderIdByPrefix(connections, nodes), modelAliases, comboByName };
       return comboEffortTiers({ name: modelStr, models: comboModels }, ctx);
     }
     if (typeof modelStr !== "string" || !modelStr) return null;
