@@ -188,3 +188,45 @@ export function resolveClassifierLevel(profile, answers) {
   }
   return questionLevels(best);
 }
+
+// Human-readable scores for the Usage → Details drawer, derived from the same
+// answers resolveClassifierLevel reads. Each entry is { level, score } where
+// `level` is the chain's primary (first) entry — the level that question or cut
+// stands for. argmax lists every scored question, highest first (the winner
+// leads); threshold lists the single complexity score. Returns [] when the
+// answers carry nothing usable.
+export function resolveClassifierScores(profile, answers) {
+  if (!answers || typeof answers !== "object") return [];
+  const score = (id) => {
+    const value = Number(answers[id]?.noul);
+    return Number.isFinite(value) ? value : null;
+  };
+
+  if (profile?.mode === "threshold") {
+    const question = profile.threshold?.question;
+    const cuts = Array.isArray(profile.threshold?.cuts) ? profile.threshold.cuts : [];
+    if (!question?.id || cuts.length === 0) return [];
+    const value = score(question.id);
+    if (value === null) return [];
+    const ordered = [...cuts].sort((a, b) => Number(a.max) - Number(b.max));
+    for (const cut of ordered) {
+      if (value <= Number(cut.max)) {
+        const levels = questionLevels(cut);
+        return levels.length > 0 ? [{ level: levels[0], score: value }] : [];
+      }
+    }
+    return [];
+  }
+
+  const scored = [];
+  for (const q of Array.isArray(profile?.questions) ? profile.questions : []) {
+    if (!q?.id) continue;
+    const value = score(q.id);
+    if (value === null) continue;
+    const levels = questionLevels(q);
+    if (levels.length === 0) continue;
+    scored.push({ level: levels[0], score: value });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, MAX_LEVEL_CHAIN);
+}

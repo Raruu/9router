@@ -64,6 +64,31 @@ describe("buildThinkingTrace", () => {
       fallback: true,
     });
   });
+
+  it("carries the classifier scores when present, omits them otherwise", () => {
+    const scores = [{ level: "max", score: 0.9 }, { level: "low", score: 0.1 }];
+    expect(buildThinkingTrace({
+      requested: { mode: "level", level: "max" },
+      applied: { mode: "level", level: "max" },
+      classifier: { profile: "laya", requested: "laya", fallback: false, scores },
+    })).toMatchObject({ classifier: "laya", scores });
+
+    // No scores (older decision shape) → the key is absent, not empty.
+    const trace = buildThinkingTrace({
+      requested: null,
+      applied: null,
+      classifier: { profile: "laya", requested: "laya", fallback: false },
+    });
+    expect("scores" in trace).toBe(false);
+
+    // An empty score list is also omitted rather than stored as [].
+    const empty = buildThinkingTrace({
+      requested: null,
+      applied: null,
+      classifier: { profile: "laya", requested: "laya", fallback: true, scores: [] },
+    });
+    expect("scores" in empty).toBe(false);
+  });
 });
 
 describe("request detail persistence", () => {

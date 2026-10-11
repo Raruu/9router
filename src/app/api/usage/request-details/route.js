@@ -71,6 +71,13 @@ export async function GET(request) {
             redacted[key] = { redacted: true };
           }
         }
+        // Thinking-classifier scores are derived from the prompt, so they leak
+        // the same signal the bodies do. Keep only the winning entry when
+        // bodies are hidden; the level itself is already shown as metadata.
+        const scores = redacted.thinking?.scores;
+        if (Array.isArray(scores) && scores.length > 1) {
+          redacted.thinking = { ...redacted.thinking, scores: scores.slice(0, 1) };
+        }
         return redacted;
       });
 

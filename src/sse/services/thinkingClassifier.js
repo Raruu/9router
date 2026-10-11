@@ -22,6 +22,7 @@ import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import {
   buildClassifierQuestions,
   resolveClassifierLevel,
+  resolveClassifierScores,
   pickFirstSupported,
   DEFAULT_CLASSIFIER_TIMEOUT_MS,
   DEFAULT_CLASSIFIER_FALLBACK_LEVEL,
@@ -139,7 +140,7 @@ export function extractPromptText(body) {
  */
 export async function classifyWithProfile({ profile, body, log }) {
   const startedAt = Date.now();
-  const fail = (error) => ({ levels: [], answers: null, latencyMs: Date.now() - startedAt, error });
+  const fail = (error) => ({ levels: [], scores: [], answers: null, latencyMs: Date.now() - startedAt, error });
 
   try {
     const text = extractPromptText(body).slice(0, PROMPT_TEXT_MAX);
@@ -169,6 +170,8 @@ export async function classifyWithProfile({ profile, body, log }) {
     const json = await result.response.json().catch(() => null);
     const answers = json?.answers || null;
     const levels = resolveClassifierLevel(profile, answers);
+    // Per-question scores for Usage → Details; the winner leads the list.
+    const scores = resolveClassifierScores(profile, answers);
 
     // Cost stays visible in Usage; endpoint tags it as internal so it is not
     // mistaken for client traffic.
@@ -184,7 +187,7 @@ export async function classifyWithProfile({ profile, body, log }) {
       }).catch(() => {});
     }
 
-    return { levels, answers, latencyMs: Date.now() - startedAt, error: levels.length > 0 ? null : "no usable answer" };
+    return { levels, scores, answers, latencyMs: Date.now() - startedAt, error: levels.length > 0 ? null : "no usable answer" };
   } catch (error) {
     return fail(error?.message || String(error));
   }
@@ -244,7 +247,7 @@ export async function resolveTargetLevels(target) {
  * @param {object|null} log
  * @param {{ modelStr?: string, comboModels?: string[]|null }} [target] - the
  *   requested target, used to resolve its supported thinking levels.
- * @returns {Promise<{ profile: string, requested: string, level: string, candidates: string[], fallback: boolean, latencyMs: number }|null>}
+ * @returns {Promise<{ profile: string, requested: string, level: string, candidates: string[], scores: {level:string,score:number}[], fallback: boolean, latencyMs: number }|null>}
  */
 export async function applyThinkingClassifier(body, log, target = null) {
   const resolved = await resolveClassifierRequest(body);
@@ -270,6 +273,7 @@ export async function applyThinkingClassifier(body, log, target = null) {
     requested,
     level,
     candidates: result.levels,
+    scores: result.scores,
     fallback,
     latencyMs: result.latencyMs,
   };

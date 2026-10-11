@@ -385,6 +385,14 @@ export default function RequestDetailsTab() {
                         ? `${selectedDetail.thinking.requested} → ${selectedDetail.thinking.applied} (fallback)`
                         : selectedDetail.thinking.applied || selectedDetail.thinking.requested}
                   </span>
+                  {Array.isArray(selectedDetail.thinking.scores) && selectedDetail.thinking.scores.length > 0 && (
+                    <span className="ml-2 font-mono text-text-muted">
+                      {selectedDetail.thinking.scores.length === 1 ? "score " : "scores "}
+                      {selectedDetail.thinking.scores
+                        .map((s) => `${s.level} ${Number(s.score).toFixed(2)}`)
+                        .join(", ")}
+                    </span>
+                  )}
                 </div>
               )}
               <div>

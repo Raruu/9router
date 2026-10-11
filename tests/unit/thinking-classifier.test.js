@@ -9,6 +9,7 @@ import {
   genericClassifierTemplate,
   buildClassifierQuestions,
   resolveClassifierLevel,
+  resolveClassifierScores,
   parseLevelList,
   questionLevels,
   pickFirstSupported,
@@ -135,6 +136,67 @@ describe("resolveClassifierLevel", () => {
     expect(resolveClassifierLevel(thresholdProfile, { complexity: { noul: 0.5 } })).toEqual(["low", "minimal"]);
     expect(resolveClassifierLevel(thresholdProfile, { complexity: { noul: 0.95 } })).toEqual(["max", "xhigh"]);
     expect(resolveClassifierLevel(thresholdProfile, { complexity: { noul: 1.4 } })).toEqual([]);
+  });
+});
+
+describe("resolveClassifierScores", () => {
+  const argmaxProfile = {
+    mode: "argmax",
+    questions: [
+      { id: "q_min", levels: ["minimal"] },
+      { id: "q_low", levels: ["low"] },
+      { id: "q_max", levels: ["max", "xhigh"] },
+    ],
+  };
+
+  it("lists every scored question, highest first (winner leads)", () => {
+    expect(resolveClassifierScores(argmaxProfile, {
+      q_min: { noul: 0.1 }, q_low: { noul: 0.7 }, q_max: { noul: 0.2 },
+    })).toEqual([
+      { level: "low", score: 0.7 },
+      { level: "max", score: 0.2 },
+      { level: "minimal", score: 0.1 },
+    ]);
+  });
+
+  it("uses the chain's primary level as the entry's label", () => {
+    expect(resolveClassifierScores(argmaxProfile, { q_max: { noul: 0.9 } }))
+      .toEqual([{ level: "max", score: 0.9 }]);
+  });
+
+  it("skips non-numeric answers and questions with no level", () => {
+    expect(resolveClassifierScores({
+      mode: "argmax",
+      questions: [
+        { id: "q_a", levels: ["high"] },
+        { id: "q_b", levels: [] },
+        { id: "q_c", levels: ["low"] },
+      ],
+    }, { q_a: { noul: "junk" }, q_b: { noul: 0.9 }, q_c: { noul: 0.4 } }))
+      .toEqual([{ level: "low", score: 0.4 }]);
+  });
+
+  it("returns a single complexity score in threshold mode", () => {
+    const thresholdProfile = {
+      mode: "threshold",
+      threshold: {
+        question: { id: "complexity" },
+        cuts: [
+          { max: 0.2, levels: ["minimal"] },
+          { max: 0.8, levels: ["high", "medium"] },
+          { max: 1, levels: ["max"] },
+        ],
+      },
+    };
+    expect(resolveClassifierScores(thresholdProfile, { complexity: { noul: 0.6 } }))
+      .toEqual([{ level: "high", score: 0.6 }]);
+  });
+
+  it("returns an empty list when nothing is usable", () => {
+    expect(resolveClassifierScores(argmaxProfile, null)).toEqual([]);
+    expect(resolveClassifierScores(argmaxProfile, {})).toEqual([]);
+    expect(resolveClassifierScores({ mode: "threshold", threshold: { cuts: [] } }, { complexity: { noul: 0.5 } })).toEqual([]);
+    expect(resolveClassifierScores({ mode: "threshold", threshold: { question: { id: "c" }, cuts: [{ max: 1, levels: ["high"] }] } }, { complexity: { noul: 5 } })).toEqual([]);
   });
 });
 

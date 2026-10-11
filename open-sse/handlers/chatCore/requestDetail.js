@@ -93,15 +93,22 @@ export function describeThinkingIntent(intent) {
 
 // Observability payload for the Details drawer: what the client asked for, what
 // was actually written to the upstream body (after per-model clamps/mappings),
-// and which classifier profile picked the level (null when none did).
+// and which classifier profile picked the level (null when none did). The
+// classifier's per-question scores ride along so the drawer can show why it
+// chose that level; the API trims them to the winner when request bodies are
+// hidden from the dashboard.
 export function buildThinkingTrace({ requested, applied, classifier }) {
   const requestedLabel = describeThinkingIntent(requested);
   const appliedLabel = describeThinkingIntent(applied);
   if (!requestedLabel && !appliedLabel && !classifier) return undefined;
+  const scores = Array.isArray(classifier?.scores) && classifier.scores.length > 0
+    ? classifier.scores
+    : null;
   return {
     ...(requestedLabel ? { requested: requestedLabel } : {}),
     ...(appliedLabel ? { applied: appliedLabel } : {}),
     ...(classifier ? { classifier: classifier.profile, requestedTier: classifier.requested, fallback: classifier.fallback === true } : {}),
+    ...(scores ? { scores } : {}),
   };
 }
 

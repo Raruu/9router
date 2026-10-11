@@ -126,6 +126,24 @@ describe("applyThinkingClassifier", () => {
     expect(mocks.handleSystemoneCore).toHaveBeenCalledTimes(1);
   });
 
+  it("carries the per-question scores on the decision (winner first)", async () => {
+    // q_high wins at 0.9, q_low trails at 0.1.
+    const body = { reasoning_effort: "laya", messages: [{ role: "user", content: "hi" }] };
+    const decision = await applyThinkingClassifier(body, null, { modelStr: "anthropic/claude-opus-4.6" });
+    expect(decision.scores).toEqual([
+      { level: "max", score: 0.9 },
+      { level: "low", score: 0.1 },
+    ]);
+  });
+
+  it("reports no scores when the classifier fails", async () => {
+    mocks.handleSystemoneCore.mockImplementation(async () => ({ success: false, error: "down" }));
+    const body = { reasoning_effort: "laya", messages: [{ role: "user", content: "hi" }] };
+    const decision = await applyThinkingClassifier(body, null);
+    expect(decision.scores).toEqual([]);
+    expect(decision.fallback).toBe(true);
+  });
+
   it("picks the first chain entry the target supports", async () => {
     mocks.supportedLevels = ["none", "low", "medium", "high"];
     const body = { reasoning_effort: "laya", messages: [{ role: "user", content: "hi" }] };
