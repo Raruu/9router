@@ -76,10 +76,11 @@ export function customModelKindsByAlias(customModels = []) {
  *   page is where they have always been managed, so they stay listed there even
  *   before a model is added (the providers page does not list them — hiding a
  *   model-less node would make it unreachable).
- * - openai-compatible nodes can be pointed at any per-kind endpoint, but only
- *   appear once they actually carry a model of that kind, so the card never
- *   leads to an empty provider page.
- * - anthropic-compatible nodes have no media adapters and never appear.
+ * - compatible nodes (openai- and anthropic-compatible) can be pointed at any
+ *   per-kind endpoint, but only appear once they actually carry a model of that
+ *   kind, so the card never leads to an empty provider page. The per-kind
+ *   endpoints are OpenAI-shaped regardless of the node's chat protocol, so both
+ *   node types qualify on the same rule.
  *
  * @param {object} node - provider node ({ id, type, prefix })
  * @param {string} kind - service kind ("image", "stt", …)
@@ -89,7 +90,8 @@ export function customModelKindsByAlias(customModels = []) {
 export function customNodeServesKind(node, kind, customKindsByAlias) {
   if (!node?.id || !kind) return false;
   if (node.type === "custom-embedding") return kind === "embedding";
-  if (node.type !== "openai-compatible" || !CUSTOM_CAPABLE_KINDS.has(kind)) return false;
+  const isCompatNode = node.type === "openai-compatible" || node.type === "anthropic-compatible";
+  if (!isCompatNode || !CUSTOM_CAPABLE_KINDS.has(kind)) return false;
   // Custom models are keyed by the node id or by the connection prefix the
   // user typed; match either form.
   for (const alias of [node.id, node.prefix]) {

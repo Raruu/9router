@@ -166,11 +166,17 @@ describe("customNodeServesKind", () => {
     expect(customNodeServesKind(compatNode, "video", byPrefix)).toBe(true);
   });
 
-  it("never lists an anthropic-compatible node on a media page", () => {
-    const anyKind = customModelKindsByAlias([custom("anthropic-compatible-1", "image")]);
-    for (const kind of ["embedding", "image", "stt", "tts", "video", "systemone"]) {
-      expect(customNodeServesKind(anthropicNode, kind, anyKind)).toBe(false);
-    }
+  it("lists an anthropic-compatible node once it carries a model of the kind", () => {
+    const none = customModelKindsByAlias([]);
+    expect(customNodeServesKind(anthropicNode, "image", none)).toBe(false);
+
+    const withSystemone = customModelKindsByAlias([custom("anthropic-compatible-1", "systemone")]);
+    expect(customNodeServesKind(anthropicNode, "systemone", withSystemone)).toBe(true);
+    expect(customNodeServesKind(anthropicNode, "image", withSystemone)).toBe(false);
+
+    // Prefix-keyed custom models match too, like the openai-compatible rule.
+    const byPrefix = customModelKindsByAlias([custom("ac", "image")]);
+    expect(customNodeServesKind(anthropicNode, "image", byPrefix)).toBe(true);
   });
 
   it("rejects kinds with no compat endpoint even when a model carries one", () => {

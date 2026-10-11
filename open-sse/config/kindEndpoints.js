@@ -1,4 +1,5 @@
-// Per-kind upstream endpoints for custom (openai-compatible) provider nodes.
+// Per-kind upstream endpoints for custom compatible provider nodes
+// (openai-compatible-* and anthropic-compatible-*).
 //
 // A node's main baseUrl serves chat. Some providers host media on a different
 // origin — e.g. nararouter: chat/embeddings/systemone on router.bynara.id/v1,
@@ -6,6 +7,11 @@
 // map (mirrored onto each connection's providerSpecificData) carries those
 // overrides; a kind without an entry falls back to the main baseUrl. The path
 // stays canonical per kind, so only the host/base changes.
+//
+// The per-kind endpoints are OpenAI-shaped regardless of the node's chat
+// protocol: a node's chat API may be Anthropic Messages while its media
+// endpoints stay OpenAI-compatible, so anthropic-compatible nodes dispatch
+// media through the same compat adapters.
 
 export const COMPAT_KIND_ENDPOINTS = Object.freeze({
   embedding: "/embeddings",
@@ -18,11 +24,15 @@ export const COMPAT_KIND_ENDPOINTS = Object.freeze({
 
 export const COMPAT_KIND_IDS = Object.freeze(Object.keys(COMPAT_KIND_ENDPOINTS));
 
-const OPENAI_COMPAT_PREFIX = "openai-compatible-";
+const COMPAT_NODE_PREFIXES = ["openai-compatible-", "anthropic-compatible-"];
 
-/** True for custom OpenAI-compatible provider nodes (the id prefix is the discriminator). */
+/**
+ * True for custom compatible provider nodes — the id prefix is the
+ * discriminator. Both node types dispatch per-kind endpoints through the same
+ * OpenAI-shaped compat adapters (see the header comment).
+ */
 export function isCompatNodeProvider(provider) {
-  return typeof provider === "string" && provider.startsWith(OPENAI_COMPAT_PREFIX);
+  return typeof provider === "string" && COMPAT_NODE_PREFIXES.some((prefix) => provider.startsWith(prefix));
 }
 
 function stripTrailingSlashes(value) {

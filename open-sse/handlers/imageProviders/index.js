@@ -13,6 +13,7 @@ import runwayml from "./runwayml.js";
 import cloudflareAi from "./cloudflareAi.js";
 import antigravity from "./antigravity.js";
 import openaiCompatNode from "./openaiCompatNode.js";
+import { isCompatNodeProvider } from "../../config/kindEndpoints.js";
 
 const ADAPTERS = {
   openai: createOpenAIAdapter("openai"),
@@ -37,9 +38,9 @@ const ADAPTERS = {
 
 export function getImageAdapter(provider) {
   if (ADAPTERS[provider]) return ADAPTERS[provider];
-  // Custom OpenAI-compatible nodes: OpenAI-shaped images endpoint on the
-  // node's per-kind or main baseUrl.
-  if (provider?.startsWith?.("openai-compatible-")) return openaiCompatNode;
+  // Custom compatible nodes (openai-/anthropic-compatible): OpenAI-shaped
+  // images endpoint on the node's per-kind or main baseUrl.
+  if (isCompatNodeProvider(provider)) return openaiCompatNode;
   return null;
 }
 
