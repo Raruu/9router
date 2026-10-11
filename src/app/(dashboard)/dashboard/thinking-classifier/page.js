@@ -25,7 +25,8 @@ export default function ThinkingClassifierPage() {
   const [saving, setSaving] = useState(false);
   const [confirmState, setConfirmState] = useState(null);
   const [showModelSelect, setShowModelSelect] = useState(false);
-  const [testText, setTestText] = useState("");
+  // Test inputs are keyed by classifier id so each card's box is independent.
+  const [testTexts, setTestTexts] = useState({});
   const [testState, setTestState] = useState({ running: false, result: null, error: null, profileId: null });
   const { copied, copy } = useCopyToClipboard();
   const notify = useNotificationStore();
@@ -127,7 +128,8 @@ export default function ThinkingClassifierPage() {
   };
 
   const handleTest = async (classifier) => {
-    if (!testText.trim()) {
+    const text = (testTexts[classifier.id] || "").trim();
+    if (!text) {
       notify.error("Enter a test prompt first");
       return;
     }
@@ -136,7 +138,7 @@ export default function ThinkingClassifierPage() {
       const res = await fetch(`/api/thinking-classifiers/${classifier.id}/test`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: testText }),
+        body: JSON.stringify({ text }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -208,12 +210,13 @@ export default function ThinkingClassifierPage() {
 
               <div className="flex flex-col gap-2 rounded-[10px] bg-surface-2 p-3">
                 <p className="text-xs font-medium text-text-main">Test</p>
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <input
-                    value={testText}
-                    onChange={(e) => setTestText(e.target.value)}
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-start">
+                  <textarea
+                    value={testTexts[classifier.id] || ""}
+                    onChange={(e) => setTestTexts((prev) => ({ ...prev, [classifier.id]: e.target.value }))}
                     placeholder="Paste a prompt to classify…"
-                    className="flex-1 rounded-[10px] border border-transparent bg-surface px-3 py-2 text-sm text-text-main placeholder-text-muted/70 focus:border-brand-500/40 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
+                    rows={3}
+                    className="flex-1 resize-y rounded-[10px] border border-transparent bg-surface px-3 py-2 text-sm text-text-main placeholder-text-muted/70 focus:border-brand-500/40 focus:outline-none focus:ring-2 focus:ring-brand-500/30"
                   />
                   <Button
                     variant="secondary"

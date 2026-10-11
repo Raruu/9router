@@ -186,6 +186,8 @@ export default function ClassifierFormModal({
                 />
                 <Input
                   className="flex-1"
+                  multiline
+                  rows={2}
                   value={q.instructions}
                   onChange={(e) => setQuestion(i, { instructions: e.target.value })}
                   placeholder="Question text sent to the decision model"
@@ -219,6 +221,8 @@ export default function ClassifierFormModal({
               </p>
             </div>
             <Input
+              multiline
+              rows={3}
               value={form.threshold.question.instructions}
               onChange={(e) => set({ threshold: { ...form.threshold, question: { ...form.threshold.question, instructions: e.target.value } } })}
               placeholder="Question text sent to the decision model"
