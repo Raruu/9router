@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { Button, Input, Modal, Select, Toggle } from "@/shared/components";
 import {
-  CLASSIFIER_LEVELS,
+  CLASSIFIER_FALLBACK_LEVELS,
   CLASSIFIER_MODES,
   DEFAULT_CLASSIFIER_TIMEOUT_MS,
   GENERIC_ARGMAX_QUESTIONS,
@@ -11,6 +11,8 @@ import {
   GENERIC_THRESHOLD_CUTS,
   MAX_CLASSIFIER_TIMEOUT_MS,
   MIN_CLASSIFIER_TIMEOUT_MS,
+  parseLevelList,
+  questionLevels,
 } from "@/shared/constants/thinkingClassifier";
 
 // Editable form state seeded from a profile (or the generic template).
@@ -19,10 +21,10 @@ export function classifierToForm(classifier = {}) {
   const questions = Array.isArray(classifier.questions) && classifier.questions.length > 0
     ? classifier.questions.map((q) => ({
         id: q.id || "",
-        level: CLASSIFIER_LEVELS.includes(q.level) ? q.level : CLASSIFIER_LEVELS[0],
+        levelsText: questionLevels(q).join(","),
         instructions: q.instructions || "",
       }))
-    : GENERIC_ARGMAX_QUESTIONS.map((q) => ({ ...q }));
+    : GENERIC_ARGMAX_QUESTIONS.map((q) => ({ ...q, levelsText: q.levels.join(",") }));
   const threshold = classifier.threshold && typeof classifier.threshold === "object"
     ? {
         question: {
@@ -30,12 +32,12 @@ export function classifierToForm(classifier = {}) {
           instructions: classifier.threshold.question?.instructions || GENERIC_THRESHOLD_QUESTION.instructions,
         },
         cuts: Array.isArray(classifier.threshold.cuts) && classifier.threshold.cuts.length > 0
-          ? classifier.threshold.cuts.map((c) => ({ max: Number(c.max), level: CLASSIFIER_LEVELS.includes(c.level) ? c.level : "medium" }))
-          : GENERIC_THRESHOLD_CUTS.map((c) => ({ ...c })),
+          ? classifier.threshold.cuts.map((c) => ({ max: Number(c.max), levelsText: questionLevels(c).join(",") }))
+          : GENERIC_THRESHOLD_CUTS.map((c) => ({ max: c.max, levelsText: c.levels.join(",") })),
       }
     : {
         question: { ...GENERIC_THRESHOLD_QUESTION },
-        cuts: GENERIC_THRESHOLD_CUTS.map((c) => ({ ...c })),
+        cuts: GENERIC_THRESHOLD_CUTS.map((c) => ({ max: c.max, levelsText: c.levels.join(",") })),
       };
   return {
     name: classifier.name || "",
@@ -44,12 +46,12 @@ export function classifierToForm(classifier = {}) {
     isActive: classifier.isActive !== false,
     questions,
     threshold,
-    fallbackLevel: CLASSIFIER_LEVELS.includes(classifier.fallbackLevel) ? classifier.fallbackLevel : "medium",
+    fallbackLevel: CLASSIFIER_FALLBACK_LEVELS.includes(classifier.fallbackLevel) ? classifier.fallbackLevel : "medium",
     timeoutMs: Number.isFinite(classifier.timeoutMs) ? classifier.timeoutMs : DEFAULT_CLASSIFIER_TIMEOUT_MS,
   };
 }
 
-const LEVEL_OPTIONS = CLASSIFIER_LEVELS.map((level) => ({ value: level, label: level.charAt(0).toUpperCase() + level.slice(1) }));
+const FALLBACK_OPTIONS = CLASSIFIER_FALLBACK_LEVELS.map((level) => ({ value: level, label: level.charAt(0).toUpperCase() + level.slice(1) }));
 
 export default function ClassifierFormModal({
   isOpen,
@@ -82,7 +84,7 @@ export default function ClassifierFormModal({
     isActive: form.isActive,
     questions: form.questions.map((q) => ({
       id: q.id.trim(),
-      level: q.level,
+      levels: parseLevelList(q.levelsText),
       instructions: q.instructions.trim(),
     })),
     threshold: {
@@ -90,7 +92,7 @@ export default function ClassifierFormModal({
         id: form.threshold.question.id.trim(),
         instructions: form.threshold.question.instructions.trim(),
       },
-      cuts: form.threshold.cuts.map((c) => ({ max: Number(c.max), level: c.level })),
+      cuts: form.threshold.cuts.map((c) => ({ max: Number(c.max), levels: parseLevelList(c.levelsText) })),
     },
     fallbackLevel: form.fallbackLevel,
     timeoutMs: Number(form.timeoutMs) || DEFAULT_CLASSIFIER_TIMEOUT_MS,
@@ -149,7 +151,7 @@ export default function ClassifierFormModal({
             label="Fallback level"
             value={form.fallbackLevel}
             onChange={(e) => set({ fallbackLevel: e.target.value })}
-            options={LEVEL_OPTIONS}
+            options={FALLBACK_OPTIONS}
           />
           <Input
             label="Timeout (ms)"
@@ -173,16 +175,18 @@ export default function ClassifierFormModal({
             <div>
               <p className="text-sm font-medium text-text-main">Questions</p>
               <p className="text-xs text-text-muted">
-                One probability question per level; the highest answer wins.
+                One probability question per level; the highest answer wins. Level may be a
+                comma-separated chain (e.g. <code className="font-mono">max,xhigh,high</code>) — the
+                first level the target supports is sent.
               </p>
             </div>
             {form.questions.map((q, i) => (
               <div key={i} className="flex flex-col gap-2 rounded-[10px] border border-border-subtle p-3 sm:flex-row sm:items-start">
-                <Select
-                  className="sm:w-36"
-                  value={q.level}
-                  onChange={(e) => setQuestion(i, { level: e.target.value })}
-                  options={LEVEL_OPTIONS}
+                <Input
+                  className="sm:w-40"
+                  value={q.levelsText}
+                  onChange={(e) => setQuestion(i, { levelsText: e.target.value })}
+                  placeholder="high,xhigh"
                 />
                 <Input
                   className="flex-1"
@@ -207,7 +211,7 @@ export default function ClassifierFormModal({
               variant="secondary"
               size="sm"
               icon="add"
-              onClick={() => set({ questions: [...form.questions, { id: `level_${Date.now()}`, level: "medium", instructions: "" }] })}
+              onClick={() => set({ questions: [...form.questions, { id: `level_${Date.now()}`, levelsText: "medium", instructions: "" }] })}
             >
               Add question
             </Button>
@@ -218,6 +222,7 @@ export default function ClassifierFormModal({
               <p className="text-sm font-medium text-text-main">Complexity question</p>
               <p className="text-xs text-text-muted">
                 One 0–1 score question; the first cut whose max the score is ≤ decides the level.
+                Each cut may list a comma-separated chain — the first supported level is sent.
               </p>
             </div>
             <Input
@@ -240,11 +245,11 @@ export default function ClassifierFormModal({
                   className="w-28"
                 />
                 <span className="text-xs text-text-muted">→</span>
-                <Select
-                  className="w-36"
-                  value={c.level}
-                  onChange={(e) => setCut(i, { level: e.target.value })}
-                  options={LEVEL_OPTIONS}
+                <Input
+                  className="w-40"
+                  value={c.levelsText}
+                  onChange={(e) => setCut(i, { levelsText: e.target.value })}
+                  placeholder="high,xhigh"
                 />
                 <Button
                   variant="ghost"
@@ -261,7 +266,7 @@ export default function ClassifierFormModal({
               variant="secondary"
               size="sm"
               icon="add"
-              onClick={() => set({ threshold: { ...form.threshold, cuts: [...form.threshold.cuts, { max: 1, level: "medium" }] } })}
+              onClick={() => set({ threshold: { ...form.threshold, cuts: [...form.threshold.cuts, { max: 1, levelsText: "medium" }] } })}
             >
               Add cut
             </Button>

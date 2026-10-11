@@ -235,8 +235,9 @@ export default function ThinkingClassifierPage() {
                     ) : (
                       <div className="flex flex-col gap-1">
                         <p className="text-text-main">
-                          → <span className="font-semibold">{testState.result.level || testState.result.fallbackLevel || "no decision"}</span>
+                          → <span className="font-semibold">{testState.result.levels?.join(",") || testState.result.level || "no decision"}</span>
                           {testState.result.latencyMs ? ` · ${testState.result.latencyMs}ms` : ""}
+                          {testState.result.levels?.length > 1 ? " · first supported level is sent" : ""}
                           {!testState.result.level && testState.result.error ? ` · ${testState.result.error}` : ""}
                         </p>
                         {testState.result.answers && (

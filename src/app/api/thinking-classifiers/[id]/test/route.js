@@ -25,8 +25,11 @@ export async function POST(request, { params }) {
       body: { messages: [{ role: "user", content: text }] },
     });
 
+    // The test box has no target model, so the "picked" level is the chain's
+    // first entry — the routing pick happens later against the real target.
     return NextResponse.json({
-      level: result.level,
+      level: result.levels[0] || null,
+      levels: result.levels,
       answers: result.answers,
       latencyMs: result.latencyMs,
       error: result.error,

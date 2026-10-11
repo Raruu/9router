@@ -6,6 +6,9 @@ const mocks = {
   profile: null,
   credentials: { connectionId: "conn-1", apiKey: "sk" },
   systemoneResult: null,
+  supportedLevels: null,
+  levelsByModel: {},
+  comboModels: null,
   handleSystemoneCore: vi.fn(),
   saveRequestUsage: vi.fn(),
 };
@@ -27,6 +30,20 @@ vi.mock("../../src/sse/services/model.js", () => ({
     const [provider, ...rest] = modelStr.split("/");
     return { provider, model: rest.join("/") };
   }),
+}));
+
+vi.mock("open-sse/providers/thinkingLevels.js", () => ({
+  getThinkingLevels: vi.fn((provider, model) => mocks.levelsByModel[`${provider}/${model}`] ?? mocks.supportedLevels),
+}));
+
+vi.mock("@/lib/localDb", () => ({
+  getProviderConnections: vi.fn(async () => []),
+  getCombos: vi.fn(async () => []),
+  getModelAliases: vi.fn(async () => ({})),
+}));
+
+vi.mock("@/lib/providerPrefixMap.js", () => ({
+  buildProviderIdByPrefix: vi.fn(() => new Map()),
 }));
 
 vi.mock("@/lib/usageDb.js", () => ({ saveRequestUsage: mocks.saveRequestUsage }));
@@ -52,8 +69,8 @@ const PROFILE = {
   model: "oc/jev-1.13-free",
   mode: "argmax",
   questions: [
-    { id: "q_low", level: "low", instructions: "simple?" },
-    { id: "q_high", level: "high", instructions: "complex?" },
+    { id: "q_low", levels: ["low"], instructions: "simple?" },
+    { id: "q_high", levels: ["max", "xhigh", "high"], instructions: "complex?" },
   ],
   fallbackLevel: "medium",
   timeoutMs: 5000,
@@ -69,6 +86,9 @@ beforeEach(() => {
   mocks.profile = { ...PROFILE };
   mocks.credentials = { connectionId: "conn-1", apiKey: "sk" };
   mocks.systemoneResult = OK_ANSWERS({ q_low: { noul: 0.1 }, q_high: { noul: 0.9 } });
+  mocks.supportedLevels = null;
+  mocks.levelsByModel = {};
+  mocks.comboModels = null;
   mocks.handleSystemoneCore.mockReset();
   mocks.handleSystemoneCore.mockImplementation(async () => mocks.systemoneResult);
   mocks.saveRequestUsage.mockReset();
@@ -96,18 +116,58 @@ describe("applyThinkingClassifier", () => {
     expect(body.reasoning_effort).toBe("laya"); // upstream may know it; we do not touch it
   });
 
-  it("replaces the requested tier with the classified level", async () => {
+  it("sends the chain's first entry when the target has no level information", async () => {
     const body = { reasoning_effort: "laya", messages: [{ role: "user", content: "refactor the parser" }] };
-    const decision = await applyThinkingClassifier(body, null);
-    expect(decision).toMatchObject({ profile: "laya", requested: "laya", level: "high", fallback: false });
-    expect(body.reasoning_effort).toBe("high");
+    const decision = await applyThinkingClassifier(body, null, { modelStr: "anthropic/claude-opus-4.6" });
+    expect(decision).toMatchObject({ profile: "laya", requested: "laya", level: "max", fallback: false });
+    expect(decision.candidates).toEqual(["max", "xhigh", "high"]);
+    expect(body.reasoning_effort).toBe("max");
     expect(mocks.handleSystemoneCore).toHaveBeenCalledTimes(1);
+  });
+
+  it("picks the first chain entry the target supports", async () => {
+    mocks.supportedLevels = ["none", "low", "medium", "high"];
+    const body = { reasoning_effort: "laya", messages: [{ role: "user", content: "hi" }] };
+    const decision = await applyThinkingClassifier(body, null, { modelStr: "qwen/qwen3-max" });
+    expect(decision.level).toBe("high");
+    expect(body.reasoning_effort).toBe("high");
+  });
+
+  it("picks a lower chain entry when the target skips the first ones", async () => {
+    mocks.supportedLevels = ["none", "xhigh"];
+    const body = { reasoning_effort: "laya", messages: [{ role: "user", content: "hi" }] };
+    const decision = await applyThinkingClassifier(body, null, { modelStr: "openai/gpt-5.4" });
+    expect(decision.level).toBe("xhigh");
+  });
+
+  it("uses the union of combo member levels", async () => {
+    // The combo path resolves levels through comboEffortTiers (union by
+    // default), so "max" is supported by the flagship member even though the
+    // other member stops at high.
+    mocks.comboModels = ["qwen/qwen3-max", "openai/gpt-5.4"];
+    mocks.levelsByModel = {
+      "qwen/qwen3-max": ["none", "low", "medium", "high"],
+      "openai/gpt-5.4": ["none", "low", "medium", "high", "xhigh"],
+    };
+    const body = { reasoning_effort: "laya", messages: [{ role: "user", content: "hi" }] };
+    const decision = await applyThinkingClassifier(body, null, { modelStr: "my-combo", comboModels: mocks.comboModels });
+    // Union is [none, low, medium, high, xhigh] — none of the chain
+    // (max, xhigh, high) is "max", so the first supported entry is xhigh.
+    expect(decision.level).toBe("xhigh");
+  });
+
+  it("falls back to the first candidate when no combo member reports levels", async () => {
+    mocks.comboModels = ["qwen/qwen3-max", "openai/gpt-5.4"];
+    mocks.levelsByModel = {};
+    const body = { reasoning_effort: "laya", messages: [{ role: "user", content: "hi" }] };
+    const decision = await applyThinkingClassifier(body, null, { modelStr: "my-combo", comboModels: mocks.comboModels });
+    expect(decision.level).toBe("max");
   });
 
   it("writes back into the exact field the client used", async () => {
     const body = { output_config: { effort: "laya" }, messages: [{ role: "user", content: "hi" }] };
     await applyThinkingClassifier(body, null);
-    expect(body.output_config.effort).toBe("high");
+    expect(body.output_config.effort).toBe("max");
     expect(body.reasoning_effort).toBeUndefined();
   });
 

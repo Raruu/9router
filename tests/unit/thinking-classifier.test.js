@@ -4,11 +4,14 @@ import { describe, it, expect } from "vitest";
 
 import {
   RESERVED_EFFORT_VALUES,
-  CLASSIFIER_LEVELS,
+  CLASSIFIER_FALLBACK_LEVELS,
   validateClassifierName,
   genericClassifierTemplate,
   buildClassifierQuestions,
   resolveClassifierLevel,
+  parseLevelList,
+  questionLevels,
+  pickFirstSupported,
 } from "../../src/shared/constants/thinkingClassifier.js";
 import {
   readEffortField,
@@ -81,46 +84,115 @@ describe("resolveClassifierLevel", () => {
   const argmaxProfile = {
     mode: "argmax",
     questions: [
-      { id: "q_min", level: "minimal" },
-      { id: "q_low", level: "low" },
-      { id: "q_max", level: "max" },
+      { id: "q_min", levels: ["minimal"] },
+      { id: "q_low", levels: ["low"] },
+      { id: "q_max", levels: ["max", "xhigh", "high"] },
     ],
   };
 
-  it("picks the highest-probability level", () => {
+  it("returns the winning question's level chain", () => {
     expect(resolveClassifierLevel(argmaxProfile, {
       q_min: { noul: 0.1 }, q_low: { noul: 0.7 }, q_max: { noul: 0.2 },
-    })).toBe("low");
+    })).toEqual(["low"]);
+    expect(resolveClassifierLevel(argmaxProfile, {
+      q_min: { noul: 0.1 }, q_low: { noul: 0.2 }, q_max: { noul: 0.8 },
+    })).toEqual(["max", "xhigh", "high"]);
+  });
+
+  it("reads the legacy single `level` field too", () => {
+    expect(resolveClassifierLevel({
+      mode: "argmax",
+      questions: [{ id: "q_low", level: "low" }],
+    }, { q_low: { noul: 0.9 } })).toEqual(["low"]);
   });
 
   it("ignores entries with non-numeric answers", () => {
     expect(resolveClassifierLevel(argmaxProfile, {
       q_min: { noul: 0.9 }, q_low: { noul: "junk" }, q_max: { noul: 0.5 },
-    })).toBe("minimal");
+    })).toEqual(["minimal"]);
   });
 
-  it("returns null when nothing is usable", () => {
-    expect(resolveClassifierLevel(argmaxProfile, null)).toBeNull();
-    expect(resolveClassifierLevel(argmaxProfile, {})).toBeNull();
+  it("returns an empty chain when nothing is usable", () => {
+    expect(resolveClassifierLevel(argmaxProfile, null)).toEqual([]);
+    expect(resolveClassifierLevel(argmaxProfile, {})).toEqual([]);
+    expect(resolveClassifierLevel({ mode: "argmax", questions: [{ id: "q", levels: [] }] }, { q: { noul: 1 } })).toEqual([]);
   });
 
-  it("threshold mode walks ascending cuts", () => {
+  it("threshold mode walks ascending cuts and returns their chains", () => {
     const thresholdProfile = {
       mode: "threshold",
       threshold: {
         question: { id: "complexity" },
         cuts: [
-          { max: 0.2, level: "minimal" },
-          { max: 0.5, level: "low" },
-          { max: 0.8, level: "high" },
-          { max: 1, level: "max" },
+          { max: 0.2, levels: ["minimal"] },
+          { max: 0.5, levels: ["low", "minimal"] },
+          { max: 0.8, levels: ["high"] },
+          { max: 1, levels: ["max", "xhigh"] },
         ],
       },
     };
-    expect(resolveClassifierLevel(thresholdProfile, { complexity: { noul: 0.1 } })).toBe("minimal");
-    expect(resolveClassifierLevel(thresholdProfile, { complexity: { noul: 0.5 } })).toBe("low");
-    expect(resolveClassifierLevel(thresholdProfile, { complexity: { noul: 0.95 } })).toBe("max");
-    expect(resolveClassifierLevel(thresholdProfile, { complexity: { noul: 1.4 } })).toBeNull();
+    expect(resolveClassifierLevel(thresholdProfile, { complexity: { noul: 0.1 } })).toEqual(["minimal"]);
+    expect(resolveClassifierLevel(thresholdProfile, { complexity: { noul: 0.5 } })).toEqual(["low", "minimal"]);
+    expect(resolveClassifierLevel(thresholdProfile, { complexity: { noul: 0.95 } })).toEqual(["max", "xhigh"]);
+    expect(resolveClassifierLevel(thresholdProfile, { complexity: { noul: 1.4 } })).toEqual([]);
+  });
+});
+
+describe("parseLevelList", () => {
+  it("parses a comma-separated chain", () => {
+    expect(parseLevelList("high,xhigh")).toEqual(["high", "xhigh"]);
+    expect(parseLevelList(" low , none ")).toEqual(["low", "none"]);
+  });
+
+  it("accepts arrays and normalizes case, duplicates and empties", () => {
+    expect(parseLevelList(["HIGH", "high", "", " xhigh "])).toEqual(["high", "xhigh"]);
+    expect(parseLevelList([])).toEqual([]);
+    expect(parseLevelList(null)).toEqual([]);
+    expect(parseLevelList(42)).toEqual([]);
+  });
+
+  it("caps the chain length and token length", () => {
+    expect(parseLevelList(Array.from({ length: 40 }, (_, i) => `l${i}`))).toHaveLength(16);
+    expect(parseLevelList(["a".repeat(80)])[0]).toHaveLength(32);
+  });
+
+  it("keeps unknown values — no vocabulary check", () => {
+    expect(parseLevelList("hyper,high")).toEqual(["hyper", "high"]);
+  });
+});
+
+describe("questionLevels", () => {
+  it("prefers `levels` and falls back to the legacy `level`", () => {
+    expect(questionLevels({ levels: ["max", "high"] })).toEqual(["max", "high"]);
+    expect(questionLevels({ level: "high" })).toEqual(["high"]);
+    expect(questionLevels({ levels: ["x"], level: "high" })).toEqual(["x"]);
+    expect(questionLevels(null)).toEqual([]);
+  });
+});
+
+describe("pickFirstSupported", () => {
+  it("picks the first candidate the target supports", () => {
+    expect(pickFirstSupported(["max", "xhigh", "high"], ["low", "medium", "high"])).toBe("high");
+    expect(pickFirstSupported(["high", "xhigh"], ["xhigh"])).toBe("xhigh");
+  });
+
+  it("sends the first candidate when the target supports none of them", () => {
+    expect(pickFirstSupported(["max", "xhigh"], ["low", "medium"])).toBe("max");
+  });
+
+  it("sends the first candidate when there is no level information", () => {
+    expect(pickFirstSupported(["max", "high"], null)).toBe("max");
+    expect(pickFirstSupported(["max", "high"], [])).toBe("max");
+  });
+
+  it("treats auto as always supported", () => {
+    expect(pickFirstSupported(["auto"], ["low"])).toBe("auto");
+    expect(pickFirstSupported(["high", "auto"], ["low"])).toBe("auto");
+  });
+
+  it("returns null for an empty chain", () => {
+    expect(pickFirstSupported([], ["low"])).toBeNull();
+    expect(pickFirstSupported(null, ["low"])).toBeNull();
   });
 });
 
@@ -175,8 +247,8 @@ describe("extractPromptText", () => {
   });
 });
 
-describe("CLASSIFIER_LEVELS", () => {
-  it("stays in canonical ascending order", () => {
-    expect(CLASSIFIER_LEVELS).toEqual(["minimal", "low", "medium", "high", "max"]);
+describe("CLASSIFIER_FALLBACK_LEVELS", () => {
+  it("covers the wider value set a chain may name", () => {
+    expect(CLASSIFIER_FALLBACK_LEVELS).toEqual(["none", "minimal", "low", "medium", "high", "xhigh", "max", "auto"]);
   });
 });

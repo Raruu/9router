@@ -12,15 +12,20 @@ import { getProviderCredentials } from "@/sse/services/auth.js";
 import { checkAndRefreshToken } from "@/sse/services/tokenRefresh.js";
 import { getModelInfo } from "@/sse/services/model.js";
 import { getThinkingClassifierByName } from "@/lib/db/repos/thinkingClassifiersRepo.js";
+import { getProviderConnections, getCombos, getModelAliases } from "@/lib/localDb";
+import { buildProviderIdByPrefix } from "@/lib/providerPrefixMap.js";
 import { saveRequestUsage } from "@/lib/usageDb.js";
 import { handleSystemoneCore } from "open-sse/handlers/systemoneCore.js";
 import { extractTextContent } from "open-sse/translator/formats/gemini.js";
+import { comboEffortTiers } from "open-sse/providers/comboCapabilities.js";
+import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import {
   buildClassifierQuestions,
   resolveClassifierLevel,
+  pickFirstSupported,
   DEFAULT_CLASSIFIER_TIMEOUT_MS,
   DEFAULT_CLASSIFIER_FALLBACK_LEVEL,
-  CLASSIFIER_LEVELS,
+  CLASSIFIER_FALLBACK_LEVELS,
 } from "@/shared/constants/thinkingClassifier.js";
 
 const PROMPT_TEXT_MAX = 4000;
@@ -126,15 +131,15 @@ export function extractPromptText(body) {
  * Run one classifier profile over the request's prompt text.
  *
  * Fail-open by contract: any error (missing credentials, upstream failure,
- * timeout, unusable answers) resolves to `{ level: null }` and the caller
+ * timeout, unusable answers) resolves to `{ levels: [] }` and the caller
  * falls back to the profile's fallbackLevel. Never throws, never locks the
  * classifier account (a classifier call must not degrade routing health).
  *
- * @returns {Promise<{ level: string|null, answers: object|null, latencyMs: number, error: string|null }>}
+ * @returns {Promise<{ levels: string[], answers: object|null, latencyMs: number, error: string|null }>}
  */
 export async function classifyWithProfile({ profile, body, log }) {
   const startedAt = Date.now();
-  const fail = (error) => ({ level: null, answers: null, latencyMs: Date.now() - startedAt, error });
+  const fail = (error) => ({ levels: [], answers: null, latencyMs: Date.now() - startedAt, error });
 
   try {
     const text = extractPromptText(body).slice(0, PROMPT_TEXT_MAX);
@@ -163,7 +168,7 @@ export async function classifyWithProfile({ profile, body, log }) {
 
     const json = await result.response.json().catch(() => null);
     const answers = json?.answers || null;
-    const level = resolveClassifierLevel(profile, answers);
+    const levels = resolveClassifierLevel(profile, answers);
 
     // Cost stays visible in Usage; endpoint tags it as internal so it is not
     // mistaken for client traffic.
@@ -175,51 +180,95 @@ export async function classifyWithProfile({ profile, body, log }) {
         tokens: usage,
         connectionId: credentials.connectionId,
         endpoint: "/internal/thinking-classifier",
-        status: level ? "success" : "error",
+        status: levels.length > 0 ? "success" : "error",
       }).catch(() => {});
     }
 
-    return { level, answers, latencyMs: Date.now() - startedAt, error: level ? null : "no usable answer" };
+    return { levels, answers, latencyMs: Date.now() - startedAt, error: levels.length > 0 ? null : "no usable answer" };
   } catch (error) {
     return fail(error?.message || String(error));
   }
 }
 
-// The level actually sent upstream for a requested profile: the classifier's
-// decision, else the profile's fallback (validated, defaulting to medium).
+// The fallback level sent upstream for a requested profile (validated against
+// the expanded set, defaulting to medium).
 export function resolveFallbackLevel(profile) {
   const fallback = typeof profile?.fallbackLevel === "string" ? profile.fallbackLevel : "";
-  return CLASSIFIER_LEVELS.includes(fallback) ? fallback : DEFAULT_CLASSIFIER_FALLBACK_LEVEL;
+  return CLASSIFIER_FALLBACK_LEVELS.includes(fallback) ? fallback : DEFAULT_CLASSIFIER_FALLBACK_LEVEL;
+}
+
+/**
+ * Thinking levels the request's target accepts, for the first-supported pick.
+ * A combo resolves to the union of its members' levels (the same list
+ * /v1/models advertises via capabilities.effort_tiers); a single model uses its
+ * own list. Any failure resolves to null = "no level information", so the pick
+ * falls back to the first candidate and the per-member clamp stays in charge.
+ *
+ * @param {{ modelStr?: string, comboModels?: string[]|null }} target
+ * @returns {Promise<string[]|null>}
+ */
+export async function resolveTargetLevels(target) {
+  try {
+    const { modelStr, comboModels } = target || {};
+    if (Array.isArray(comboModels) && comboModels.length > 0 && typeof modelStr === "string") {
+      const [connections, combos, modelAliases] = await Promise.all([
+        getProviderConnections(),
+        getCombos(),
+        getModelAliases(),
+      ]);
+      const comboByName = new Map();
+      for (const combo of combos || []) {
+        if (typeof combo?.name === "string" && !comboByName.has(combo.name)) comboByName.set(combo.name, combo);
+      }
+      const ctx = { providerIdByPrefix: buildProviderIdByPrefix(connections), modelAliases, comboByName };
+      return comboEffortTiers({ name: modelStr, models: comboModels }, ctx);
+    }
+    if (typeof modelStr !== "string" || !modelStr) return null;
+    const modelInfo = await getModelInfo(modelStr);
+    if (!modelInfo?.provider) return null;
+    return getThinkingLevels(modelInfo.provider, modelInfo.model) || null;
+  } catch {
+    return null;
+  }
 }
 
 /**
  * Interception entry point for handleChat. Reads the requested effort value; if
- * it names an active profile, classifies the prompt and rewrites the value in
- * place. Returns a decision object for logging/observability, or null when the
- * request has nothing to do with classifiers.
+ * it names an active profile, classifies the prompt, picks the first level the
+ * target supports from the decided chain, and rewrites the value in place.
+ * Returns a decision object for logging/observability, or null when the request
+ * has nothing to do with classifiers.
  *
- * @returns {Promise<{ profile: string, requested: string, level: string, fallback: boolean, latencyMs: number }|null>}
+ * @param {object} body - the client request body (mutated in place)
+ * @param {object|null} log
+ * @param {{ modelStr?: string, comboModels?: string[]|null }} [target] - the
+ *   requested target, used to resolve its supported thinking levels.
+ * @returns {Promise<{ profile: string, requested: string, level: string, candidates: string[], fallback: boolean, latencyMs: number }|null>}
  */
-export async function applyThinkingClassifier(body, log) {
+export async function applyThinkingClassifier(body, log, target = null) {
   const resolved = await resolveClassifierRequest(body);
   if (!resolved) return null;
 
   const { profile, field, requested } = resolved;
   const result = await classifyWithProfile({ profile, body, log });
-  const fallback = !result.level;
-  const level = result.level || resolveFallbackLevel(profile);
+  const fallback = result.levels.length === 0;
+  const supported = fallback ? null : await resolveTargetLevels(target);
+  const level = fallback
+    ? resolveFallbackLevel(profile)
+    : pickFirstSupported(result.levels, supported);
 
   writeEffortField(body, field, level);
 
   const note = fallback
     ? `classifier failed (${result.error}) → fallback ${level}`
-    : `→ ${level}`;
+    : `→ ${level}${result.levels.length > 1 ? ` (from ${result.levels.join(",")})` : ""}`;
   log?.info?.("CLASSIFIER", `system one (${profile.name}) ${note} · ${result.latencyMs}ms`);
 
   return {
     profile: profile.name,
     requested,
     level,
+    candidates: result.levels,
     fallback,
     latencyMs: result.latencyMs,
   };

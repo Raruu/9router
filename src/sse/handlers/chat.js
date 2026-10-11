@@ -107,18 +107,21 @@ export async function handleChat(request, clientRawRequest = null) {
   const bypassResponse = handleBypassRequest(body, modelStr, userAgent, !!settings.ccFilterNaming);
   if (bypassResponse) return bypassResponse.response || bypassResponse;
 
+  // Combo lookup happens before the classifier so the first-supported pick can
+  // use the union of the combo's member levels. Pure DB read — the access and
+  // bypass decisions above are unaffected.
+  const comboModels = await getComboModels(modelStr);
+
   // Thinking Effort Classifier: a client selects a classifier profile by sending
   // its name as the effort value (advertised in capabilities.effort_tiers). The
   // name is replaced here, before combo expansion, so every member of a combo
   // gets the same decided level; the per-member thinking clamp then applies as
   // usual. Fail-open: an unknown/inactive name or a classifier error falls back
   // to the profile's fallbackLevel, and no name at all is a no-op.
-  const classifierDecision = await applyThinkingClassifier(body, log);
+  const classifierDecision = await applyThinkingClassifier(body, log, { modelStr, comboModels });
 
   const requiredCapabilities = detectRequiredCapabilities(body);
 
-  // Check if model is a combo (has multiple models with fallback)
-  const comboModels = await getComboModels(modelStr);
   if (comboModels) {
     // Check for combo-specific strategy first, fallback to global
     const comboStrategies = settings.comboStrategies || {};

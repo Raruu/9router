@@ -7,13 +7,15 @@ import {
 import {
   validateClassifierName,
   CLASSIFIER_MODES,
-  CLASSIFIER_LEVELS,
+  CLASSIFIER_FALLBACK_LEVELS,
   DEFAULT_CLASSIFIER_TIMEOUT_MS,
   MIN_CLASSIFIER_TIMEOUT_MS,
   MAX_CLASSIFIER_TIMEOUT_MS,
   GENERIC_ARGMAX_QUESTIONS,
   GENERIC_THRESHOLD_QUESTION,
   GENERIC_THRESHOLD_CUTS,
+  parseLevelList,
+  questionLevels,
 } from "@/shared/constants/thinkingClassifier.js";
 
 // Validate a create/update payload. Unknown fields are dropped rather than
@@ -33,21 +35,22 @@ export function normalizeClassifierInput(body = {}) {
     .slice(0, 32)
     .map((q) => ({
       id: q.id.trim().slice(0, 64),
-      level: CLASSIFIER_LEVELS.includes(q.level) ? q.level : null,
+      levels: questionLevels(q),
       instructions: typeof q.instructions === "string" ? q.instructions.trim().slice(0, 2000) : "",
     }));
-  if (mode === "argmax" && questions.filter((q) => q.level).length === 0) {
-    return { error: "At least one question must map to a level" };
+  if (mode === "argmax" && questions.filter((q) => q.levels.length > 0).length === 0) {
+    return { error: "At least one question must list a level" };
   }
 
   const rawThreshold = body.threshold && typeof body.threshold === "object" ? body.threshold : {};
   const question = rawThreshold.question && typeof rawThreshold.question === "object" ? rawThreshold.question : GENERIC_THRESHOLD_QUESTION;
   const cuts = (Array.isArray(rawThreshold.cuts) ? rawThreshold.cuts : GENERIC_THRESHOLD_CUTS)
-    .filter((c) => Number.isFinite(Number(c?.max)) && CLASSIFIER_LEVELS.includes(c?.level))
-    .map((c) => ({ max: Number(c.max), level: c.level }))
+    .filter((c) => Number.isFinite(Number(c?.max)))
+    .map((c) => ({ max: Number(c.max), levels: questionLevels(c) }))
+    .filter((c) => c.levels.length > 0)
     .sort((a, b) => a.max - b.max);
   if (mode === "threshold" && cuts.length === 0) {
-    return { error: "Threshold mode needs at least one cut" };
+    return { error: "Threshold mode needs at least one cut with a level" };
   }
 
   const timeout = Number(body.timeoutMs);
@@ -69,7 +72,7 @@ export function normalizeClassifierInput(body = {}) {
         },
         cuts,
       },
-      fallbackLevel: CLASSIFIER_LEVELS.includes(body.fallbackLevel) ? body.fallbackLevel : "medium",
+      fallbackLevel: CLASSIFIER_FALLBACK_LEVELS.includes(body.fallbackLevel) ? body.fallbackLevel : "medium",
       timeoutMs,
     },
   };
