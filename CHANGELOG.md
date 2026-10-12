@@ -1,3 +1,28 @@
+# v0.5.99-3 (2026-10-12)
+
+## Features
+- **Thinking Classifier**: a dashboard page for named effort tiers backed by
+  System One decision models. Active tiers appear in every reasoning model's
+  `capabilities.effort_tiers`, so a client picks one by sending its name as its
+  effort value and the gateway swaps in the level the classifier chooses for the
+  prompt. Profiles carry an ordered model fallback list (uniform or per-model
+  timeouts), argmax (one probability question per level) or threshold (one 0–1
+  score plus cuts) questions, a comma-separated level chain per question
+  (`max,xhigh,high` — the first level the target supports is sent), JSON
+  export/import, and an inline test box
+- **Usage → Details**: requests that ran through a classifier now show the
+  chosen level, the per-question scores, and the model that answered with how
+  long it took
+- **Media Providers**: anthropic-compatible custom nodes can serve the per-kind
+  endpoints (image, TTS, STT, video, embedding, System One) instead of being
+  hidden from every media page
+
+## Fixes
+- **Models**: a combo member's prefix is resolved from its provider node, so a
+  member on a node whose connections are all deactivated keeps its pinned
+  catalog capabilities instead of falling back to provider-agnostic rules and
+  advertising levels it never declared
+
 # v0.5.99-2 (2026-10-10)
 
 ## Features
