@@ -15,6 +15,7 @@ import {
   GENERIC_THRESHOLD_QUESTION,
   GENERIC_THRESHOLD_CUTS,
   questionLevels,
+  questionIdFromLevels,
   clampClassifierTimeout,
   normalizeClassifierModels,
 } from "@/shared/constants/thinkingClassifier.js";
@@ -40,16 +41,32 @@ export function normalizeClassifierInput(body = {}) {
 
   const mode = CLASSIFIER_MODES.includes(body.mode) ? body.mode : "argmax";
 
+  // Question ids are DERIVED from the level chain (questionIdFromLevels), never
+  // taken from the client: an id must always describe its own levels, and two
+  // questions must never share one — a duplicate would collapse into a single
+  // key in the upstream questions object and silently drop a question. Blank
+  // chains produce no id and are dropped (they cannot be addressed upstream).
   const rawQuestions = Array.isArray(body.questions) ? body.questions : GENERIC_ARGMAX_QUESTIONS;
-  const questions = rawQuestions
-    .filter((q) => q && typeof q.id === "string" && q.id.trim())
-    .slice(0, 32)
-    .map((q) => ({
-      id: q.id.trim().slice(0, 64),
-      levels: questionLevels(q),
+  const questions = [];
+  const seenIds = new Map();
+  for (const q of rawQuestions.slice(0, 32)) {
+    if (!q || typeof q !== "object") continue;
+    const levels = questionLevels(q);
+    // Truncate BEFORE deduping so two over-long chains that truncate to the
+    // same id are rejected rather than silently collapsing upstream.
+    const id = questionIdFromLevels(levels).slice(0, 200);
+    if (!id) continue;
+    if (seenIds.has(id)) {
+      return { error: `Two questions use the same level chain: ${levels.join(",")}` };
+    }
+    seenIds.set(id, true);
+    questions.push({
+      id,
+      levels,
       instructions: typeof q.instructions === "string" ? q.instructions.trim().slice(0, 2000) : "",
-    }));
-  if (mode === "argmax" && questions.filter((q) => q.levels.length > 0).length === 0) {
+    });
+  }
+  if (mode === "argmax" && questions.length === 0) {
     return { error: "At least one question must list a level" };
   }
 
@@ -74,7 +91,9 @@ export function normalizeClassifierInput(body = {}) {
       questions,
       threshold: {
         question: {
-          id: typeof question.id === "string" && question.id.trim() ? question.id.trim().slice(0, 64) : "complexity",
+          // The threshold question has no level chain, so its id is the fixed
+          // sentinel — never client input (ids are always server-owned).
+          id: GENERIC_THRESHOLD_QUESTION.id,
           instructions: typeof question.instructions === "string" ? question.instructions.trim().slice(0, 2000) : "",
         },
         cuts,

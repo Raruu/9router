@@ -27,6 +27,7 @@ import {
   clampClassifierTimeout,
   normalizeClassifierModels,
   questionLevels,
+  questionIdFromLevels,
 } from "@/shared/constants/thinkingClassifier";
 
 export const CLASSIFIER_EXPORT_FORMAT = "9router-thinking-classifiers";
@@ -116,8 +117,18 @@ export function parseClassifierImport(text) {
 
   const mode = CLASSIFIER_MODES.includes(raw.mode) ? raw.mode : "argmax";
   const questions = Array.isArray(raw.questions) ? raw.questions : [];
-  if (mode === "argmax" && questions.filter((q) => questionLevels(q).length > 0).length === 0) {
-    throw new Error("At least one question must list a level");
+  if (mode === "argmax") {
+    // Same rule the server applies: every question needs a level chain, and no
+    // two may share one (their derived ids would collide upstream).
+    const ids = new Set();
+    for (const q of questions) {
+      const levels = questionLevels(q);
+      const id = questionIdFromLevels(levels);
+      if (!id) throw new Error("Every question must list a level");
+      if (ids.has(id)) throw new Error(`Two questions use the same level chain: ${levels.join(",")}`);
+      ids.add(id);
+    }
+    if (questions.length === 0) throw new Error("At least one question must list a level");
   }
   const threshold = raw.threshold && typeof raw.threshold === "object" ? raw.threshold : {};
   if (mode === "threshold") {

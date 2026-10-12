@@ -14,6 +14,7 @@ import {
   profileModels,
   parseLevelList,
   questionLevels,
+  questionIdFromLevels,
   pickFirstSupported,
 } from "../../src/shared/constants/thinkingClassifier.js";
 import {
@@ -231,6 +232,24 @@ describe("questionLevels", () => {
     expect(questionLevels({ level: "high" })).toEqual(["high"]);
     expect(questionLevels({ levels: ["x"], level: "high" })).toEqual(["x"]);
     expect(questionLevels(null)).toEqual([]);
+  });
+});
+
+describe("questionIdFromLevels", () => {
+  it("joins the chain into a slug", () => {
+    expect(questionIdFromLevels(["max", "ultra"])).toBe("max-ultra");
+    expect(questionIdFromLevels("max, ultra")).toBe("max-ultra");
+    expect(questionIdFromLevels(["max", "xhigh", "high"])).toBe("max-xhigh-high");
+  });
+
+  it("normalizes case and duplicates via parseLevelList", () => {
+    expect(questionIdFromLevels("Max, MAX, ultra")).toBe("max-ultra");
+  });
+
+  it("returns an empty string for an empty chain", () => {
+    expect(questionIdFromLevels([])).toBe("");
+    expect(questionIdFromLevels("")).toBe("");
+    expect(questionIdFromLevels(null)).toBe("");
   });
 });
 

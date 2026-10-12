@@ -128,6 +128,15 @@ export function questionLevels(entry) {
   return parseLevelList(entry.level);
 }
 
+// The System One question id for a level chain: "max, ultra" → "max-ultra".
+// Ids are a PURE FUNCTION of the chain (never stored user input), so they can
+// never drift from the levels they represent and two questions can never share
+// an id — which would silently collapse into one key in the upstream questions
+// object. Returns "" for an empty chain; callers treat that as "not a question".
+export function questionIdFromLevels(levels) {
+  return parseLevelList(levels).join("-");
+}
+
 // First candidate the target actually supports. "auto" is a mode rather than a
 // level — every model accepts it — so it always wins when listed. An empty
 // `supported` list means "no level information": the first candidate is sent
@@ -158,13 +167,15 @@ export function validateClassifierName(name) {
 // Prefilled generic template — one argmax question per level. Instructions are
 // written to be model-agnostic; users can reword them per profile. Levels are
 // chains: the hardest entry lists fallbacks so a target that cannot go that
-// high still gets the strongest level it accepts.
+// high still gets the strongest level it accepts. Ids match
+// questionIdFromLevels(levels) so a fresh profile's stored shape is exactly
+// what the derivation produces on save.
 export const GENERIC_ARGMAX_QUESTIONS = Object.freeze([
-  { id: "level_minimal", levels: ["minimal"], instructions: "The request is trivial: a greeting, thanks, or a one-line lookup needing no analysis." },
-  { id: "level_low", levels: ["low", "minimal"], instructions: "The request is simple: a short explanation or a small self-contained edit that needs no planning." },
-  { id: "level_medium", levels: ["medium", "low"], instructions: "The request needs moderate work: multi-step reasoning, a change across a few files, or a balanced trade-off." },
-  { id: "level_high", levels: ["high", "medium"], instructions: "The request is complex: deep reasoning, architecture or debugging across systems, or strict correctness requirements." },
-  { id: "level_max", levels: ["max", "xhigh", "high"], instructions: "The request is extremely hard: novel research-level reasoning, large-scale design, or a problem where an error is very costly." },
+  { id: "minimal", levels: ["minimal"], instructions: "The request is trivial: a greeting, thanks, or a one-line lookup needing no analysis." },
+  { id: "low-minimal", levels: ["low", "minimal"], instructions: "The request is simple: a short explanation or a small self-contained edit that needs no planning." },
+  { id: "medium-low", levels: ["medium", "low"], instructions: "The request needs moderate work: multi-step reasoning, a change across a few files, or a balanced trade-off." },
+  { id: "high-medium", levels: ["high", "medium"], instructions: "The request is complex: deep reasoning, architecture or debugging across systems, or strict correctness requirements." },
+  { id: "max-xhigh-high", levels: ["max", "xhigh", "high"], instructions: "The request is extremely hard: novel research-level reasoning, large-scale design, or a problem where an error is very costly." },
 ]);
 
 export const GENERIC_THRESHOLD_QUESTION = Object.freeze({

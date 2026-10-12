@@ -63,7 +63,7 @@ describe("normalizeClassifierInput", () => {
     expect(normalizeClassifierInput({ name: "tier", models: [{ model: "  " }] }).error).toContain("model");
   });
 
-  it("drops unknown fields and normalizes level chains", () => {
+  it("derives question ids from the level chain and ignores client ids", () => {
     const { value } = normalizeClassifierInput({
       name: "tier", model: "m", evil: "payload",
       questions: [
@@ -73,9 +73,40 @@ describe("normalizeClassifierInput", () => {
     });
     expect(value.evil).toBeUndefined();
     expect(value.questions[0].levels).toEqual(["max", "xhigh"]);
+    expect(value.questions[0].id).toBe("max-xhigh");
     // Legacy single-level payloads upgrade to a one-entry chain.
     expect(value.questions[1].levels).toEqual(["high"]);
     expect(value.questions[1].level).toBeUndefined();
+    expect(value.questions[1].id).toBe("high");
+  });
+
+  it("rejects two questions sharing a level chain", () => {
+    const result = normalizeClassifierInput({
+      name: "tier", model: "m",
+      questions: [
+        { levels: ["high"], instructions: "a" },
+        { levels: ["high"], instructions: "b" },
+      ],
+    });
+    expect(result.error).toContain("same level chain");
+    expect(result.error).toContain("high");
+  });
+
+  it("rejects duplicate chains that only collide after normalization", () => {
+    // Same chain, different spelling/casing/duplication.
+    expect(normalizeClassifierInput({
+      name: "tier", model: "m",
+      questions: [{ levels: ["max", "ultra"] }, { levels: "Max, MAX, ultra" }],
+    }).error).toContain("same level chain");
+  });
+
+  it("drops questions with no levels instead of keeping an unaddressable row", () => {
+    const { value } = normalizeClassifierInput({
+      name: "tier", model: "m",
+      questions: [{ levels: [] }, { levels: ["high"] }],
+    });
+    expect(value.questions).toHaveLength(1);
+    expect(value.questions[0].id).toBe("high");
   });
 
   it("keeps unknown level values — no vocabulary check", () => {
@@ -84,6 +115,15 @@ describe("normalizeClassifierInput", () => {
       questions: [{ id: "q", levels: ["hyper", "high"], instructions: "x" }],
     });
     expect(value.questions[0].levels).toEqual(["hyper", "high"]);
+    expect(value.questions[0].id).toBe("hyper-high");
+  });
+
+  it("keeps the fixed complexity id for the threshold question", () => {
+    const { value } = normalizeClassifierInput({
+      name: "tier", model: "m", mode: "threshold",
+      threshold: { question: { id: "whatever", instructions: "?" }, cuts: [{ max: 1, levels: ["max"] }] },
+    });
+    expect(value.threshold.question.id).toBe("complexity");
   });
 
   it("rejects argmax without any leveled question and threshold without leveled cuts", () => {

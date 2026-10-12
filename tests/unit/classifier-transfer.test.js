@@ -96,10 +96,19 @@ describe("parseClassifierImport", () => {
   it("rejects a profile whose mode has nothing to decide with", () => {
     expect(() => parseClassifierImport(JSON.stringify({
       classifier: { name: "t", models: ["oc/a"], mode: "argmax", questions: [{ id: "q", levels: [] }] },
-    }))).toThrow("must list a level");
+    }))).toThrow("Every question must list a level");
     expect(() => parseClassifierImport(JSON.stringify({
       classifier: { name: "t", models: ["oc/a"], mode: "threshold", threshold: { cuts: [] } },
     }))).toThrow("at least one cut");
+  });
+
+  it("rejects two questions sharing a level chain", () => {
+    expect(() => parseClassifierImport(JSON.stringify({
+      classifier: {
+        name: "t", models: ["oc/a"], mode: "argmax",
+        questions: [{ levels: ["high"], instructions: "a" }, { levels: ["High"], instructions: "b" }],
+      },
+    }))).toThrow("same level chain");
   });
 
   it("falls back to safe defaults for unknown enum values", () => {

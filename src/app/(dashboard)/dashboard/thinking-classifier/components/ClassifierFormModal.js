@@ -18,6 +18,7 @@ import {
   normalizeClassifierModels,
   parseLevelList,
   questionLevels,
+  questionIdFromLevels,
 } from "@/shared/constants/thinkingClassifier";
 
 // Editable form state seeded from a profile (or the generic template).
@@ -34,11 +35,11 @@ export function classifierToForm(classifier = {}) {
   })();
   const questions = Array.isArray(classifier.questions) && classifier.questions.length > 0
     ? classifier.questions.map((q) => ({
-        id: q.id || "",
+        // The id is derived from the levels on save, so the form never carries it.
         levelsText: questionLevels(q).join(","),
         instructions: q.instructions || "",
       }))
-    : GENERIC_ARGMAX_QUESTIONS.map((q) => ({ ...q, levelsText: q.levels.join(",") }));
+    : GENERIC_ARGMAX_QUESTIONS.map((q) => ({ levelsText: q.levels.join(","), instructions: q.instructions }));
   const threshold = classifier.threshold && typeof classifier.threshold === "object"
     ? {
         question: {
@@ -86,6 +87,28 @@ export default function ClassifierFormModal({
     set({ questions: form.questions.map((q, i) => (i === index ? { ...q, ...patch } : q)) });
   };
 
+  // Duplicate level chains are rejected by the server; mirror that here so the
+  // offending rows are marked before the user hits Save. Keyed by the derived
+  // id (the chain joined), the same value the server computes.
+  const questionIdErrors = useMemo(() => {
+    const counts = new Map();
+    for (const q of form.questions) {
+      const id = questionIdFromLevels(q.levelsText);
+      if (!id) continue;
+      counts.set(id, (counts.get(id) || 0) + 1);
+    }
+    return counts;
+  }, [form.questions]);
+
+  const questionError = (q) => {
+    const id = questionIdFromLevels(q.levelsText);
+    if (!id) return "List at least one level";
+    if (questionIdErrors.get(id) > 1) return `Duplicate level chain: ${id}`;
+    return null;
+  };
+
+  const argmaxInvalid = form.mode === "argmax" && form.questions.some((q) => questionError(q));
+
   const setCut = (index, patch) => {
     set({
       threshold: {
@@ -127,7 +150,6 @@ export default function ClassifierFormModal({
     mode: form.mode,
     isActive: form.isActive,
     questions: form.questions.map((q) => ({
-      id: q.id.trim(),
       levels: parseLevelList(q.levelsText),
       instructions: q.instructions.trim(),
     })),
@@ -151,7 +173,7 @@ export default function ClassifierFormModal({
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={() => onSave(payload)} loading={saving} disabled={!payload.name || payload.models.length === 0}>
+          <Button onClick={() => onSave(payload)} loading={saving} disabled={!payload.name || payload.models.length === 0 || argmaxInvalid}>
             Save
           </Button>
         </>
@@ -280,6 +302,8 @@ export default function ClassifierFormModal({
                   value={q.levelsText}
                   onChange={(e) => setQuestion(i, { levelsText: e.target.value })}
                   placeholder="high,xhigh"
+                  error={questionError(q)}
+                  hint={questionError(q) ? undefined : (questionIdFromLevels(q.levelsText) ? `id: ${questionIdFromLevels(q.levelsText)}` : undefined)}
                 />
                 <Input
                   className="flex-1"
@@ -304,7 +328,7 @@ export default function ClassifierFormModal({
               variant="secondary"
               size="sm"
               icon="add"
-              onClick={() => set({ questions: [...form.questions, { id: `level_${Date.now()}`, levelsText: "medium", instructions: "" }] })}
+              onClick={() => set({ questions: [...form.questions, { levelsText: "", instructions: "" }] })}
             >
               Add question
             </Button>
