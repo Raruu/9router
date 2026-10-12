@@ -16,6 +16,12 @@ export default function Select({
   selectClassName,
   ...props
 }) {
+  // When the caller already supplies an option with value "", that option is
+  // the empty state: render the built-in placeholder only otherwise, so the
+  // two never collide (a duplicate "" makes the browser show the first one —
+  // the disabled placeholder — instead of the caller's label).
+  const hasEmptyOption = options.some((option) => option.value === "");
+
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
       {label && (
@@ -40,9 +46,11 @@ export default function Select({
           )}
           {...props}
         >
-          <option value="" disabled>
-            {placeholder}
-          </option>
+          {!hasEmptyOption && (
+            <option value="" disabled>
+              {placeholder}
+            </option>
+          )}
           {options.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
