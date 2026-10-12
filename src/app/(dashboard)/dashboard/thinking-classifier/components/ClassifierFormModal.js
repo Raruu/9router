@@ -180,6 +180,16 @@ export default function ClassifierFormModal({
       }
     >
       <div className="flex flex-col gap-5 max-h-[70vh] overflow-y-auto pr-1">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-text-main">Active</p>
+            <p className="text-xs text-text-muted">
+              Active classifiers are advertised in every reasoning model&apos;s effort_tiers and accepted as an effort value.
+            </p>
+          </div>
+          <Toggle checked={form.isActive} onChange={(v) => set({ isActive: v })} className="shrink-0" />
+        </div>
+
         <Input
           label="Tier name"
           required
@@ -277,13 +287,6 @@ export default function ClassifierFormModal({
             />
           )}
         </div>
-
-        <Toggle
-          checked={form.isActive}
-          onChange={(v) => set({ isActive: v })}
-          label="Active"
-          description="Active classifiers are advertised in every reasoning model's effort_tiers and accepted as an effort value."
-        />
 
         {form.mode === "argmax" ? (
           <div className="flex flex-col gap-3">

@@ -1,11 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge, Button, Card, CardSkeleton, ConfirmModal, ModelSelectModal, Toggle } from "@/shared/components";
+import { Badge, Button, Card, CardSkeleton, ConfirmModal, Input, ModelSelectModal, Toggle } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useNotificationStore } from "@/store/notificationStore";
 import { getProviderByAlias } from "@/shared/constants/providers";
-import { profileModels, normalizeClassifierModels } from "@/shared/constants/thinkingClassifier";
+import { profileModels, normalizeClassifierModels, validateClassifierName } from "@/shared/constants/thinkingClassifier";
 import ClassifierFormModal, { classifierToForm } from "./components/ClassifierFormModal";
 import { buildClassifierExport, buildClassifierExportFilename, parseClassifierImport } from "./classifierTransfer";
 
@@ -34,6 +34,9 @@ export default function ThinkingClassifierPage() {
   const [form, setForm] = useState(null);
   const [saving, setSaving] = useState(false);
   const [confirmState, setConfirmState] = useState(null);
+  // Import confirmation is its own state so the tier name stays editable before
+  // committing; `name` is seeded from the file and re-validated as it changes.
+  const [importDraft, setImportDraft] = useState(null);
   const [showModelSelect, setShowModelSelect] = useState(false);
   const importFileRef = useRef(null);
   // Test inputs are keyed by classifier id so each card's box is independent.
@@ -166,41 +169,41 @@ export default function ThinkingClassifierPage() {
     }
 
     const { classifier } = parsed;
-    const existing = classifiers.find((c) => c.name === classifier.name);
-    setConfirmState({
-      title: existing ? "Update classifier" : "Import classifier",
-      message: existing
-        ? `Replace the settings of "${classifier.name}" with the file's? Its active state is kept.`
-        : `Create a new classifier "${classifier.name}"?`,
-      confirmText: existing ? "Update" : "Create",
-      onConfirm: async () => {
-        try {
-          const res = await fetch(
-            existing ? `/api/thinking-classifiers/${existing.id}` : "/api/thinking-classifiers",
-            {
-              method: existing ? "PUT" : "POST",
-              headers: { "Content-Type": "application/json" },
-              // isActive is routing state a file must not flip: keep the stored
-              // value on update; a new profile takes the server default (active).
-              body: JSON.stringify(existing ? { ...classifier, isActive: existing.isActive } : classifier),
-            },
-          );
-          const data = await res.json().catch(() => ({}));
-          if (!res.ok) {
-            notify.error(data.error || "Import failed");
-            setConfirmState(null);
-            return;
-          }
-          notify.success(existing ? `Updated "${classifier.name}"` : `Created "${classifier.name}"`);
-          setConfirmState(null);
-          await fetchData();
-        } catch (error) {
-          console.log("Error importing classifier:", error);
-          notify.error("Import failed");
-          setConfirmState(null);
-        }
-      },
-    });
+    setImportDraft({ classifier, name: classifier.name });
+  };
+
+  // The name typed in the import dialog, re-validated live. Typing an existing
+  // profile's name switches the dialog to an update of that profile.
+  const importNameCheck = importDraft ? validateClassifierName(importDraft.name) : null;
+  const importExisting =
+    importDraft && importNameCheck?.ok ? classifiers.find((c) => c.name === importNameCheck.value) : null;
+
+  const handleImportConfirm = async () => {
+    if (!importDraft || !importNameCheck?.ok) return;
+    const classifier = { ...importDraft.classifier, name: importNameCheck.value };
+    try {
+      const res = await fetch(
+        importExisting ? `/api/thinking-classifiers/${importExisting.id}` : "/api/thinking-classifiers",
+        {
+          method: importExisting ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          // isActive is routing state a file must not flip: keep the stored
+          // value on update; a new profile takes the server default (active).
+          body: JSON.stringify(importExisting ? { ...classifier, isActive: importExisting.isActive } : classifier),
+        },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        notify.error(data.error || "Import failed");
+        return;
+      }
+      notify.success(importExisting ? `Updated "${classifier.name}"` : `Created "${classifier.name}"`);
+      setImportDraft(null);
+      await fetchData();
+    } catch (error) {
+      console.log("Error importing classifier:", error);
+      notify.error("Import failed");
+    }
   };
 
   const handleTest = async (classifier) => {
@@ -244,7 +247,7 @@ export default function ThinkingClassifierPage() {
           <div className="flex items-center gap-2 shrink-0">
             <Button
               variant="secondary"
-              icon="upload"
+              icon="download"
               onClick={() => importFileRef.current?.click()}
               className="shrink-0"
             >
@@ -296,7 +299,7 @@ export default function ThinkingClassifierPage() {
                   >
                     Copy tier
                   </Button>
-                  <Button variant="ghost" size="sm" icon="download" onClick={() => handleExport(classifier)} title="Export this classifier as JSON">
+                  <Button variant="ghost" size="sm" icon="upload" onClick={() => handleExport(classifier)} title="Export this classifier as JSON">
                     Export
                   </Button>
                   <Button variant="ghost" size="sm" icon="edit" onClick={() => openEditModal(classifier)}>Edit</Button>
@@ -401,6 +404,32 @@ export default function ThinkingClassifierPage() {
         message={confirmState?.message}
         confirmText={confirmState?.confirmText}
       />
+
+      <ConfirmModal
+        isOpen={!!importDraft}
+        onClose={() => setImportDraft(null)}
+        onConfirm={handleImportConfirm}
+        title={importExisting ? "Update classifier" : "Import classifier"}
+        message={
+          importExisting
+            ? `Replace the settings of "${importExisting.name}" with the file's? Its active state is kept.`
+            : "Create a new classifier from this file? Adjust the tier name if needed."
+        }
+        confirmText={importExisting ? "Update" : "Create"}
+        confirmDisabled={!importNameCheck?.ok}
+      >
+        <div className="mt-3">
+          <Input
+            label="Tier name"
+            required
+            placeholder="generic"
+            value={importDraft?.name || ""}
+            onChange={(e) => setImportDraft((prev) => (prev ? { ...prev, name: e.target.value } : prev))}
+            error={importNameCheck?.error}
+            hint="Lowercase letters, digits, - or _. Clients send this as their effort value."
+          />
+        </div>
+      </ConfirmModal>
     </div>
   );
 }
