@@ -6,15 +6,25 @@ import {
   CLASSIFIER_FALLBACK_LEVELS,
   CLASSIFIER_MODES,
   CLASSIFIER_TIMEOUT_MODES,
+  CLASSIFIER_INPUT_MODES,
   DEFAULT_CLASSIFIER_TIMEOUT_MS,
   DEFAULT_CLASSIFIER_TIMEOUT_MODE,
+  DEFAULT_CLASSIFIER_INPUT_MODE,
+  DEFAULT_CLASSIFIER_TAIL_TURNS,
+  DEFAULT_CLASSIFIER_TAIL_CHARS,
   GENERIC_ARGMAX_QUESTIONS,
   GENERIC_THRESHOLD_QUESTION,
   GENERIC_THRESHOLD_CUTS,
   MAX_CLASSIFIER_MODELS,
   MAX_CLASSIFIER_TIMEOUT_MS,
+  MAX_CLASSIFIER_TAIL_TURNS,
+  MAX_CLASSIFIER_TAIL_CHARS,
   MIN_CLASSIFIER_TIMEOUT_MS,
+  MIN_CLASSIFIER_TAIL_TURNS,
+  MIN_CLASSIFIER_TAIL_CHARS,
   clampClassifierTimeout,
+  clampClassifierTailTurns,
+  clampClassifierTailChars,
   normalizeClassifierModels,
   parseLevelList,
   questionLevels,
@@ -61,6 +71,11 @@ export function classifierToForm(classifier = {}) {
       ? classifier.timeoutMode
       : DEFAULT_CLASSIFIER_TIMEOUT_MODE,
     mode,
+    inputMode: CLASSIFIER_INPUT_MODES.includes(classifier.inputMode)
+      ? classifier.inputMode
+      : DEFAULT_CLASSIFIER_INPUT_MODE,
+    tailTurns: clampClassifierTailTurns(classifier.tailTurns) ?? DEFAULT_CLASSIFIER_TAIL_TURNS,
+    tailChars: clampClassifierTailChars(classifier.tailChars) ?? DEFAULT_CLASSIFIER_TAIL_CHARS,
     isActive: classifier.isActive !== false,
     questions,
     threshold,
@@ -70,6 +85,19 @@ export function classifierToForm(classifier = {}) {
 }
 
 const FALLBACK_OPTIONS = CLASSIFIER_FALLBACK_LEVELS.map((level) => ({ value: level, label: level.charAt(0).toUpperCase() + level.slice(1) }));
+
+const INPUT_MODE_OPTIONS = [
+  { value: "last-user", label: "Last user message" },
+  { value: "latest-turn", label: "Latest turn (any role)" },
+  { value: "tail-window", label: "Tail window" },
+];
+
+// One-line explanation per input mode, shown under the select.
+const INPUT_MODE_HINTS = {
+  "last-user": "The newest user message only. Tool results and assistant turns are skipped — the default, and what a profile used before this option existed.",
+  "latest-turn": "The newest turn with any text, including a tool result or an assistant message. The input shifts as an agent progresses.",
+  "tail-window": "The last few turns joined (any role, tool results included), bounded by the turn count and character budget below.",
+};
 
 export default function ClassifierFormModal({
   isOpen,
@@ -148,6 +176,9 @@ export default function ClassifierFormModal({
       .filter((m) => m.model),
     timeoutMode: form.timeoutMode,
     mode: form.mode,
+    inputMode: form.inputMode,
+    tailTurns: Number(form.tailTurns) || DEFAULT_CLASSIFIER_TAIL_TURNS,
+    tailChars: Number(form.tailChars) || DEFAULT_CLASSIFIER_TAIL_CHARS,
     isActive: form.isActive,
     questions: form.questions.map((q) => ({
       levels: parseLevelList(q.levelsText),
@@ -289,6 +320,43 @@ export default function ClassifierFormModal({
           )}
         </div>
 
+        <div className="flex flex-col gap-3">
+          <div>
+            <p className="text-sm font-medium text-text-main">What to classify</p>
+            <p className="text-xs text-text-muted">{INPUT_MODE_HINTS[form.inputMode]}</p>
+          </div>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <Select
+              label="Input"
+              value={form.inputMode}
+              onChange={(e) => set({ inputMode: e.target.value })}
+              options={INPUT_MODE_OPTIONS}
+            />
+            {form.inputMode === "tail-window" && (
+              <>
+                <Input
+                  label="Turns"
+                  type="number"
+                  min={MIN_CLASSIFIER_TAIL_TURNS}
+                  max={MAX_CLASSIFIER_TAIL_TURNS}
+                  value={form.tailTurns}
+                  onChange={(e) => set({ tailTurns: e.target.value })}
+                  hint="How many of the newest turns to include"
+                />
+                <Input
+                  label="Characters"
+                  type="number"
+                  min={MIN_CLASSIFIER_TAIL_CHARS}
+                  max={MAX_CLASSIFIER_TAIL_CHARS}
+                  value={form.tailChars}
+                  onChange={(e) => set({ tailChars: e.target.value })}
+                  hint="Character budget for the joined turns"
+                />
+              </>
+            )}
+          </div>
+        </div>
+
         {form.mode === "argmax" ? (
           <div className="flex flex-col gap-3">
             <div>
@@ -397,7 +465,7 @@ export default function ClassifierFormModal({
         )}
 
         <p className="text-xs text-text-muted">
-          The last user message of each request that selects this tier is sent to the classifier model above.
+          The selected slice of each request that picks this tier is sent to the classifier model above.
           If classification fails, requests fall back to the fallback level.
         </p>
       </div>

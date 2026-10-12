@@ -3,8 +3,9 @@
 // A classifier profile advertises its name inside `capabilities.effort_tiers`
 // (see withClassifierTiers). When a client sends that name as its effort value
 // (e.g. `reasoning_effort: "laya"`), the gateway runs the profile's System One
-// decision model over the last user message and swaps the name for the level it
-// decides, before any translation happens. This module owns:
+// decision model over the profile's chosen slice of the request (see
+// CLASSIFIER_INPUT_MODES — the newest user message by default) and swaps the
+// name for the level it decides, before any translation happens. This module owns:
 //   - locating/writing the effort value across client shapes (readEffortField)
 //   - resolving a requested name to an active profile (resolveClassifierRequest)
 //   - the classification call itself, fail-open (classifyWithProfile)
@@ -17,6 +18,8 @@ import { buildProviderIdByPrefix } from "@/lib/providerPrefixMap.js";
 import { saveRequestUsage } from "@/lib/usageDb.js";
 import { handleSystemoneCore } from "open-sse/handlers/systemoneCore.js";
 import { extractTextContent } from "open-sse/translator/formats/gemini.js";
+import { coerceResponsesOutput } from "open-sse/translator/formats/responsesApi.js";
+import { CLAUDE_BLOCK, RESPONSES_ITEM } from "open-sse/translator/schema/index.js";
 import { extractThinking } from "open-sse/translator/concerns/thinkingUnified.js";
 import { comboEffortTiers } from "open-sse/providers/comboCapabilities.js";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
@@ -26,9 +29,15 @@ import {
   resolveClassifierScores,
   pickFirstSupported,
   profileModels,
+  clampClassifierTailTurns,
+  clampClassifierTailChars,
   DEFAULT_CLASSIFIER_TIMEOUT_MS,
   DEFAULT_CLASSIFIER_FALLBACK_LEVEL,
+  DEFAULT_CLASSIFIER_INPUT_MODE,
+  DEFAULT_CLASSIFIER_TAIL_TURNS,
+  DEFAULT_CLASSIFIER_TAIL_CHARS,
   CLASSIFIER_FALLBACK_LEVELS,
+  CLASSIFIER_INPUT_MODES,
 } from "@/shared/constants/thinkingClassifier.js";
 
 const PROMPT_TEXT_MAX = 4000;
@@ -84,48 +93,162 @@ export async function resolveClassifierRequest(body) {
   }
 }
 
-// Last user message text across OpenAI/Claude/Gemini/Responses shapes.
-export function extractPromptText(body) {
+// Text of a message's content across OpenAI (string) and Claude (blocks) shapes.
+// Mirrors the original extractor: typed text blocks first, then a per-block
+// fallback for array content that carries no `type: "text"` marker.
+function contentText(content) {
+  if (typeof content === "string") return content.trim();
+  if (Array.isArray(content)) {
+    const typed = extractTextContent(content, "\n").trim();
+    if (typed) return typed;
+    return content.map((b) => (typeof b === "string" ? b : b?.text || "")).join("\n").trim();
+  }
+  return "";
+}
+
+// Text carried by Claude `tool_result` blocks inside a user message's content.
+function claudeToolResultText(content) {
+  if (!Array.isArray(content)) return "";
+  const parts = [];
+  for (const block of content) {
+    if (block?.type !== CLAUDE_BLOCK.TOOL_RESULT) continue;
+    const inner = block.content;
+    if (typeof inner === "string") parts.push(inner);
+    else if (Array.isArray(inner)) parts.push(inner.map((c) => (typeof c === "string" ? c : c?.text || "")).join("\n"));
+  }
+  return parts.join("\n").trim();
+}
+
+// Stringify a Gemini functionResponse payload for classification.
+function coerceToolJson(value) {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "";
+  }
+}
+
+// Responses input blocks (`input_text`/`output_text`/`text`) are not OpenAI
+// `text` blocks, so the shared extractor skips them — read them directly.
+function responsesContentText(content) {
+  if (typeof content === "string") return content.trim();
+  if (!Array.isArray(content)) return "";
+  return content
+    .map((b) => {
+      if (typeof b === "string") return b;
+      const type = b?.type;
+      return type === RESPONSES_ITEM.INPUT_TEXT || type === RESPONSES_ITEM.OUTPUT_TEXT || type === "text" ? b.text || "" : "";
+    })
+    .join("\n")
+    .trim();
+}
+
+// One normalized turn list across OpenAI/Claude/Gemini/Responses shapes. A turn
+// carries `text` (the message's own text) and `toolText` (a tool result's
+// output) separately so each input mode can choose what to read. `role` is
+// "user" | "assistant" | "tool". System/developer turns are dropped — they are
+// not what a profile classifies.
+export function collectTurns(body) {
+  const turns = [];
+
   const messages = Array.isArray(body?.messages) ? body.messages : null;
   if (messages) {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      const msg = messages[i];
-      if (msg?.role !== "user") continue;
-      const text = extractTextContent(msg.content, "\n").trim();
-      if (text) return text;
-      // Claude-style array content may carry non-text blocks only.
-      if (Array.isArray(msg.content)) {
-        const joined = msg.content.map((b) => (typeof b === "string" ? b : b?.text || "")).join("\n").trim();
-        if (joined) return joined;
+    for (const msg of messages) {
+      const role = msg?.role;
+      if (role === "user") {
+        turns.push({ role: "user", text: contentText(msg.content), toolText: claudeToolResultText(msg.content) });
+      } else if (role === "assistant") {
+        turns.push({ role: "assistant", text: contentText(msg.content), toolText: "" });
+      } else if (role === "tool") {
+        turns.push({ role: "tool", text: "", toolText: contentText(msg.content) });
       }
     }
   }
+
   const contents = Array.isArray(body?.contents) ? body.contents : null;
   if (contents) {
-    for (let i = contents.length - 1; i >= 0; i--) {
-      const parts = contents[i]?.parts;
-      if (!Array.isArray(parts)) continue;
+    for (const entry of contents) {
+      const parts = Array.isArray(entry?.parts) ? entry.parts : null;
+      if (!parts) continue;
+      // Gemini labels assistant turns "model"; anything else (or a missing
+      // role) is a user turn. Role-aware on purpose: a trailing model turn is
+      // not the user's prompt.
+      const role = entry?.role === "model" ? "assistant" : "user";
       const text = parts.map((p) => p?.text || "").join("\n").trim();
-      if (text) return text;
+      const toolText = parts
+        .filter((p) => p?.functionResponse)
+        .map((p) => coerceToolJson(p.functionResponse.response ?? p.functionResponse))
+        .join("\n")
+        .trim();
+      turns.push({ role, text, toolText });
     }
   }
+
   const input = Array.isArray(body?.input) ? body.input : null;
   if (input) {
-    for (let i = input.length - 1; i >= 0; i--) {
-      const item = input[i];
-      if (item?.role !== "user") continue;
-      const text = extractTextContent(item.content, "\n").trim();
-      if (text) return text;
-      // Responses input blocks are typed `input_text`, which the shared
-      // extractor (text-only) skips — read them directly here.
-      if (Array.isArray(item.content)) {
-        const joined = item.content
-          .map((b) => (typeof b === "string" ? b : b?.type === "input_text" || b?.type === "text" ? b.text || "" : ""))
-          .join("\n")
-          .trim();
-        if (joined) return joined;
+    for (const item of input) {
+      const type = item?.type;
+      if (type === RESPONSES_ITEM.FUNCTION_CALL_OUTPUT || type === RESPONSES_ITEM.CUSTOM_TOOL_CALL_OUTPUT) {
+        turns.push({ role: "tool", text: "", toolText: coerceResponsesOutput(item.output) });
+        continue;
       }
+      const role = item?.role === "assistant" ? "assistant" : item?.role === "user" ? "user" : null;
+      if (!role) continue;
+      turns.push({ role, text: responsesContentText(item.content), toolText: "" });
     }
+  }
+
+  return turns;
+}
+
+// Keep the newest `maxChars` characters (front-truncate), so the freshest text
+// survives the budget. Returns the input unchanged when it already fits.
+function clampFromFront(text, maxChars) {
+  if (text.length <= maxChars) return text;
+  return text.slice(text.length - maxChars).trimStart();
+}
+
+/**
+ * The request text handed to a profile's decision model, selected by its input
+ * mode (see CLASSIFIER_INPUT_MODES):
+ *   last-user   (default) — the newest user turn's text. Byte-identical to the
+ *                 original single-message extractor, so existing profiles and
+ *                 their decisions are unchanged.
+ *   latest-turn — the newest turn with any text, tool results included.
+ *   tail-window — the last N turns joined (any role), bounded by a turn count
+ *                 and a character budget.
+ * The caller applies the final PROMPT_TEXT_MAX cap.
+ */
+export function extractPromptText(body, options = {}) {
+  const mode = CLASSIFIER_INPUT_MODES.includes(options.mode) ? options.mode : DEFAULT_CLASSIFIER_INPUT_MODE;
+  const turns = collectTurns(body);
+
+  if (mode === "latest-turn") {
+    for (let i = turns.length - 1; i >= 0; i--) {
+      const text = turns[i].text || turns[i].toolText;
+      if (text) return text;
+    }
+    return "";
+  }
+
+  if (mode === "tail-window") {
+    const maxTurns = clampClassifierTailTurns(options.tailTurns) ?? DEFAULT_CLASSIFIER_TAIL_TURNS;
+    const maxChars = clampClassifierTailChars(options.tailChars) ?? DEFAULT_CLASSIFIER_TAIL_CHARS;
+    const picked = [];
+    for (let i = turns.length - 1; i >= 0 && picked.length < maxTurns; i--) {
+      const text = (turns[i].text || turns[i].toolText).trim();
+      if (text) picked.push(text);
+    }
+    picked.reverse();
+    return clampFromFront(picked.join("\n"), maxChars);
+  }
+
+  // last-user (default)
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const turn = turns[i];
+    if (turn.role !== "user") continue;
+    if (turn.text) return turn.text;
   }
   return "";
 }
@@ -158,7 +281,11 @@ export async function classifyWithProfile({ profile, body, log }) {
   let lastError = null;
 
   try {
-    const text = extractPromptText(body).slice(0, PROMPT_TEXT_MAX);
+    const text = extractPromptText(body, {
+      mode: profile?.inputMode,
+      tailTurns: profile?.tailTurns,
+      tailChars: profile?.tailChars,
+    }).slice(0, PROMPT_TEXT_MAX);
     if (!text) return fail("no prompt text");
 
     const questions = buildClassifierQuestions(profile);

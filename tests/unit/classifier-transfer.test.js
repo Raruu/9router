@@ -17,6 +17,9 @@ const PROFILE = {
   timeoutMode: "per-model",
   timeoutMs: 8000,
   mode: "argmax",
+  inputMode: "tail-window",
+  tailTurns: 8,
+  tailChars: 1500,
   questions: [
     { id: "q_low", levels: ["low"], instructions: "simple?" },
     { id: "q_high", levels: ["max", "high"], instructions: "hard?" },
@@ -37,6 +40,9 @@ describe("buildClassifierExport", () => {
     expect(payload.classifier.models).toEqual([{ model: "oc/jev-1.13-free", timeoutMs: 5000 }]);
     expect(payload.classifier.timeoutMode).toBe("per-model");
     expect(payload.classifier.fallbackLevel).toBe("high");
+    expect(payload.classifier.inputMode).toBe("tail-window");
+    expect(payload.classifier.tailTurns).toBe(8);
+    expect(payload.classifier.tailChars).toBe(1500);
     // Routing state and install-local identity must not travel in a file.
     expect("id" in payload.classifier).toBe(false);
     expect("isActive" in payload.classifier).toBe(false);
@@ -70,6 +76,35 @@ describe("parseClassifierImport", () => {
     expect(classifier.mode).toBe("argmax");
     expect(classifier.questions).toHaveLength(2);
     expect(classifier.fallbackLevel).toBe("high");
+    expect(classifier.inputMode).toBe("tail-window");
+    expect(classifier.tailTurns).toBe(8);
+    expect(classifier.tailChars).toBe(1500);
+  });
+
+  it("defaults the input mode when a file omits it", () => {
+    const { classifier } = parseClassifierImport(JSON.stringify({
+      name: "bare",
+      models: ["oc/a"],
+      mode: "argmax",
+      questions: [{ id: "q", levels: ["low"] }],
+    }));
+    expect(classifier.inputMode).toBe("last-user");
+    expect(classifier.tailTurns).toBe(6);
+    expect(classifier.tailChars).toBe(2000);
+  });
+
+  it("clamps an out-of-range tail window from a file", () => {
+    const { classifier } = parseClassifierImport(JSON.stringify({
+      name: "bare",
+      models: ["oc/a"],
+      mode: "argmax",
+      inputMode: "tail-window",
+      tailTurns: 999,
+      tailChars: 1,
+      questions: [{ id: "q", levels: ["low"] }],
+    }));
+    expect(classifier.tailTurns).toBe(20);
+    expect(classifier.tailChars).toBe(200);
   });
 
   it("accepts a bare classifier object", () => {

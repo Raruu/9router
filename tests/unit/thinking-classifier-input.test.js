@@ -51,6 +51,25 @@ describe("normalizeClassifierInput", () => {
     expect(normalizeClassifierInput({ name: "tier", model: "m", timeoutMode: "bogus" }).value.timeoutMode).toBe("uniform");
   });
 
+  it("defaults the input mode and tail window", () => {
+    const { value } = normalizeClassifierInput({ name: "tier", model: "m" });
+    expect(value.inputMode).toBe("last-user");
+    expect(value.tailTurns).toBe(6);
+    expect(value.tailChars).toBe(2000);
+  });
+
+  it("accepts a known input mode and rejects an unknown one", () => {
+    expect(normalizeClassifierInput({ name: "tier", model: "m", inputMode: "tail-window" }).value.inputMode).toBe("tail-window");
+    expect(normalizeClassifierInput({ name: "tier", model: "m", inputMode: "latest-turn" }).value.inputMode).toBe("latest-turn");
+    expect(normalizeClassifierInput({ name: "tier", model: "m", inputMode: "bogus" }).value.inputMode).toBe("last-user");
+  });
+
+  it("clamps the tail window bounds", () => {
+    expect(normalizeClassifierInput({ name: "tier", model: "m", tailTurns: 999, tailChars: 1 }).value).toMatchObject({ tailTurns: 20, tailChars: 200 });
+    expect(normalizeClassifierInput({ name: "tier", model: "m", tailTurns: 0, tailChars: 99999 }).value).toMatchObject({ tailTurns: 1, tailChars: 4000 });
+    expect(normalizeClassifierInput({ name: "tier", model: "m", tailTurns: "x", tailChars: "y" }).value).toMatchObject({ tailTurns: 6, tailChars: 2000 });
+  });
+
   it("rejects reserved and malformed names", () => {
     expect(normalizeClassifierInput({ name: "max", model: "m" }).error).toContain("reserved");
     expect(normalizeClassifierInput({ name: "Bad Name", model: "m" }).error).toBeTruthy();
