@@ -31,6 +31,8 @@ export async function POST(request, { params }) {
       level: result.levels[0] || null,
       levels: result.levels,
       answers: result.answers,
+      usedModel: result.usedModel,
+      attempts: result.attempts,
       latencyMs: result.latencyMs,
       error: result.error,
     });

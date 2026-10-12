@@ -15,6 +15,40 @@ describe("normalizeClassifierInput", () => {
     expect(value.questions.length).toBeGreaterThan(0);
     expect(value.fallbackLevel).toBe("medium");
     expect(value.timeoutMs).toBe(10000);
+    // Legacy single `model` upgrades to a one-entry fallback list.
+    expect(value.models).toEqual([{ model: "oc/jev-1.13-free", timeoutMs: 10000 }]);
+    expect(value.timeoutMode).toBe("uniform");
+  });
+
+  it("normalizes a model list in order, deduped and capped", () => {
+    const { value } = normalizeClassifierInput({
+      name: "tier",
+      models: [
+        { model: "oc/a" },
+        "oc/b",
+        { model: "oc/a" },
+        { model: "oc/c", timeoutMs: 2500 },
+      ],
+    });
+    expect(value.models).toEqual([
+      { model: "oc/a", timeoutMs: 10000 },
+      { model: "oc/b", timeoutMs: 10000 },
+      { model: "oc/c", timeoutMs: 2500 },
+    ]);
+  });
+
+  it("caps the list and clamps each entry's timeout", () => {
+    const { value } = normalizeClassifierInput({
+      name: "tier",
+      models: Array.from({ length: 20 }, (_, i) => ({ model: `oc/m${i}`, timeoutMs: 999999 })),
+    });
+    expect(value.models).toHaveLength(8);
+    expect(value.models[0].timeoutMs).toBe(60000);
+  });
+
+  it("carries the timeout mode", () => {
+    expect(normalizeClassifierInput({ name: "tier", model: "m", timeoutMode: "per-model" }).value.timeoutMode).toBe("per-model");
+    expect(normalizeClassifierInput({ name: "tier", model: "m", timeoutMode: "bogus" }).value.timeoutMode).toBe("uniform");
   });
 
   it("rejects reserved and malformed names", () => {
@@ -23,8 +57,10 @@ describe("normalizeClassifierInput", () => {
     expect(normalizeClassifierInput({ model: "m" }).error).toBe("Name is required");
   });
 
-  it("requires a classifier model", () => {
+  it("requires at least one classifier model", () => {
     expect(normalizeClassifierInput({ name: "tier" }).error).toContain("model");
+    expect(normalizeClassifierInput({ name: "tier", models: [] }).error).toContain("model");
+    expect(normalizeClassifierInput({ name: "tier", models: [{ model: "  " }] }).error).toContain("model");
   });
 
   it("drops unknown fields and normalizes level chains", () => {

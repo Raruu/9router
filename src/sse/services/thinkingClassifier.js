@@ -24,6 +24,7 @@ import {
   resolveClassifierLevel,
   resolveClassifierScores,
   pickFirstSupported,
+  profileModels,
   DEFAULT_CLASSIFIER_TIMEOUT_MS,
   DEFAULT_CLASSIFIER_FALLBACK_LEVEL,
   CLASSIFIER_FALLBACK_LEVELS,
@@ -131,16 +132,29 @@ export function extractPromptText(body) {
 /**
  * Run one classifier profile over the request's prompt text.
  *
- * Fail-open by contract: any error (missing credentials, upstream failure,
- * timeout, unusable answers) resolves to `{ levels: [] }` and the caller
- * falls back to the profile's fallbackLevel. Never throws, never locks the
- * classifier account (a classifier call must not degrade routing health).
+ * The profile's models are tried IN ORDER as fallbacks: the first model that
+ * returns usable answers wins. A model that cannot be routed (a combo name, a
+ * typo), has no available account, errors, times out, or answers nothing usable
+ * simply advances to the next. Each attempt gets its own timeout budget.
  *
- * @returns {Promise<{ levels: string[], answers: object|null, latencyMs: number, error: string|null }>}
+ * Fail-open by contract: when every model fails this resolves to
+ * `{ levels: [], scores: [] }` and the caller falls back to the profile's
+ * fallbackLevel. Never throws, never locks a classifier account (a classifier
+ * call must not degrade routing health).
+ *
+ * @returns {Promise<{ levels: string[], scores: {level:string,score:number}[], answers: object|null, usedModel: string|null, attempts: number, latencyMs: number, error: string|null }>}
  */
 export async function classifyWithProfile({ profile, body, log }) {
   const startedAt = Date.now();
-  const fail = (error) => ({ levels: [], scores: [], answers: null, latencyMs: Date.now() - startedAt, error });
+  const models = profileModels(profile);
+  const fail = (error) => ({
+    levels: [], scores: [], answers: null, usedModel: null,
+    attempts: 0, latencyMs: Date.now() - startedAt, error,
+  });
+  if (models.length === 0) return fail("profile has no model");
+
+  let attempts = 0;
+  let lastError = null;
 
   try {
     const text = extractPromptText(body).slice(0, PROMPT_TEXT_MAX);
@@ -149,47 +163,80 @@ export async function classifyWithProfile({ profile, body, log }) {
     const questions = buildClassifierQuestions(profile);
     if (!questions) return fail("profile has no questions");
 
-    const modelInfo = await getModelInfo(profile.model);
-    if (!modelInfo?.provider) return fail(`invalid classifier model: ${profile.model}`);
+    for (const entry of models) {
+      const modelStr = entry.model;
+      const timeoutMs = Number.isFinite(entry.timeoutMs) ? entry.timeoutMs : DEFAULT_CLASSIFIER_TIMEOUT_MS;
+      attempts += 1;
+      try {
+        const modelInfo = await getModelInfo(modelStr);
+        if (!modelInfo?.provider) {
+          // A combo name or an unresolvable id — nothing to route.
+          lastError = `invalid classifier model: ${modelStr}`;
+          continue;
+        }
 
-    const credentials = await getProviderCredentials(modelInfo.provider, null, modelInfo.model);
-    if (!credentials || credentials.allRateLimited) return fail("classifier account unavailable");
+        const credentials = await getProviderCredentials(modelInfo.provider, null, modelInfo.model);
+        if (!credentials || credentials.allRateLimited) {
+          lastError = `${modelStr}: account unavailable`;
+          continue;
+        }
 
-    const refreshed = await checkAndRefreshToken(modelInfo.provider, credentials);
+        const refreshed = await checkAndRefreshToken(modelInfo.provider, credentials);
 
-    const result = await handleSystemoneCore({
-      body: { model: profile.model, state: text, questions },
-      modelInfo,
-      credentials: refreshed,
-      log,
-      timeoutMs: Number.isFinite(profile.timeoutMs) ? profile.timeoutMs : DEFAULT_CLASSIFIER_TIMEOUT_MS,
-    });
+        const result = await handleSystemoneCore({
+          body: { model: modelStr, state: text, questions },
+          modelInfo,
+          credentials: refreshed,
+          log,
+          timeoutMs,
+        });
 
-    if (!result?.success) return fail(result?.error || "classifier request failed");
+        if (!result?.success) {
+          lastError = `${modelStr}: ${result?.error || "request failed"}`;
+          continue;
+        }
 
-    const json = await result.response.json().catch(() => null);
-    const answers = json?.answers || null;
-    const levels = resolveClassifierLevel(profile, answers);
-    // Per-question scores for Usage → Details; the winner leads the list.
-    const scores = resolveClassifierScores(profile, answers);
+        const json = await result.response.json().catch(() => null);
+        const answers = json?.answers || null;
+        const levels = resolveClassifierLevel(profile, answers);
+        // Per-question scores for Usage → Details; the winner leads the list.
+        const scores = resolveClassifierScores(profile, answers);
 
-    // Cost stays visible in Usage; endpoint tags it as internal so it is not
-    // mistaken for client traffic.
-    const usage = result.usage;
-    if (usage && (usage.prompt_tokens || usage.completion_tokens)) {
-      saveRequestUsage({
-        provider: modelInfo.provider,
-        model: modelInfo.model,
-        tokens: usage,
-        connectionId: credentials.connectionId,
-        endpoint: "/internal/thinking-classifier",
-        status: levels.length > 0 ? "success" : "error",
-      }).catch(() => {});
+        // Cost stays visible in Usage; endpoint tags it as internal so it is not
+        // mistaken for client traffic. Recorded even on an unusable answer — the
+        // call was billed.
+        const usage = result.usage;
+        if (usage && (usage.prompt_tokens || usage.completion_tokens)) {
+          saveRequestUsage({
+            provider: modelInfo.provider,
+            model: modelInfo.model,
+            tokens: usage,
+            connectionId: credentials.connectionId,
+            endpoint: "/internal/thinking-classifier",
+            status: levels.length > 0 ? "success" : "error",
+          }).catch(() => {});
+        }
+
+        if (levels.length === 0) {
+          lastError = `${modelStr}: no usable answer`;
+          continue;
+        }
+
+        return {
+          levels, scores, answers, usedModel: modelStr, attempts,
+          latencyMs: Date.now() - startedAt, error: null,
+        };
+      } catch (error) {
+        // A single model's failure (timeout, network, provider throw) must not
+        // abort the fallback chain.
+        lastError = `${modelStr}: ${error?.message || String(error)}`;
+        continue;
+      }
     }
 
-    return { levels, scores, answers, latencyMs: Date.now() - startedAt, error: levels.length > 0 ? null : "no usable answer" };
+    return { ...fail(lastError || "no usable answer"), attempts };
   } catch (error) {
-    return fail(error?.message || String(error));
+    return { ...fail(error?.message || String(error)), attempts };
   }
 }
 
@@ -247,7 +294,7 @@ export async function resolveTargetLevels(target) {
  * @param {object|null} log
  * @param {{ modelStr?: string, comboModels?: string[]|null }} [target] - the
  *   requested target, used to resolve its supported thinking levels.
- * @returns {Promise<{ profile: string, requested: string, level: string, candidates: string[], scores: {level:string,score:number}[], fallback: boolean, latencyMs: number }|null>}
+ * @returns {Promise<{ profile: string, requested: string, level: string, candidates: string[], scores: {level:string,score:number}[], usedModel: string|null, fallback: boolean, latencyMs: number }|null>}
  */
 export async function applyThinkingClassifier(body, log, target = null) {
   const resolved = await resolveClassifierRequest(body);
@@ -263,9 +310,10 @@ export async function applyThinkingClassifier(body, log, target = null) {
 
   writeEffortField(body, field, level);
 
+  const via = result.usedModel ? ` via ${result.usedModel}` : "";
   const note = fallback
     ? `classifier failed (${result.error}) → fallback ${level}`
-    : `→ ${level}${result.levels.length > 1 ? ` (from ${result.levels.join(",")})` : ""}`;
+    : `→ ${level}${result.levels.length > 1 ? ` (from ${result.levels.join(",")})` : ""}${via}`;
   log?.info?.("CLASSIFIER", `system one (${profile.name}) ${note} · ${result.latencyMs}ms`);
 
   return {
@@ -274,6 +322,7 @@ export async function applyThinkingClassifier(body, log, target = null) {
     level,
     candidates: result.levels,
     scores: result.scores,
+    usedModel: result.usedModel,
     fallback,
     latencyMs: result.latencyMs,
   };

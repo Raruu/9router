@@ -31,7 +31,6 @@ vi.mock("../../src/sse/services/model.js", () => ({
     return { provider, model: rest.join("/") };
   }),
 }));
-
 vi.mock("open-sse/providers/thinkingLevels.js", () => ({
   getThinkingLevels: vi.fn((provider, model) => mocks.levelsByModel[`${provider}/${model}`] ?? mocks.supportedLevels),
 }));
@@ -62,12 +61,14 @@ vi.mock("../../src/sse/utils/logger.js", () => ({
 
 const { applyThinkingClassifier } = await import("../../src/sse/services/thinkingClassifier.js");
 const { withClassifierTiers } = await import("open-sse/providers/comboCapabilities.js");
+const { getModelInfo } = await import("../../src/sse/services/model.js");
 
 const PROFILE = {
   id: "p1",
   name: "laya",
   isActive: true,
-  model: "oc/jev-1.13-free",
+  models: [{ model: "oc/jev-1.13-free", timeoutMs: 5000 }],
+  timeoutMode: "uniform",
   mode: "argmax",
   questions: [
     { id: "q_low", levels: ["low"], instructions: "simple?" },
@@ -92,11 +93,17 @@ beforeEach(() => {
   mocks.comboModels = null;
   mocks.handleSystemoneCore.mockReset();
   mocks.handleSystemoneCore.mockImplementation(async () => mocks.systemoneResult);
+  // Default router: split "prefix/model". Individual tests override with
+  // mockImplementationOnce; reset so a leftover queued impl can't leak.
+  getModelInfo.mockReset();
+  getModelInfo.mockImplementation(async (modelStr) => {
+    const [provider, ...rest] = modelStr.split("/");
+    return { provider, model: rest.join("/") };
+  });
   mocks.saveRequestUsage.mockReset();
   // Production awaits/catches this — the mock must return a promise.
   mocks.saveRequestUsage.mockImplementation(async () => {});
 });
-
 describe("applyThinkingClassifier", () => {
   it("is a no-op when the client sends no effort at all", async () => {
     const body = { messages: [{ role: "user", content: "hello" }] };
@@ -246,6 +253,106 @@ describe("applyThinkingClassifier", () => {
     const body = { reasoning_effort: "laya" };
     expect(await applyThinkingClassifier(body, null)).toBeNull();
     expect(body.reasoning_effort).toBe("laya");
+  });
+});
+
+// The profile's models are fallbacks tried in order: the first model that
+// returns a usable decision wins; every other outcome advances to the next.
+describe("model fallback chain", () => {
+  const withModels = (models, timeoutMode = "uniform") => ({
+    ...PROFILE,
+    models,
+    timeoutMode,
+  });
+
+  it("uses the first model when it succeeds", async () => {
+    mocks.profile = withModels([{ model: "oc/first" }, { model: "oc/second" }]);
+    const body = { reasoning_effort: "laya", messages: [{ role: "user", content: "hi" }] };
+    const decision = await applyThinkingClassifier(body, null);
+    expect(decision.usedModel).toBe("oc/first");
+    expect(mocks.handleSystemoneCore).toHaveBeenCalledTimes(1);
+  });
+
+  it("advances to the next model when one fails", async () => {
+    mocks.profile = withModels([{ model: "oc/first" }, { model: "oc/second" }]);
+    mocks.handleSystemoneCore
+      .mockImplementationOnce(async () => ({ success: false, status: 502, error: "down" }))
+      .mockImplementationOnce(async () => mocks.systemoneResult);
+    const body = { reasoning_effort: "laya", messages: [{ role: "user", content: "hi" }] };
+    const decision = await applyThinkingClassifier(body, null);
+    expect(decision.usedModel).toBe("oc/second");
+    expect(decision.fallback).toBe(false);
+    expect(mocks.handleSystemoneCore).toHaveBeenCalledTimes(2);
+  });
+
+  it("advances when a model throws", async () => {
+    mocks.profile = withModels([{ model: "oc/first" }, { model: "oc/second" }]);
+    mocks.handleSystemoneCore
+      .mockImplementationOnce(async () => { throw new Error("timeout"); })
+      .mockImplementationOnce(async () => mocks.systemoneResult);
+    const body = { reasoning_effort: "laya", messages: [{ role: "user", content: "hi" }] };
+    const decision = await applyThinkingClassifier(body, null);
+    expect(decision.usedModel).toBe("oc/second");
+  });
+
+  it("advances when a model answers nothing usable", async () => {
+    mocks.profile = withModels([{ model: "oc/first" }, { model: "oc/second" }]);
+    mocks.handleSystemoneCore
+      .mockImplementationOnce(async () => OK_ANSWERS({}))
+      .mockImplementationOnce(async () => mocks.systemoneResult);
+    const body = { reasoning_effort: "laya", messages: [{ role: "user", content: "hi" }] };
+    const decision = await applyThinkingClassifier(body, null);
+    expect(decision.usedModel).toBe("oc/second");
+    expect(decision.fallback).toBe(false);
+  });
+
+  it("skips an entry that cannot be routed (a combo name or typo)", async () => {
+    getModelInfo.mockImplementationOnce(async () => ({ provider: null, model: "some-combo" }));
+    mocks.profile = withModels([{ model: "some-combo" }, { model: "oc/second" }]);
+    const body = { reasoning_effort: "laya", messages: [{ role: "user", content: "hi" }] };
+    const decision = await applyThinkingClassifier(body, null);
+    expect(decision.usedModel).toBe("oc/second");
+    // The unroutable entry never reached the upstream call.
+    expect(mocks.handleSystemoneCore).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to fallbackLevel when every model fails", async () => {
+    mocks.profile = withModels([{ model: "oc/first" }, { model: "oc/second" }]);
+    mocks.handleSystemoneCore.mockImplementation(async () => ({ success: false, error: "down" }));
+    const body = { reasoning_effort: "laya", messages: [{ role: "user", content: "hi" }] };
+    const decision = await applyThinkingClassifier(body, null);
+    expect(decision.fallback).toBe(true);
+    expect(decision.level).toBe("medium");
+    expect(body.reasoning_effort).toBe("medium");
+    expect(mocks.handleSystemoneCore).toHaveBeenCalledTimes(2);
+  });
+
+  it("passes each entry's own timeout in per-model mode", async () => {
+    mocks.profile = withModels(
+      [{ model: "oc/first", timeoutMs: 2000 }, { model: "oc/second", timeoutMs: 4500 }],
+      "per-model",
+    );
+    mocks.handleSystemoneCore.mockImplementation(async () => ({ success: false, error: "down" }));
+    const body = { reasoning_effort: "laya", messages: [{ role: "user", content: "hi" }] };
+    await applyThinkingClassifier(body, null);
+    expect(mocks.handleSystemoneCore.mock.calls[0][0].timeoutMs).toBe(2000);
+    expect(mocks.handleSystemoneCore.mock.calls[1][0].timeoutMs).toBe(4500);
+  });
+
+  it("applies the shared timeout to every attempt in uniform mode", async () => {
+    mocks.profile = withModels([{ model: "oc/first" }, { model: "oc/second" }], "uniform");
+    mocks.handleSystemoneCore.mockImplementation(async () => ({ success: false, error: "down" }));
+    const body = { reasoning_effort: "laya", messages: [{ role: "user", content: "hi" }] };
+    await applyThinkingClassifier(body, null);
+    expect(mocks.handleSystemoneCore.mock.calls[0][0].timeoutMs).toBe(5000);
+    expect(mocks.handleSystemoneCore.mock.calls[1][0].timeoutMs).toBe(5000);
+  });
+
+  it("reads the legacy single-model shape", async () => {
+    mocks.profile = { ...PROFILE, models: undefined, model: "oc/legacy" };
+    const body = { reasoning_effort: "laya", messages: [{ role: "user", content: "hi" }] };
+    const decision = await applyThinkingClassifier(body, null);
+    expect(decision.usedModel).toBe("oc/legacy");
   });
 });
 

@@ -35,6 +35,68 @@ export const MIN_CLASSIFIER_TIMEOUT_MS = 1000;
 export const MAX_CLASSIFIER_TIMEOUT_MS = 60000;
 export const DEFAULT_CLASSIFIER_FALLBACK_LEVEL = "medium";
 
+// How per-model timeouts are configured:
+//   uniform   — one timeout value shared by every attempt
+//   per-model — each model entry carries its own timeout
+export const CLASSIFIER_TIMEOUT_MODES = Object.freeze(["uniform", "per-model"]);
+export const DEFAULT_CLASSIFIER_TIMEOUT_MODE = "uniform";
+// A profile tries its models in order as fallbacks; this caps the list.
+export const MAX_CLASSIFIER_MODELS = 8;
+
+// Clamp a timeout to the accepted range, or null when not a finite number.
+export function clampClassifierTimeout(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.min(MAX_CLASSIFIER_TIMEOUT_MS, Math.max(MIN_CLASSIFIER_TIMEOUT_MS, Math.round(n)));
+}
+
+// Normalize a profile's model list into `[{ model, timeoutMs }]`, tried in
+// order as fallbacks. Accepts:
+//   - the current shape: array of { model, timeoutMs } or bare "provider/model"
+//   - the legacy shape: a single `model` string (one entry)
+// Entries without a usable timeout inherit `fallbackTimeoutMs`. Duplicates are
+// dropped (first wins) and the list is capped. Returns [] when nothing usable.
+export function normalizeClassifierModels(input, fallbackTimeoutMs = DEFAULT_CLASSIFIER_TIMEOUT_MS) {
+  const raw = Array.isArray(input)
+    ? input
+    : typeof input === "string"
+      ? [input]
+      : [];
+  const seen = new Set();
+  const out = [];
+  for (const entry of raw) {
+    const model = typeof entry === "string"
+      ? entry.trim()
+      : typeof entry?.model === "string"
+        ? entry.model.trim()
+        : "";
+    if (!model || seen.has(model)) continue;
+    seen.add(model);
+    const timeout = clampClassifierTimeout(typeof entry === "object" ? entry?.timeoutMs : undefined);
+    out.push({ model, timeoutMs: timeout ?? clampClassifierTimeout(fallbackTimeoutMs) ?? DEFAULT_CLASSIFIER_TIMEOUT_MS });
+    if (out.length >= MAX_CLASSIFIER_MODELS) break;
+  }
+  return out;
+}
+
+// A stored profile's model list. Reads `models` (current shape) and falls back
+// to the legacy single `model` string, so profiles created before the fallback
+// list keep working without a data migration. In "uniform" mode every entry
+// reports the profile-level timeout, so the engine reads one shape either way.
+export function profileModels(profile) {
+  if (!profile || typeof profile !== "object") return [];
+  const fallback = clampClassifierTimeout(profile.timeoutMs) ?? DEFAULT_CLASSIFIER_TIMEOUT_MS;
+  const perModel = profile.timeoutMode === "per-model";
+  let models = [];
+  if (profile.models !== undefined) {
+    models = normalizeClassifierModels(profile.models, fallback);
+  } else if (typeof profile.model === "string" && profile.model.trim()) {
+    models = normalizeClassifierModels([{ model: profile.model, timeoutMs: fallback }], fallback);
+  }
+  if (perModel) return models;
+  return models.map((entry) => ({ model: entry.model, timeoutMs: fallback }));
+}
+
 // Parse a comma-separated level chain ("high,xhigh" → ["high","xhigh"]).
 // Accepts an array too, so a stored profile round-trips unchanged. Trims,
 // lowercases, dedupes, drops empties and caps length — no value validation.
@@ -121,7 +183,8 @@ export const GENERIC_THRESHOLD_CUTS = Object.freeze([
 // The template a brand-new profile starts from ("generic" prompt handling).
 export function genericClassifierTemplate() {
   return {
-    model: "oc/jev-1.13-free",
+    models: [{ model: "oc/jev-1.13-free", timeoutMs: DEFAULT_CLASSIFIER_TIMEOUT_MS }],
+    timeoutMode: DEFAULT_CLASSIFIER_TIMEOUT_MODE,
     mode: "argmax",
     questions: GENERIC_ARGMAX_QUESTIONS.map((q) => ({ ...q, levels: [...q.levels] })),
     threshold: {

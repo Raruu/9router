@@ -36,7 +36,7 @@ describe("thinkingClassifiers table", () => {
 
 describe("thinkingClassifiersRepo", () => {
   it("creates a profile seeded from the generic template", async () => {
-    const created = await db.createThinkingClassifier({ name: "generic", model: "oc/jev-1.13-free" });
+    const created = await db.createThinkingClassifier({ name: "generic", models: [{ model: "oc/jev-1.13-free" }] });
     expect(created.id).toBeTruthy();
     expect(created.name).toBe("generic");
     expect(created.isActive).toBe(true);
@@ -44,10 +44,11 @@ describe("thinkingClassifiersRepo", () => {
     expect(Array.isArray(created.questions)).toBe(true);
     expect(created.questions.length).toBeGreaterThan(0);
     expect(created.fallbackLevel).toBe("medium");
+    expect(created.models[0].model).toBe("oc/jev-1.13-free");
   });
 
   it("lists profiles in creation order and resolves by id/name", async () => {
-    await db.createThinkingClassifier({ name: "laya", model: "oc/jev-1.13-free" });
+    await db.createThinkingClassifier({ name: "laya", models: [{ model: "oc/jev-1.13-free" }] });
     const all = await db.getThinkingClassifiers();
     expect(all.map((c) => c.name)).toEqual(["generic", "laya"]);
 
@@ -68,7 +69,7 @@ describe("thinkingClassifiersRepo", () => {
   });
 
   it("enforces name uniqueness at the DB level", async () => {
-    await expect(db.createThinkingClassifier({ name: "generic", model: "oc/jev-1.13-free" })).rejects.toThrow();
+    await expect(db.createThinkingClassifier({ name: "generic", models: [{ model: "oc/jev-1.13-free" }] })).rejects.toThrow();
   });
 
   it("deletes a profile", async () => {
@@ -79,7 +80,7 @@ describe("thinkingClassifiersRepo", () => {
   });
 
   it("round-trips through exportDb/importDb", async () => {
-    await db.createThinkingClassifier({ name: "roundtrip", model: "oc/jev-1.13-free", fallbackLevel: "high" });
+    await db.createThinkingClassifier({ name: "roundtrip", models: [{ model: "oc/jev-1.13-free" }], fallbackLevel: "high" });
     const dump = await db.exportDb();
     expect(Array.isArray(dump.thinkingClassifiers)).toBe(true);
     const exported = dump.thinkingClassifiers.find((c) => c.name === "roundtrip");
@@ -89,6 +90,6 @@ describe("thinkingClassifiersRepo", () => {
     await db.importDb(dump);
     const restored = await db.getThinkingClassifierByName("roundtrip");
     expect(restored.fallbackLevel).toBe("high");
-    expect(restored.model).toBe("oc/jev-1.13-free");
+    expect(restored.models[0].model).toBe("oc/jev-1.13-free");
   });
 });

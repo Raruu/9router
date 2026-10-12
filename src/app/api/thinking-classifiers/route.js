@@ -8,14 +8,15 @@ import {
   validateClassifierName,
   CLASSIFIER_MODES,
   CLASSIFIER_FALLBACK_LEVELS,
+  CLASSIFIER_TIMEOUT_MODES,
   DEFAULT_CLASSIFIER_TIMEOUT_MS,
-  MIN_CLASSIFIER_TIMEOUT_MS,
-  MAX_CLASSIFIER_TIMEOUT_MS,
+  DEFAULT_CLASSIFIER_TIMEOUT_MODE,
   GENERIC_ARGMAX_QUESTIONS,
   GENERIC_THRESHOLD_QUESTION,
   GENERIC_THRESHOLD_CUTS,
-  parseLevelList,
   questionLevels,
+  clampClassifierTimeout,
+  normalizeClassifierModels,
 } from "@/shared/constants/thinkingClassifier.js";
 
 // Validate a create/update payload. Unknown fields are dropped rather than
@@ -24,8 +25,18 @@ export function normalizeClassifierInput(body = {}) {
   const nameCheck = validateClassifierName(body.name);
   if (!nameCheck.ok) return { error: nameCheck.error };
 
-  const model = typeof body.model === "string" ? body.model.trim() : "";
-  if (!model) return { error: "Classifier model is required" };
+  const timeout = clampClassifierTimeout(body.timeoutMs);
+  const timeoutMs = timeout ?? DEFAULT_CLASSIFIER_TIMEOUT_MS;
+  const timeoutMode = CLASSIFIER_TIMEOUT_MODES.includes(body.timeoutMode)
+    ? body.timeoutMode
+    : DEFAULT_CLASSIFIER_TIMEOUT_MODE;
+  // Accepts the model list or the legacy single `model` string; entries inherit
+  // the profile timeout when they carry none.
+  const models = normalizeClassifierModels(
+    body.models !== undefined ? body.models : body.model,
+    timeoutMs,
+  );
+  if (models.length === 0) return { error: "Classifier model is required" };
 
   const mode = CLASSIFIER_MODES.includes(body.mode) ? body.mode : "argmax";
 
@@ -53,16 +64,12 @@ export function normalizeClassifierInput(body = {}) {
     return { error: "Threshold mode needs at least one cut with a level" };
   }
 
-  const timeout = Number(body.timeoutMs);
-  const timeoutMs = Number.isFinite(timeout)
-    ? Math.min(MAX_CLASSIFIER_TIMEOUT_MS, Math.max(MIN_CLASSIFIER_TIMEOUT_MS, Math.round(timeout)))
-    : DEFAULT_CLASSIFIER_TIMEOUT_MS;
-
   return {
     value: {
       name: nameCheck.value,
       isActive: body.isActive !== false,
-      model,
+      models,
+      timeoutMode,
       mode,
       questions,
       threshold: {

@@ -5,12 +5,17 @@ import { Button, Input, Modal, Select, Toggle } from "@/shared/components";
 import {
   CLASSIFIER_FALLBACK_LEVELS,
   CLASSIFIER_MODES,
+  CLASSIFIER_TIMEOUT_MODES,
   DEFAULT_CLASSIFIER_TIMEOUT_MS,
+  DEFAULT_CLASSIFIER_TIMEOUT_MODE,
   GENERIC_ARGMAX_QUESTIONS,
   GENERIC_THRESHOLD_QUESTION,
   GENERIC_THRESHOLD_CUTS,
+  MAX_CLASSIFIER_MODELS,
   MAX_CLASSIFIER_TIMEOUT_MS,
   MIN_CLASSIFIER_TIMEOUT_MS,
+  clampClassifierTimeout,
+  normalizeClassifierModels,
   parseLevelList,
   questionLevels,
 } from "@/shared/constants/thinkingClassifier";
@@ -18,6 +23,15 @@ import {
 // Editable form state seeded from a profile (or the generic template).
 export function classifierToForm(classifier = {}) {
   const mode = CLASSIFIER_MODES.includes(classifier.mode) ? classifier.mode : "argmax";
+  const timeoutMs = clampClassifierTimeout(classifier.timeoutMs) ?? DEFAULT_CLASSIFIER_TIMEOUT_MS;
+  // One row per model, tried in order as fallbacks.
+  const models = (() => {
+    const list = normalizeClassifierModels(
+      classifier.models !== undefined ? classifier.models : classifier.model,
+      timeoutMs,
+    );
+    return list.length > 0 ? list : [{ model: "", timeoutMs }];
+  })();
   const questions = Array.isArray(classifier.questions) && classifier.questions.length > 0
     ? classifier.questions.map((q) => ({
         id: q.id || "",
@@ -41,13 +55,16 @@ export function classifierToForm(classifier = {}) {
       };
   return {
     name: classifier.name || "",
-    model: classifier.model || "",
+    models,
+    timeoutMode: CLASSIFIER_TIMEOUT_MODES.includes(classifier.timeoutMode)
+      ? classifier.timeoutMode
+      : DEFAULT_CLASSIFIER_TIMEOUT_MODE,
     mode,
     isActive: classifier.isActive !== false,
     questions,
     threshold,
     fallbackLevel: CLASSIFIER_FALLBACK_LEVELS.includes(classifier.fallbackLevel) ? classifier.fallbackLevel : "medium",
-    timeoutMs: Number.isFinite(classifier.timeoutMs) ? classifier.timeoutMs : DEFAULT_CLASSIFIER_TIMEOUT_MS,
+    timeoutMs,
   };
 }
 
@@ -63,6 +80,7 @@ export default function ClassifierFormModal({
   onPickModel,
 }) {
   const set = (patch) => onChange({ ...form, ...patch });
+  const perModelTimeout = form.timeoutMode === "per-model";
 
   const setQuestion = (index, patch) => {
     set({ questions: form.questions.map((q, i) => (i === index ? { ...q, ...patch } : q)) });
@@ -77,9 +95,35 @@ export default function ClassifierFormModal({
     });
   };
 
+  const setModelRow = (index, patch) => {
+    set({ models: form.models.map((m, i) => (i === index ? { ...m, ...patch } : m)) });
+  };
+
+  const addModelRow = (model) => {
+    const value = typeof model === "string" ? model : model?.value;
+    if (!value) return;
+    set({ models: normalizeClassifierModels([...form.models, { model: value, timeoutMs: form.timeoutMs }], form.timeoutMs) });
+  };
+
+  const removeModelRow = (index) => {
+    const next = form.models.filter((_, i) => i !== index);
+    set({ models: next.length > 0 ? next : [{ model: "", timeoutMs: form.timeoutMs }] });
+  };
+
+  const moveModelRow = (index, delta) => {
+    const target = index + delta;
+    if (target < 0 || target >= form.models.length) return;
+    const next = [...form.models];
+    [next[index], next[target]] = [next[target], next[index]];
+    set({ models: next });
+  };
+
   const payload = useMemo(() => ({
     name: form.name.trim(),
-    model: form.model,
+    models: form.models
+      .map((m) => ({ model: String(m.model || "").trim(), timeoutMs: Number(m.timeoutMs) || form.timeoutMs }))
+      .filter((m) => m.model),
+    timeoutMode: form.timeoutMode,
     mode: form.mode,
     isActive: form.isActive,
     questions: form.questions.map((q) => ({
@@ -107,34 +151,71 @@ export default function ClassifierFormModal({
       footer={
         <>
           <Button variant="ghost" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button onClick={() => onSave(payload)} loading={saving} disabled={!payload.name || !payload.model}>
+          <Button onClick={() => onSave(payload)} loading={saving} disabled={!payload.name || payload.models.length === 0}>
             Save
           </Button>
         </>
       }
     >
       <div className="flex flex-col gap-5 max-h-[70vh] overflow-y-auto pr-1">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Input
-            label="Tier name"
-            required
-            placeholder="generic"
-            value={form.name}
-            onChange={(e) => set({ name: e.target.value })}
-            hint="Lowercase letters, digits, - or _. Clients send this as their effort value."
-          />
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-text-main">Classifier model</label>
-            <div className="flex gap-2">
-              <Input
-                value={form.model}
-                onChange={(e) => set({ model: e.target.value })}
-                placeholder="oc/jev-1.13-free"
-                className="flex-1"
-              />
-              <Button variant="secondary" onClick={onPickModel} className="shrink-0">Pick</Button>
+        <Input
+          label="Tier name"
+          required
+          placeholder="generic"
+          value={form.name}
+          onChange={(e) => set({ name: e.target.value })}
+          hint="Lowercase letters, digits, - or _. Clients send this as their effort value."
+        />
+
+        <div className="flex flex-col gap-3">
+          <div className="flex items-end justify-between gap-2">
+            <div>
+              <p className="text-sm font-medium text-text-main">Classifier models</p>
+              <p className="text-xs text-text-muted">
+                Tried in order — the next model is used when one fails or returns no decision.
+              </p>
             </div>
+            <Button variant="secondary" size="sm" icon="add" onClick={onPickModel} className="shrink-0">
+              Add model
+            </Button>
           </div>
+          {form.models.map((m, i) => (
+            <div key={i} className="flex flex-col gap-2 rounded-[10px] border border-border-subtle p-3 sm:flex-row sm:items-center">
+              <span className="text-[10px] font-medium text-text-muted w-4 text-center shrink-0">{i + 1}</span>
+              <Input
+                className="flex-1"
+                value={m.model}
+                onChange={(e) => setModelRow(i, { model: e.target.value })}
+                placeholder="oc/jev-1.13-free"
+              />
+              {perModelTimeout && (
+                <Input
+                  className="sm:w-32"
+                  type="number"
+                  min={MIN_CLASSIFIER_TIMEOUT_MS}
+                  max={MAX_CLASSIFIER_TIMEOUT_MS}
+                  value={m.timeoutMs}
+                  onChange={(e) => setModelRow(i, { timeoutMs: e.target.value })}
+                  title="Timeout for this model (ms)"
+                />
+              )}
+              <div className="flex items-center gap-1 shrink-0">
+                <Button variant="ghost" size="sm" icon="arrow_upward" onClick={() => moveModelRow(i, -1)} disabled={i === 0} title="Move up" />
+                <Button variant="ghost" size="sm" icon="arrow_downward" onClick={() => moveModelRow(i, 1)} disabled={i === form.models.length - 1} title="Move down" />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  icon="delete"
+                  onClick={() => removeModelRow(i)}
+                  disabled={form.models.length <= 1}
+                  title="Remove"
+                />
+              </div>
+            </div>
+          ))}
+          {form.models.length >= MAX_CLASSIFIER_MODELS && (
+            <p className="text-xs text-text-muted">Maximum {MAX_CLASSIFIER_MODELS} models.</p>
+          )}
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -153,14 +234,26 @@ export default function ClassifierFormModal({
             onChange={(e) => set({ fallbackLevel: e.target.value })}
             options={FALLBACK_OPTIONS}
           />
-          <Input
-            label="Timeout (ms)"
-            type="number"
-            min={MIN_CLASSIFIER_TIMEOUT_MS}
-            max={MAX_CLASSIFIER_TIMEOUT_MS}
-            value={form.timeoutMs}
-            onChange={(e) => set({ timeoutMs: e.target.value })}
+          <Select
+            label="Timeout mode"
+            value={form.timeoutMode}
+            onChange={(e) => set({ timeoutMode: e.target.value })}
+            options={[
+              { value: "uniform", label: "Same for every model" },
+              { value: "per-model", label: "Per model" },
+            ]}
           />
+          {!perModelTimeout && (
+            <Input
+              label="Timeout (ms)"
+              type="number"
+              min={MIN_CLASSIFIER_TIMEOUT_MS}
+              max={MAX_CLASSIFIER_TIMEOUT_MS}
+              value={form.timeoutMs}
+              onChange={(e) => set({ timeoutMs: e.target.value })}
+              hint="Applied to each model attempt"
+            />
+          )}
         </div>
 
         <Toggle

@@ -10,6 +10,8 @@ import {
   buildClassifierQuestions,
   resolveClassifierLevel,
   resolveClassifierScores,
+  normalizeClassifierModels,
+  profileModels,
   parseLevelList,
   questionLevels,
   pickFirstSupported,
@@ -312,5 +314,70 @@ describe("extractPromptText", () => {
 describe("CLASSIFIER_FALLBACK_LEVELS", () => {
   it("covers the wider value set a chain may name", () => {
     expect(CLASSIFIER_FALLBACK_LEVELS).toEqual(["none", "minimal", "low", "medium", "high", "xhigh", "max", "auto"]);
+  });
+});
+
+describe("normalizeClassifierModels", () => {
+  it("normalizes strings and objects, preserving order", () => {
+    expect(normalizeClassifierModels(["oc/a", { model: "oc/b", timeoutMs: 3000 }], 7000)).toEqual([
+      { model: "oc/a", timeoutMs: 7000 },
+      { model: "oc/b", timeoutMs: 3000 },
+    ]);
+  });
+
+  it("drops duplicates (first wins), blanks and caps the list", () => {
+    expect(normalizeClassifierModels(["oc/a", "oc/a", "  ", { model: "" }])).toEqual([{ model: "oc/a", timeoutMs: 10000 }]);
+    expect(normalizeClassifierModels(Array.from({ length: 20 }, (_, i) => `oc/m${i}`))).toHaveLength(8);
+  });
+
+  it("clamps entry timeouts and falls back to the default", () => {
+    expect(normalizeClassifierModels([{ model: "oc/a", timeoutMs: 999999 }])[0].timeoutMs).toBe(60000);
+    expect(normalizeClassifierModels([{ model: "oc/a", timeoutMs: 5 }])[0].timeoutMs).toBe(1000);
+    expect(normalizeClassifierModels([{ model: "oc/a", timeoutMs: "junk" }], 3000)[0].timeoutMs).toBe(3000);
+  });
+
+  it("returns [] for unusable input", () => {
+    expect(normalizeClassifierModels(null)).toEqual([]);
+    expect(normalizeClassifierModels(42)).toEqual([]);
+    expect(normalizeClassifierModels([])).toEqual([]);
+  });
+});
+
+describe("profileModels", () => {
+  it("reads the current list shape", () => {
+    expect(profileModels({ models: [{ model: "oc/a", timeoutMs: 2000 }], timeoutMode: "per-model", timeoutMs: 9000 }))
+      .toEqual([{ model: "oc/a", timeoutMs: 2000 }]);
+  });
+
+  it("reads the legacy single-model string", () => {
+    expect(profileModels({ model: "oc/legacy", timeoutMs: 4000 }))
+      .toEqual([{ model: "oc/legacy", timeoutMs: 4000 }]);
+  });
+
+  it("uniform mode forces the profile timeout onto every entry", () => {
+    expect(profileModels({
+      models: [{ model: "oc/a", timeoutMs: 2000 }, { model: "oc/b", timeoutMs: 3000 }],
+      timeoutMode: "uniform",
+      timeoutMs: 8000,
+    })).toEqual([
+      { model: "oc/a", timeoutMs: 8000 },
+      { model: "oc/b", timeoutMs: 8000 },
+    ]);
+  });
+
+  it("per-model mode keeps each entry's own timeout", () => {
+    expect(profileModels({
+      models: [{ model: "oc/a", timeoutMs: 2000 }, { model: "oc/b" }],
+      timeoutMode: "per-model",
+      timeoutMs: 8000,
+    })).toEqual([
+      { model: "oc/a", timeoutMs: 2000 },
+      { model: "oc/b", timeoutMs: 8000 },
+    ]);
+  });
+
+  it("returns [] for an empty or missing profile", () => {
+    expect(profileModels(null)).toEqual([]);
+    expect(profileModels({})).toEqual([]);
   });
 });

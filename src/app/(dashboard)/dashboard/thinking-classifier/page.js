@@ -1,11 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge, Button, Card, CardSkeleton, ConfirmModal, ModelSelectModal, Toggle } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useNotificationStore } from "@/store/notificationStore";
 import { getProviderByAlias } from "@/shared/constants/providers";
+import { profileModels, normalizeClassifierModels } from "@/shared/constants/thinkingClassifier";
 import ClassifierFormModal, { classifierToForm } from "./components/ClassifierFormModal";
+import { buildClassifierExport, buildClassifierExportFilename, parseClassifierImport } from "./classifierTransfer";
 
 // Human label for a classifier model id ("oc/jev-1.13-free" → "OpenCode · jev-1.13-free").
 function modelLabel(modelId) {
@@ -13,6 +15,14 @@ function modelLabel(modelId) {
   const [prefix, ...rest] = modelId.split("/");
   const provider = getProviderByAlias(prefix);
   return `${provider?.name || prefix} · ${rest.join("/")}`;
+}
+
+// "Model A" or "Model A (+2 more)" for a profile's ordered fallback list.
+function modelsSummary(profile) {
+  const models = profileModels(profile);
+  if (models.length === 0) return "—";
+  const first = modelLabel(models[0].model);
+  return models.length > 1 ? `${first} (+${models.length - 1} more)` : first;
 }
 
 export default function ThinkingClassifierPage() {
@@ -25,6 +35,7 @@ export default function ThinkingClassifierPage() {
   const [saving, setSaving] = useState(false);
   const [confirmState, setConfirmState] = useState(null);
   const [showModelSelect, setShowModelSelect] = useState(false);
+  const importFileRef = useRef(null);
   // Test inputs are keyed by classifier id so each card's box is independent.
   const [testTexts, setTestTexts] = useState({});
   const [testState, setTestState] = useState({ running: false, result: null, error: null, profileId: null });
@@ -127,6 +138,71 @@ export default function ThinkingClassifierPage() {
     });
   };
 
+  const handleExport = (classifier) => {
+    const payload = buildClassifierExport(classifier);
+    const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = buildClassifierExportFilename(classifier.name);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(url);
+    notify.success(`Exported "${classifier.name}"`);
+  };
+
+  const handleImportFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (importFileRef.current) importFileRef.current.value = "";
+    if (!file) return;
+
+    let parsed;
+    try {
+      parsed = parseClassifierImport(await file.text());
+    } catch (err) {
+      notify.error(err.message || "Invalid classifier file");
+      return;
+    }
+
+    const { classifier } = parsed;
+    const existing = classifiers.find((c) => c.name === classifier.name);
+    setConfirmState({
+      title: existing ? "Update classifier" : "Import classifier",
+      message: existing
+        ? `Replace the settings of "${classifier.name}" with the file's? Its active state is kept.`
+        : `Create a new classifier "${classifier.name}"?`,
+      confirmText: existing ? "Update" : "Create",
+      onConfirm: async () => {
+        try {
+          const res = await fetch(
+            existing ? `/api/thinking-classifiers/${existing.id}` : "/api/thinking-classifiers",
+            {
+              method: existing ? "PUT" : "POST",
+              headers: { "Content-Type": "application/json" },
+              // isActive is routing state a file must not flip: keep the stored
+              // value on update; a new profile takes the server default (active).
+              body: JSON.stringify(existing ? { ...classifier, isActive: existing.isActive } : classifier),
+            },
+          );
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) {
+            notify.error(data.error || "Import failed");
+            setConfirmState(null);
+            return;
+          }
+          notify.success(existing ? `Updated "${classifier.name}"` : `Created "${classifier.name}"`);
+          setConfirmState(null);
+          await fetchData();
+        } catch (error) {
+          console.log("Error importing classifier:", error);
+          notify.error("Import failed");
+          setConfirmState(null);
+        }
+      },
+    });
+  };
+
   const handleTest = async (classifier) => {
     const text = (testTexts[classifier.id] || "").trim();
     if (!text) {
@@ -154,19 +230,36 @@ export default function ThinkingClassifierPage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-semibold text-text-main">Thinking Effort Classifier</h1>
-          <p className="text-sm text-text-muted">
-            Named tiers backed by a System One decision model. Active tiers are advertised in every
-            reasoning model&apos;s <code className="font-mono text-xs">capabilities.effort_tiers</code> — a client
-            selects one by sending its name as its effort value (e.g.{" "}
-            <code className="font-mono text-xs">reasoning_effort: &quot;generic&quot;</code>), and the gateway
-            replaces it with the level the classifier picks for the prompt.
-          </p>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h1 className="text-xl font-semibold text-text-main">Thinking Effort Classifier</h1>
+            <p className="text-sm text-text-muted">
+              Named tiers backed by System One decision models. Active tiers are advertised in every
+              reasoning model&apos;s <code className="font-mono text-xs">capabilities.effort_tiers</code> — a client
+              selects one by sending its name as its effort value (e.g.{" "}
+              <code className="font-mono text-xs">reasoning_effort: &quot;generic&quot;</code>), and the gateway
+              replaces it with the level the classifier picks for the prompt.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <Button
+              variant="secondary"
+              icon="upload"
+              onClick={() => importFileRef.current?.click()}
+              className="shrink-0"
+            >
+              Import
+            </Button>
+            <input
+              ref={importFileRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={handleImportFile}
+            />
+            <Button icon="add" onClick={openCreateModal} className="shrink-0">New classifier</Button>
+          </div>
         </div>
-        <Button icon="add" onClick={openCreateModal} className="shrink-0">New classifier</Button>
-      </div>
 
       {loading ? (
         <CardSkeleton />
@@ -190,7 +283,7 @@ export default function ThinkingClassifierPage() {
                   {classifier.isActive ? "active" : "inactive"}
                 </Badge>
                 <Badge>{classifier.mode === "threshold" ? "score + thresholds" : "per-level (argmax)"}</Badge>
-                <span className="text-xs text-text-muted">{modelLabel(classifier.model)}</span>
+                <span className="text-xs text-text-muted">{modelsSummary(classifier)}</span>
                 <span className="text-xs text-text-muted">fallback: {classifier.fallbackLevel || "medium"}</span>
                 <div className="ml-auto flex items-center gap-2">
                   <Toggle checked={classifier.isActive !== false} onChange={() => handleToggleActive(classifier)} size="sm" />
@@ -202,6 +295,9 @@ export default function ThinkingClassifierPage() {
                     title="Copy the tier name clients send as their effort value"
                   >
                     Copy tier
+                  </Button>
+                  <Button variant="ghost" size="sm" icon="download" onClick={() => handleExport(classifier)} title="Export this classifier as JSON">
+                    Export
                   </Button>
                   <Button variant="ghost" size="sm" icon="edit" onClick={() => openEditModal(classifier)}>Edit</Button>
                   <Button variant="ghost" size="sm" icon="delete" onClick={() => handleDelete(classifier)}>Delete</Button>
@@ -236,6 +332,7 @@ export default function ThinkingClassifierPage() {
                       <div className="flex flex-col gap-1">
                         <p className="text-text-main">
                           → <span className="font-semibold">{testState.result.levels?.join(",") || testState.result.level || "no decision"}</span>
+                          {testState.result.usedModel ? ` · via ${testState.result.usedModel}` : ""}
                           {testState.result.latencyMs ? ` · ${testState.result.latencyMs}ms` : ""}
                           {testState.result.levels?.length > 1 ? " · first supported level is sent" : ""}
                           {!testState.result.level && testState.result.error ? ` · ${testState.result.error}` : ""}
@@ -272,13 +369,28 @@ export default function ThinkingClassifierPage() {
         onClose={() => setShowModelSelect(false)}
         onSelect={(model) => {
           if (!model?.value) return;
-          setForm((prev) => (prev ? { ...prev, model: model.value } : prev));
-          setShowModelSelect(false);
+          setForm((prev) => {
+            if (!prev) return prev;
+            const models = normalizeClassifierModels(
+              [...prev.models, { model: model.value, timeoutMs: prev.timeoutMs }],
+              prev.timeoutMs,
+            );
+            return { ...prev, models };
+          });
+        }}
+        onDeselect={(model) => {
+          if (!model?.value) return;
+          setForm((prev) => {
+            if (!prev) return prev;
+            const models = prev.models.filter((m) => m.model !== model.value);
+            return { ...prev, models: models.length > 0 ? models : [{ model: "", timeoutMs: prev.timeoutMs }] };
+          });
         }}
         activeProviders={activeProviders}
-        title="Select classifier model"
+        title="Add classifier model"
         kindFilter="systemone"
-        closeOnSelect={true}
+        addedModelValues={form?.models?.map((m) => m.model).filter(Boolean) || []}
+        closeOnSelect={false}
       />
 
       <ConfirmModal
@@ -287,6 +399,7 @@ export default function ThinkingClassifierPage() {
         onConfirm={confirmState?.onConfirm}
         title={confirmState?.title}
         message={confirmState?.message}
+        confirmText={confirmState?.confirmText}
       />
     </div>
   );
