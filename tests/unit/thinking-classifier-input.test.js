@@ -53,15 +53,15 @@ describe("normalizeClassifierInput", () => {
 
   it("defaults the input mode and tail window", () => {
     const { value } = normalizeClassifierInput({ name: "tier", model: "m" });
-    expect(value.inputMode).toBe("last-user");
+    expect(value.inputMode).toBe("latest-turn");
     expect(value.tailTurns).toBe(6);
     expect(value.tailChars).toBe(2000);
   });
 
   it("accepts a known input mode and rejects an unknown one", () => {
     expect(normalizeClassifierInput({ name: "tier", model: "m", inputMode: "tail-window" }).value.inputMode).toBe("tail-window");
-    expect(normalizeClassifierInput({ name: "tier", model: "m", inputMode: "latest-turn" }).value.inputMode).toBe("latest-turn");
-    expect(normalizeClassifierInput({ name: "tier", model: "m", inputMode: "bogus" }).value.inputMode).toBe("last-user");
+    expect(normalizeClassifierInput({ name: "tier", model: "m", inputMode: "last-user" }).value.inputMode).toBe("last-user");
+    expect(normalizeClassifierInput({ name: "tier", model: "m", inputMode: "bogus" }).value.inputMode).toBe("latest-turn");
   });
 
   it("clamps the tail window bounds", () => {

@@ -1,6 +1,6 @@
-// Thinking Effort Classifier — input selection modes. The extractor must keep
-// `last-user` byte-identical to the original single-message behavior while
-// `latest-turn` and `tail-window` read newer/tool turns across every wire shape.
+// Thinking Effort Classifier — input selection modes. The extractor defaults to
+// `latest-turn` (the newest turn, tool results included); `last-user` keeps the
+// original single-user-message behavior; `tail-window` reads the last N turns.
 import { describe, it, expect } from "vitest";
 
 import {
@@ -12,13 +12,23 @@ const lastUser = (body) => extractPromptText(body, { mode: "last-user" });
 const latestTurn = (body) => extractPromptText(body, { mode: "latest-turn" });
 const tailWindow = (body, opts = {}) => extractPromptText(body, { mode: "tail-window", ...opts });
 
-describe("last-user mode (default, unchanged behavior)", () => {
-  it("is the default when no mode is given", () => {
-    const body = { messages: [{ role: "user", content: "only" }] };
-    expect(extractPromptText(body)).toBe("only");
-    expect(extractPromptText(body, {})).toBe("only");
+describe("default mode is latest-turn", () => {
+  it("reads the newest turn when no mode is given", () => {
+    const body = { messages: [
+      { role: "user", content: "the original prompt" },
+      { role: "assistant", content: "a newer assistant turn" },
+    ] };
+    expect(extractPromptText(body)).toBe("a newer assistant turn");
+    expect(extractPromptText(body, {})).toBe("a newer assistant turn");
   });
 
+  it("is a no-op difference on a single user message", () => {
+    const body = { messages: [{ role: "user", content: "only" }] };
+    expect(extractPromptText(body)).toBe("only");
+  });
+});
+
+describe("last-user mode (original single-message behavior)", () => {
   it("skips assistant and tool turns to find the newest user message", () => {
     expect(lastUser({ messages: [
       { role: "user", content: "first" },

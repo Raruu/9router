@@ -88,7 +88,7 @@ describe("parseClassifierImport", () => {
       mode: "argmax",
       questions: [{ id: "q", levels: ["low"] }],
     }));
-    expect(classifier.inputMode).toBe("last-user");
+    expect(classifier.inputMode).toBe("latest-turn");
     expect(classifier.tailTurns).toBe(6);
     expect(classifier.tailChars).toBe(2000);
   });

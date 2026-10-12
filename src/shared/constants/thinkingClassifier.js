@@ -44,15 +44,16 @@ export const DEFAULT_CLASSIFIER_TIMEOUT_MODE = "uniform";
 export const MAX_CLASSIFIER_MODELS = 8;
 
 // Which text of a request is sent to the decision model:
-//   last-user   — the newest user turn's text (the original behavior; tool
-//                 results and assistant turns are skipped). Default, so a
-//                 profile created before this option keeps its behavior.
 //   latest-turn — the newest turn with any text, including a tool result or an
 //                 assistant message, so the input shifts as an agent progresses.
+//                 Default.
+//   last-user   — the newest user turn's text; tool results and assistant turns
+//                 are skipped (the original behavior, kept for profiles that
+//                 want the task text alone).
 //   tail-window — the last N turns (any role, tool results included) joined,
 //                 bounded by a turn count and a character budget.
-export const CLASSIFIER_INPUT_MODES = Object.freeze(["last-user", "latest-turn", "tail-window"]);
-export const DEFAULT_CLASSIFIER_INPUT_MODE = "last-user";
+export const CLASSIFIER_INPUT_MODES = Object.freeze(["latest-turn", "last-user", "tail-window"]);
+export const DEFAULT_CLASSIFIER_INPUT_MODE = "latest-turn";
 
 // Tail-window sizing (both controls apply): keep the newest turns until either
 // the turn count or the character budget is reached.

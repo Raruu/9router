@@ -324,9 +324,14 @@ describe("extractPromptText", () => {
     expect(extractPromptText({ input: [{ role: "user", content: [{ type: "input_text", text: "responses" }] }] })).toBe("responses");
   });
 
+  it("defaults to the newest turn (any role)", () => {
+    // The default mode reads the newest turn even when it is not a user turn.
+    expect(extractPromptText({ messages: [{ role: "assistant", content: "hi" }] })).toBe("hi");
+  });
+
   it("returns an empty string when there is no user text", () => {
     expect(extractPromptText({})).toBe("");
-    expect(extractPromptText({ messages: [{ role: "assistant", content: "hi" }] })).toBe("");
+    expect(extractPromptText({ messages: [{ role: "assistant", content: "hi" }] }, { mode: "last-user" })).toBe("");
   });
 });
 

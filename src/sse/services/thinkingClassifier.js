@@ -4,7 +4,7 @@
 // (see withClassifierTiers). When a client sends that name as its effort value
 // (e.g. `reasoning_effort: "laya"`), the gateway runs the profile's System One
 // decision model over the profile's chosen slice of the request (see
-// CLASSIFIER_INPUT_MODES — the newest user message by default) and swaps the
+// CLASSIFIER_INPUT_MODES — the newest turn by default) and swaps the
 // name for the level it decides, before any translation happens. This module owns:
 //   - locating/writing the effort value across client shapes (readEffortField)
 //   - resolving a requested name to an active profile (resolveClassifierRequest)
@@ -212,10 +212,9 @@ function clampFromFront(text, maxChars) {
 /**
  * The request text handed to a profile's decision model, selected by its input
  * mode (see CLASSIFIER_INPUT_MODES):
- *   last-user   (default) — the newest user turn's text. Byte-identical to the
- *                 original single-message extractor, so existing profiles and
- *                 their decisions are unchanged.
- *   latest-turn — the newest turn with any text, tool results included.
+ *   latest-turn (default) — the newest turn with any text, tool results included.
+ *   last-user   — the newest user turn's text, skipping tool results and
+ *                 assistant turns (the original single-message behavior).
  *   tail-window — the last N turns joined (any role), bounded by a turn count
  *                 and a character budget.
  * The caller applies the final PROMPT_TEXT_MAX cap.
@@ -244,7 +243,7 @@ export function extractPromptText(body, options = {}) {
     return clampFromFront(picked.join("\n"), maxChars);
   }
 
-  // last-user (default)
+  // last-user
   for (let i = turns.length - 1; i >= 0; i--) {
     const turn = turns[i];
     if (turn.role !== "user") continue;

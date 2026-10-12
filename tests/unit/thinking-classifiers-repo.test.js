@@ -44,7 +44,7 @@ describe("thinkingClassifiersRepo", () => {
     expect(Array.isArray(created.questions)).toBe(true);
     expect(created.questions.length).toBeGreaterThan(0);
     expect(created.fallbackLevel).toBe("medium");
-    expect(created.inputMode).toBe("last-user");
+    expect(created.inputMode).toBe("latest-turn");
     expect(created.tailTurns).toBe(6);
     expect(created.tailChars).toBe(2000);
     expect(created.models[0].model).toBe("oc/jev-1.13-free");
