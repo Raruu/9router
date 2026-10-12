@@ -14,7 +14,9 @@ import { CapabilitiesGrid, LimitsRow, PricingTable, Section, fmtRate, fmtTokens 
 // the catalog entry preview shares; this modal only renders combo-aware rows on
 // top of those blocks.
 
-function MembersTable({ members }) {
+// Exported for its own SSR test (the members table is where a member's
+// provider/pin problems surface) — same precedent as ModelInfoSections.
+export function MembersTable({ members }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-border">
       <table className="w-full text-xs">
@@ -39,6 +41,14 @@ function MembersTable({ members }) {
                 )}
                 {m.kind === "combo" && (
                   <span className="text-[10px] text-text-muted">nested combo</span>
+                )}
+                {m.providerMissing && !m.unresolved && (
+                  <span
+                    className="block text-[10px] text-amber-600 dark:text-amber-500"
+                    title="This member's prefix matches no provider, so a catalog pin cannot be applied — capabilities fall back to generic catalog rules."
+                  >
+                    pin is missing
+                  </span>
                 )}
                 {m.catalogRef && (
                   <span className="block truncate font-mono text-[10px] text-primary/80" title={`[${m.catalogRef.source}] ${m.catalogRef.provider} / ${m.catalogRef.pattern}`}>

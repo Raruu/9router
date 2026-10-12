@@ -61,7 +61,12 @@ describe("kindEndpoints config", () => {
 
   it("detects compat node providers by id prefix", () => {
     expect(isCompatNodeProvider("openai-compatible-chat-abc")).toBe(true);
+    // Both compatible node types dispatch per-kind endpoints through the same
+    // OpenAI-shaped adapters — a node's chat API may be Anthropic Messages
+    // while its media endpoints stay OpenAI-compatible.
+    expect(isCompatNodeProvider("anthropic-compatible-abc")).toBe(true);
     expect(isCompatNodeProvider("openai")).toBe(false);
+    expect(isCompatNodeProvider("custom-embedding-abc")).toBe(false);
     expect(isCompatNodeProvider(null)).toBe(false);
   });
 
@@ -255,6 +260,52 @@ describe("connection push-down (POST /api/providers)", () => {
   });
 });
 
+describe("node creation (POST /api/provider-nodes)", () => {
+  beforeEach(async () => { await setupDb(); });
+
+  afterEach(() => {
+    vi.doUnmock("../../src/lib/modelCatalog/runtime.js");
+    vi.doUnmock("next/server");
+    try { global._dbAdapter?.instance?.close?.(); } catch {}
+    delete global._dbAdapter;
+    if (tempDir) fs.rmSync(tempDir, { recursive: true, force: true });
+    if (originalDataDir === undefined) delete process.env.DATA_DIR;
+    else process.env.DATA_DIR = originalDataDir;
+  });
+
+  it("persists kindBaseUrls on an anthropic-compatible node", async () => {
+    const db = await import("../../src/lib/db/index.js");
+    await db.initDb();
+    vi.doMock("next/server", () => ({
+      NextResponse: {
+        json(body, init = {}) {
+          return new Response(JSON.stringify(body), { status: init.status || 200, headers: { "Content-Type": "application/json" } });
+        },
+      },
+    }));
+    const { POST } = await import("../../src/app/api/provider-nodes/route.js");
+
+    const res = await POST(new Request("https://9router.local/api/provider-nodes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Anthropic Media",
+        prefix: "acm",
+        type: "anthropic-compatible",
+        baseUrl: "https://api.anthropic.com/v1",
+        kindBaseUrls: { systemone: MEDIA_HOST, image: `${MEDIA_HOST}/images/generations`, bogus: "https://nope" },
+      }),
+    }));
+    const body = await res.json();
+
+    expect(res.status).toBe(201);
+    expect(body.node.type).toBe("anthropic-compatible");
+    expect(body.node.kindBaseUrls).toEqual({ systemone: MEDIA_HOST, image: MEDIA_HOST });
+    const stored = await db.getProviderNodeById(body.node.id);
+    expect(stored.kindBaseUrls).toEqual({ systemone: MEDIA_HOST, image: MEDIA_HOST });
+  });
+});
+
 // ── Runtime adapters ────────────────────────────────────────────────────────
 describe("runtime adapters", () => {
   beforeEach(() => { global.fetch = vi.fn(); });
@@ -386,6 +437,47 @@ describe("runtime adapters", () => {
     expect(result.success).toBe(true);
     expect(global.fetch.mock.calls[0][0]).toBe(`${LLM_HOST}/systemone`);
     expect(global.fetch.mock.calls[0][1].headers.Authorization).toBe("Bearer test-key");
+  });
+
+  // Anthropic-compatible nodes: chat speaks Anthropic Messages, but per-kind
+  // endpoints stay OpenAI-shaped, so they dispatch through the same adapters.
+  const anthropicCreds = (overrides = {}) => ({
+    apiKey: "test-key",
+    providerSpecificData: {
+      prefix: "ac",
+      baseUrl: LLM_HOST,
+      kindBaseUrls: { image: MEDIA_HOST, systemone: MEDIA_HOST },
+      ...overrides,
+    },
+  });
+
+  it("image: an anthropic-compatible node reaches {kindBaseUrls.image}/images/generations", async () => {
+    global.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ created: 1, data: [{ url: "https://img.test/a.png" }] }), { headers: { "Content-Type": "application/json" } }));
+
+    const result = await handleImageGenerationCore({
+      body: { model: "img-model", prompt: "a cat" },
+      modelInfo: { provider: "anthropic-compatible-a1", model: "img-model" },
+      credentials: anthropicCreds(),
+      log: null,
+    });
+
+    expect(result.success).toBe(true);
+    expect(global.fetch.mock.calls[0][0]).toBe(`${MEDIA_HOST}/images/generations`);
+    expect(global.fetch.mock.calls[0][1].headers.Authorization).toBe("Bearer test-key");
+  });
+
+  it("systemone: an anthropic-compatible node reaches {kindBaseUrls.systemone}/systemone", async () => {
+    global.fetch.mockResolvedValueOnce(new Response(JSON.stringify({ answers: {} }), { headers: { "Content-Type": "application/json" } }));
+
+    const result = await handleSystemoneCore({
+      body: { model: "jev", state: "s", questions: { q: { type: "noul" } } },
+      modelInfo: { provider: "anthropic-compatible-a1", model: "jev" },
+      credentials: anthropicCreds(),
+      log: null,
+    });
+
+    expect(result.success).toBe(true);
+    expect(global.fetch.mock.calls[0][0]).toBe(`${MEDIA_HOST}/systemone`);
   });
 });
 

@@ -1,10 +1,26 @@
 import { defineConfig } from "vitest/config";
+import { transformWithOxc } from "vite";
 import { resolve } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 
+// Shared dashboard components are JSX inside .js files. Next.js parses them;
+// the test transform does not, so SSR-rendering one (react-dom/server) would
+// fail with "invalid JS syntax". Scope a jsx loader to that directory only, so
+// the rest of the suite keeps the plain .js loader.
+const jsxInSharedComponents = {
+  name: "jsx-in-shared-components",
+  enforce: "pre",
+  async transform(code, id) {
+    const file = id.split("?")[0];
+    if (!file.includes("/src/shared/components/") || !file.endsWith(".js")) return null;
+    return transformWithOxc(code, file, { lang: "jsx" });
+  },
+};
+
 export default defineConfig({
+  plugins: [jsxInSharedComponents],
   test: {
     environment: "node",
     globals: true,

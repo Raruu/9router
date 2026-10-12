@@ -7,8 +7,8 @@ import { buildCompatKindUrl, isCompatNodeProvider } from "../config/kindEndpoint
 
 /**
  * Core System One (Jev) handler — native decision payload pass-through.
- * URL/headers come from the registry's systemoneConfig; for custom
- * OpenAI-compatible nodes the URL is built from the connection
+ * URL/headers come from the registry's systemoneConfig; for custom compatible
+ * nodes (openai-/anthropic-compatible) the URL is built from the connection
  * (kindBaseUrls.systemone or the node's main baseUrl). Body and JSON response
  * are forwarded untouched (decision models have no chat translation layer).
  *
@@ -20,6 +20,7 @@ export async function handleSystemoneCore({
   credentials,
   log,
   onRequestSuccess,
+  timeoutMs,
 }) {
   const { provider, model } = modelInfo;
   const cfg = PROVIDER_MEDIA[provider]?.systemoneConfig;
@@ -73,12 +74,13 @@ export async function handleSystemoneCore({
 
   let providerResponse;
   try {
+    const timeout = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : FETCH_CONNECT_TIMEOUT_MS;
     providerResponse = await fetch(targetUrl, {
       method: "POST",
       headers,
       body: JSON.stringify(requestBody),
       ...(typeof AbortSignal?.timeout === "function"
-        ? { signal: AbortSignal.timeout(FETCH_CONNECT_TIMEOUT_MS) }
+        ? { signal: AbortSignal.timeout(timeout) }
         : {}),
     });
   } catch (error) {

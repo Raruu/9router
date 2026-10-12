@@ -21,8 +21,8 @@ const CREDENTIALED_PROVIDERS = new Set(
     .map(([id]) => id)
 );
 
-// Custom OpenAI-compatible nodes carry their endpoint + key on the connection,
-// so they always take the credentialed path.
+// Custom compatible nodes (openai-/anthropic-compatible) carry their endpoint
+// + key on the connection, so they always take the credentialed path.
 function needsCredentials(provider) {
   return CREDENTIALED_PROVIDERS.has(provider) || isCompatNodeProvider(provider);
 }

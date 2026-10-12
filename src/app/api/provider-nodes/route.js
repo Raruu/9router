@@ -96,6 +96,9 @@ export async function POST(request) {
         type: "anthropic-compatible",
         prefix: prefix.trim(),
         baseUrl: sanitizedBaseUrl,
+        // Per-kind endpoint overrides apply to both compatible node types —
+        // their media endpoints are OpenAI-shaped regardless of the chat API.
+        ...(Object.keys(kindOverrides).length ? { kindBaseUrls: kindOverrides } : {}),
         name: name.trim(),
       });
       return NextResponse.json({ node }, { status: 201 });

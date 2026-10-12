@@ -11,6 +11,7 @@ import { errorResponse, unavailableResponse } from "open-sse/utils/error.js";
 import { providerDisplayLabel, providerModelTag } from "open-sse/utils/providerLabel.js";
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 import { AI_PROVIDERS } from "@/shared/constants/providers";
+import { isCompatNodeProvider } from "open-sse/config/kindEndpoints.js";
 import { handleComboChat } from "open-sse/services/combo.js";
 import * as log from "../utils/logger.js";
 
@@ -21,11 +22,11 @@ const CREDENTIALED_PROVIDERS = new Set(
     .map(([id]) => id)
 );
 
-// Custom OpenAI-compatible nodes carry their endpoint + key on the connection,
-// so they always take the credentialed path (their adapter reads
-// providerSpecificData.kindBaseUrls/baseUrl).
+// Custom compatible nodes (openai-/anthropic-compatible) carry their endpoint
+// + key on the connection, so they always take the credentialed path (their
+// adapter reads providerSpecificData.kindBaseUrls/baseUrl).
 function needsCredentials(provider) {
-  return CREDENTIALED_PROVIDERS.has(provider) || String(provider).startsWith("openai-compatible-");
+  return CREDENTIALED_PROVIDERS.has(provider) || isCompatNodeProvider(provider);
 }
 
 export async function handleTts(request) {

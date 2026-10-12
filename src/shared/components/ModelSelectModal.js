@@ -322,8 +322,6 @@ export default function ModelSelectModal({
         // that kind (e.g. an image model on a media host). Aliases and the
         // LLM placeholder do not apply here — a typed request needs a model id.
         if (effectiveKind && TYPED_KINDS.has(effectiveKind)) {
-          // Anthropic-compatible nodes have no media routing.
-          if (isAnthropicCompatibleProvider(providerId)) return;
           // Custom-embedding nodes only serve embeddings.
           if (isCustomEmbeddingProvider(providerId) && effectiveKind !== "embedding") return;
           // Compatible nodes register custom models under the raw node id;

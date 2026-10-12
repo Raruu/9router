@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   getProviderConnections: vi.fn(),
   getProviderNodes: vi.fn(),
   getSettings: vi.fn(),
+  getActiveClassifierNames: vi.fn(),
   getPricingForModel: vi.fn(),
   getUserPricingTables: vi.fn(),
 }));
@@ -27,6 +28,7 @@ vi.mock("@/lib/localDb", () => ({
   getProviderConnections: mocks.getProviderConnections,
   getProviderNodes: mocks.getProviderNodes,
   getSettings: mocks.getSettings,
+  getActiveClassifierNames: mocks.getActiveClassifierNames,
 }));
 
 vi.mock("@/lib/db/repos/pricingRepo.js", () => ({
@@ -71,6 +73,7 @@ describe("GET /api/models/detail", () => {
     mocks.getProviderConnections.mockResolvedValue([]);
     mocks.getProviderNodes.mockResolvedValue([]);
     mocks.getSettings.mockResolvedValue({ comboStrategies: {} });
+    mocks.getActiveClassifierNames.mockResolvedValue([]);
     mocks.getPricingForModel.mockResolvedValue(null);
     mocks.getUserPricingTables.mockResolvedValue({});
   });
@@ -253,6 +256,7 @@ describe("GET /api/models/detail — combos", () => {
     mocks.getProviderConnections.mockResolvedValue([]);
     mocks.getProviderNodes.mockResolvedValue([]);
     mocks.getSettings.mockResolvedValue({ comboStrategies: {} });
+    mocks.getActiveClassifierNames.mockResolvedValue([]);
     mocks.getPricingForModel.mockResolvedValue(null);
     mocks.getUserPricingTables.mockResolvedValue({});
   });
@@ -327,6 +331,46 @@ describe("GET /api/models/detail — combos", () => {
     expect(res.body.capabilities.contextWindow).toBe(
       res.body.members[0].capabilities.contextWindow,
     );
+  });
+
+  it("flags a member whose prefix matches no provider (pin can never apply)", async () => {
+    mocks.getCombos.mockResolvedValue([
+      { name: "ghost", kind: "llm", models: ["deleted-node/gpt-6-astra"] },
+    ]);
+
+    const res = await GET(req("combo=ghost"));
+
+    const member = res.body.members[0];
+    // The row still resolves as a model string (the prefix is used verbatim),
+    // so it is NOT `unresolved` — but its catalog pin cannot be applied.
+    expect(member.unresolved).toBeUndefined();
+    expect(member.providerMissing).toBe(true);
+  });
+
+  it("does not flag a member whose prefix resolves via a node with no connections", async () => {
+    // The node layer is what makes this resolve — no connections at all.
+    mocks.getProviderNodes.mockResolvedValue([
+      { id: "openai-compatible-chat-inactive", type: "openai-compatible", prefix: "agent-router" },
+    ]);
+    mocks.getCombos.mockResolvedValue([
+      { name: "testing", kind: "llm", models: ["agent-router/gpt-6-astra"] },
+    ]);
+
+    const res = await GET(req("combo=testing"));
+
+    const member = res.body.members[0];
+    expect(member.unresolved).toBeUndefined();
+    expect(member.providerMissing).toBeUndefined();
+  });
+
+  it("does not flag a built-in member", async () => {
+    mocks.getCombos.mockResolvedValue([
+      { name: "plain", kind: "llm", models: ["anthropic/claude-opus-4.6"] },
+    ]);
+
+    const res = await GET(req("combo=plain"));
+
+    expect(res.body.members[0].providerMissing).toBeUndefined();
   });
 
   it("resolves a nested combo member", async () => {

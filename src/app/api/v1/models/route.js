@@ -6,7 +6,7 @@ import {
   isAnthropicCompatibleProvider,
   isOpenAICompatibleProvider,
 } from "@/shared/constants/providers";
-import { getProviderConnections, getCombos, getCustomModels, getModelAliases, getSettings } from "@/lib/localDb";
+import { getProviderConnections, getProviderNodes, getCombos, getCustomModels, getModelAliases, getSettings } from "@/lib/localDb";
 import { getDisabledModels } from "@/lib/disabledModelsDb";
 import { hasValidCliToken } from "@/lib/auth/cliToken";
 import { getKeyAccessContext, filterModelsListForKey } from "@/sse/services/keyAccess.js";
@@ -21,8 +21,10 @@ import { resolveZedModels } from "open-sse/shared/zedAuth.js";
 import { updateProviderCredentials } from "@/sse/services/tokenRefresh";
 import { resolveConnectionProxyConfig } from "@/lib/network/connectionProxy";
 import { capabilitiesFromServiceKind, getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
-import { comboCapabilities, comboEffortTiers, mergeMemberCapabilities } from "open-sse/providers/comboCapabilities.js";
+import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
+import { comboCapabilities, comboEffortTiers, mergeMemberCapabilities, withClassifierTiers } from "open-sse/providers/comboCapabilities.js";
 import { buildProviderIdByPrefix } from "@/lib/providerPrefixMap";
+import { getActiveClassifierNames } from "@/lib/localDb";
 
 // Qoder shares one live resolver across intl (qoder) and CN (qoder-cn); the
 // credentials carry the provider id so qoderModels picks the right region's
@@ -299,6 +301,20 @@ export { mergeMemberCapabilities };
  * @param {"max"|"min"} [options.comboLimitStrategy] - Which member's numeric limits a combo advertises.
  * @param {"union"|"intersection"} [options.comboEffortStrategy] - Which member thinking levels a combo advertises as capabilities.effort_tiers.
  */
+/**
+ * Advertise Thinking Effort Classifier tiers on a direct (non-combo) model.
+ * Returns the capabilities object to emit: the original when nothing changes,
+ * else a clone carrying `effort_tiers` = [real levels…, classifier names…].
+ * Never mutates the shared capabilities object (it is a module-level cache).
+ */
+function withDirectClassifierTiers(caps, providerId, modelId, classifierNames) {
+  if (!caps?.reasoning || !classifierNames?.length) return caps;
+  const levels = getThinkingLevels(providerId, modelId, caps) || [];
+  const tiers = withClassifierTiers(levels, classifierNames);
+  if (!tiers) return caps;
+  return { ...caps, effort_tiers: tiers };
+}
+
 export async function buildModelsList(kindFilter, options = {}) {
   // When this header is present, the /v1/models request came from another
   // 9router instance's fetchCompatibleModelIds — skip dynamic fetch to break
@@ -314,6 +330,17 @@ export async function buildModelsList(kindFilter, options = {}) {
     connections = connections.filter(c => c.isActive !== false);
   } catch (e) {
     console.log("Could not fetch providers, returning all models");
+  }
+
+  // Provider nodes are fetched UNFILTERED: a custom node's connections can all
+  // be deactivated while its models and catalog pins remain, and a combo member
+  // pointing at that node must still resolve to its id (otherwise the member
+  // falls back to provider-agnostic rules and advertises the wrong levels).
+  let providerNodes = [];
+  try {
+    providerNodes = await getProviderNodes();
+  } catch (e) {
+    console.log("Could not fetch provider nodes");
   }
 
   let combos = [];
@@ -345,6 +372,16 @@ export async function buildModelsList(kindFilter, options = {}) {
   }
   const isDisabled = (alias, modelId) => Array.isArray(disabledByAlias[alias]) && disabledByAlias[alias].includes(modelId);
 
+  // Thinking Effort Classifier profile names — appended to every reasoning
+  // model's `capabilities.effort_tiers` so a client can select one by sending
+  // the name as its effort value. Empty when no classifier is active.
+  let classifierNames = [];
+  try {
+    classifierNames = await getActiveClassifierNames();
+  } catch (e) {
+    console.log("Could not fetch thinking classifiers");
+  }
+
   const activeConnectionByProvider = new Map();
   for (const conn of connections) {
     if (!activeConnectionByProvider.has(conn.provider)) {
@@ -362,7 +399,7 @@ export async function buildModelsList(kindFilter, options = {}) {
     if (!comboByName.has(combo.name)) comboByName.set(combo.name, combo);
   }
   const capabilityContext = {
-    providerIdByPrefix: buildProviderIdByPrefix(connections),
+    providerIdByPrefix: buildProviderIdByPrefix(connections, providerNodes),
     modelAliases,
     comboByName,
     comboLimitStrategy: options.comboLimitStrategy,
@@ -390,7 +427,7 @@ export async function buildModelsList(kindFilter, options = {}) {
       if (caps) {
         entry.capabilities = caps;
         if (caps.reasoning) {
-          const effortTiers = comboEffortTiers(combo, capabilityContext);
+          const effortTiers = withClassifierTiers(comboEffortTiers(combo, capabilityContext), classifierNames);
           if (effortTiers) caps.effort_tiers = effortTiers;
         }
         if (Number.isFinite(caps.contextWindow)) {
@@ -422,7 +459,7 @@ export async function buildModelsList(kindFilter, options = {}) {
           object: "model",
           owned_by: alias,
         };
-        const caps = getCapabilitiesForModel(providerId, model.id);
+        const caps = withDirectClassifierTiers(getCapabilitiesForModel(providerId, model.id), providerId, model.id, classifierNames);
         entry.capabilities = caps;
         if (Number.isFinite(caps.contextWindow)) {
           entry.context_length = caps.contextWindow;
@@ -449,7 +486,7 @@ export async function buildModelsList(kindFilter, options = {}) {
       if (!modelId) continue;
 
       const providerId = capabilityContext.providerIdByPrefix.get(providerAlias) || providerAlias;
-      const caps = getCapabilitiesForModel(providerId, modelId);
+      const caps = withDirectClassifierTiers(getCapabilitiesForModel(providerId, modelId), providerId, modelId, classifierNames);
       const entry = {
         id: `${providerAlias}/${modelId}`,
         object: "model",
@@ -643,7 +680,10 @@ export async function buildModelsList(kindFilter, options = {}) {
         // dynamically-discovered LLM models still surface vision/reasoning/search/tools.
         const liveCaps = liveCapabilitiesById.get(modelId);
         const serviceCaps = capabilitiesFromServiceKind(customKind || liveKind);
-        const caps = liveCaps || serviceCaps || (kind === LLM_KIND ? getCapabilitiesForModel(providerId, modelId) : null);
+        const rawCaps = liveCaps || serviceCaps || (kind === LLM_KIND ? getCapabilitiesForModel(providerId, modelId) : null);
+        // Live/service capabilities bypass the static table, so resolve the
+        // level list from the static entry when the live caps don't declare one.
+        const caps = withDirectClassifierTiers(rawCaps, providerId, modelId, classifierNames);
         if (caps) model.capabilities = caps;
         // Token limits under the snake_case names the OpenAI/OpenRouter
         // convention uses. `capabilities.contextWindow` is camelCase and nested,

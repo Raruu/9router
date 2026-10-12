@@ -11,6 +11,7 @@ import selfhostedTts from "./selfhostedTts.js";
 import openaiCompatNode from "./openaiCompatNode.js";
 import { FORMAT_HANDLERS } from "./genericFormats.js";
 import { parseModelVoice } from "./_base.js";
+import { isCompatNodeProvider } from "../../config/kindEndpoints.js";
 
 // Special providers with custom synthesize() logic
 const SPECIAL_ADAPTERS = {
@@ -27,9 +28,9 @@ const SPECIAL_ADAPTERS = {
 
 export function getTtsAdapter(provider) {
   if (SPECIAL_ADAPTERS[provider]) return SPECIAL_ADAPTERS[provider];
-  // Custom OpenAI-compatible nodes: OpenAI-shaped /audio/speech on the node's
-  // per-kind or main baseUrl.
-  if (provider?.startsWith?.("openai-compatible-")) return openaiCompatNode;
+  // Custom compatible nodes (openai-/anthropic-compatible): OpenAI-shaped
+  // /audio/speech on the node's per-kind or main baseUrl.
+  if (isCompatNodeProvider(provider)) return openaiCompatNode;
   return null;
 }
 

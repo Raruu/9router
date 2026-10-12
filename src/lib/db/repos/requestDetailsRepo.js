@@ -129,6 +129,9 @@ async function flushToDatabase() {
             providerResponse: truncateField(item.providerResponse, config.maxJsonSize),
             response: truncateField(item.response, config.maxJsonSize),
             pxpipe: item.pxpipe || undefined,
+            // Thinking trace: requested vs applied effort (+ classifier profile).
+            // Small fixed shape, not a redactable payload section.
+            thinking: item.thinking || undefined,
           };
 
           db.run(

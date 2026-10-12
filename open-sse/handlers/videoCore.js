@@ -20,7 +20,7 @@ export function getVideoConfig(provider) {
   return PROVIDER_MEDIA[provider]?.videoConfig || null;
 }
 
-/** Custom OpenAI-compatible nodes resolve their URL from the connection. */
+/** Custom compatible nodes (openai-/anthropic-compatible) resolve their URL from the connection. */
 export function supportsVideo(provider) {
   return !!getVideoConfig(provider) || isCompatNodeProvider(provider);
 }

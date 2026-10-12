@@ -286,8 +286,8 @@ export async function handleSttCore({ provider, model, formData, credentials, st
   // sets it, so cloud providers are untouched. Mirrors the custom embedding
   // providers, which already resolve baseUrl the same way.
   //
-  // Custom OpenAI-compatible nodes: their per-kind STT host
-  // (kindBaseUrls.stt) wins over the node's main baseUrl. Gated on the node
+  // Custom compatible nodes (openai-/anthropic-compatible): their per-kind STT
+  // host (kindBaseUrls.stt) wins over the node's main baseUrl. Gated on the node
   // prefix — for other providers a providerSpecificData.baseUrl is the full
   // endpoint (selfhosted-stt), so appending the canonical path would double it.
   const overrideUrl = isCompatNodeProvider(provider)

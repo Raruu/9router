@@ -375,6 +375,39 @@ export default function RequestDetailsTab() {
                 <span className="text-text-muted">Model:</span>{" "}
                 <span className="text-text-main font-mono">{selectedDetail.model}</span>
               </div>
+              {selectedDetail.thinking && (
+                <div>
+                  <span className="text-text-muted">Thinking:</span>{" "}
+                  <span className="text-text-main font-mono">
+                    {selectedDetail.thinking.classifier
+                      ? `system one (${selectedDetail.thinking.classifier}) → ${selectedDetail.thinking.applied || selectedDetail.thinking.requested || "?"}${selectedDetail.thinking.fallback ? " (fallback)" : ""}`
+                      : selectedDetail.thinking.requested && selectedDetail.thinking.applied && selectedDetail.thinking.requested !== selectedDetail.thinking.applied
+                        ? `${selectedDetail.thinking.requested} → ${selectedDetail.thinking.applied} (fallback)`
+                        : selectedDetail.thinking.applied || selectedDetail.thinking.requested}
+                  </span>
+                  {Array.isArray(selectedDetail.thinking.scores) && selectedDetail.thinking.scores.length > 0 && (
+                    <span className="ml-2 font-mono text-text-muted">
+                      {selectedDetail.thinking.scores.length === 1 ? "score " : "scores "}
+                      {selectedDetail.thinking.scores
+                        .map((s) => `${s.level} ${Number(s.score).toFixed(2)}`)
+                        .join(", ")}
+                    </span>
+                  )}
+                </div>
+              )}
+              {/* Which classifier model answered and how long it took. Hidden on
+                  the fallback path, where no model produced the level. */}
+              {selectedDetail.thinking?.classifierModel && (
+                <div>
+                  <span className="text-text-muted">System-one:</span>{" "}
+                  <span className="text-text-main font-mono">
+                    {selectedDetail.thinking.classifierModel}
+                    {Number.isFinite(selectedDetail.thinking.classifierMs)
+                      ? ` · ${selectedDetail.thinking.classifierMs}ms`
+                      : ""}
+                  </span>
+                </div>
+              )}
               <div>
                 <span className="text-text-muted">Status:</span>{" "}
                 <span className={cn(

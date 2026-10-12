@@ -91,6 +91,57 @@ describe("GET /api/usage/request-details", () => {
     expect(d.request).toEqual({ redacted: true });
   });
 
+  it("trims classifier scores to the winner when bodies are hidden", async () => {
+    mocks.getRequestDetails.mockResolvedValue({
+      details: [{
+        ...storedDetail,
+        thinking: {
+          requested: "max",
+          applied: "max",
+          classifier: "laya",
+          fallback: false,
+          scores: [{ level: "max", score: 0.93 }, { level: "low", score: 0.05 }],
+        },
+      }],
+      total: 1,
+    });
+
+    const res = await GET(new Request("https://router.test/api/usage/request-details"));
+    const d = detailFrom(await res.json());
+
+    // Scores derive from the prompt, so only the winning entry survives — the
+    // level itself is already metadata and stays visible.
+    expect(d.thinking.scores).toEqual([{ level: "max", score: 0.93 }]);
+    expect(d.thinking.classifier).toBe("laya");
+    expect(d.thinking.applied).toBe("max");
+  });
+
+  it("keeps every classifier score when bodies are shown", async () => {
+    mocks.getSettings.mockResolvedValue({ observabilityShowBodies: true });
+    const scores = [{ level: "max", score: 0.93 }, { level: "low", score: 0.05 }];
+    mocks.getRequestDetails.mockResolvedValue({
+      details: [{ ...storedDetail, thinking: { classifier: "laya", scores } }],
+      total: 1,
+    });
+
+    const res = await GET(new Request("https://router.test/api/usage/request-details"));
+    const d = detailFrom(await res.json());
+
+    expect(d.thinking.scores).toEqual(scores);
+  });
+
+  it("leaves a single-score trace untouched when bodies are hidden", async () => {
+    mocks.getRequestDetails.mockResolvedValue({
+      details: [{ ...storedDetail, thinking: { classifier: "laya", scores: [{ level: "max", score: 0.9 }] } }],
+      total: 1,
+    });
+
+    const res = await GET(new Request("https://router.test/api/usage/request-details"));
+    const d = detailFrom(await res.json());
+
+    expect(d.thinking.scores).toEqual([{ level: "max", score: 0.9 }]);
+  });
+
   it("handles empty details", async () => {
     mocks.getRequestDetails.mockResolvedValue({ details: [], total: 0 });
 
