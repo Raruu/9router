@@ -1,3 +1,23 @@
+# v0.5.99-4 (2026-10-12)
+
+## Features
+- **Thinking Classifier**: a **Default tier** dropdown picks the profile that
+  runs when a client sends no thinking intent at all (no effort value and no
+  `thinking`/`thinkingConfig` object); any intent the client does send always
+  wins, and an unknown or inactive stored name is ignored. The chosen level is
+  written to the canonical `reasoning_effort` field so it re-emits in each
+  target's native shape. Importing a profile file now opens a confirmation with
+  an editable tier name, and the create/edit modal grows its question boxes to
+  fit their content
+- **Dashboard**: delete buttons on the Thinking Effort Classifier page and in
+  its modal are red; the modal's Remove buttons are icon-only; the Active switch
+  moved to the top of the form; the Import/Export icons are swapped
+
+## Fixes
+- **Dashboard**: the shared select duplicated its disabled placeholder with a
+  caller-supplied empty option, so choosing "Default (no classifier)" snapped
+  the display back to the placeholder and it could never be reselected
+
 # v0.5.99-3 (2026-10-12)
 
 ## Features

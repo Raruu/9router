@@ -117,8 +117,14 @@ export async function handleChat(request, clientRawRequest = null) {
   // name is replaced here, before combo expansion, so every member of a combo
   // gets the same decided level; the per-member thinking clamp then applies as
   // usual. Fail-open: an unknown/inactive name or a classifier error falls back
-  // to the profile's fallbackLevel, and no name at all is a no-op.
-  const classifierDecision = await applyThinkingClassifier(body, log, { modelStr, comboModels });
+  // to the profile's fallbackLevel, and no name at all is a no-op — unless a
+  // defaultClassifier is configured, which then decides the level for requests
+  // that carry no thinking intent of their own.
+  const classifierDecision = await applyThinkingClassifier(body, log, {
+    modelStr,
+    comboModels,
+    defaultClassifier: settings.defaultClassifier,
+  });
 
   const requiredCapabilities = detectRequiredCapabilities(body);
 

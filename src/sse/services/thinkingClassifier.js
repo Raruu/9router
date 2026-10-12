@@ -17,6 +17,7 @@ import { buildProviderIdByPrefix } from "@/lib/providerPrefixMap.js";
 import { saveRequestUsage } from "@/lib/usageDb.js";
 import { handleSystemoneCore } from "open-sse/handlers/systemoneCore.js";
 import { extractTextContent } from "open-sse/translator/formats/gemini.js";
+import { extractThinking } from "open-sse/translator/concerns/thinkingUnified.js";
 import { comboEffortTiers } from "open-sse/providers/comboCapabilities.js";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
 import {
@@ -290,17 +291,45 @@ export async function resolveTargetLevels(target) {
  * Returns a decision object for logging/observability, or null when the request
  * has nothing to do with classifiers.
  *
+ * A profile may also run as the target's DEFAULT tier: when the client expressed
+ * no thinking intent at all (no effort value and no thinking/thinkingConfig
+ * object) and `target.defaultClassifier` names an active profile, that profile
+ * decides the level and it is written to the canonical `reasoning_effort` field.
+ * Any client intent — a real level, a budget, a disable — always wins.
+ *
  * @param {object} body - the client request body (mutated in place)
  * @param {object|null} log
- * @param {{ modelStr?: string, comboModels?: string[]|null }} [target] - the
- *   requested target, used to resolve its supported thinking levels.
+ * @param {{ modelStr?: string, comboModels?: string[]|null, defaultClassifier?: string }} [target] -
+ *   the requested target, used to resolve its supported thinking levels and the
+ *   default-tier profile name.
  * @returns {Promise<{ profile: string, requested: string, level: string, candidates: string[], scores: {level:string,score:number}[], usedModel: string|null, fallback: boolean, latencyMs: number }|null>}
  */
 export async function applyThinkingClassifier(body, log, target = null) {
   const resolved = await resolveClassifierRequest(body);
-  if (!resolved) return null;
+  const defaultName = typeof target?.defaultClassifier === "string" ? target.defaultClassifier.trim() : "";
 
-  const { profile, field, requested } = resolved;
+  let profile = resolved?.profile || null;
+  let field = resolved?.field || null;
+  let requested = resolved?.requested || null;
+  let isDefault = false;
+
+  // Default tier: only when the client sent no effort name AND no other thinking
+  // intent. An unknown/inactive stored name is a silent no-op (fail-open).
+  if (!resolved && defaultName && extractThinking(body) === null) {
+    let candidate = null;
+    try {
+      candidate = await getThinkingClassifierByName(defaultName);
+    } catch {
+      candidate = null;
+    }
+    if (candidate && candidate.isActive !== false) {
+      profile = candidate;
+      requested = candidate.name;
+      isDefault = true;
+    }
+  }
+  if (!profile) return null;
+
   const result = await classifyWithProfile({ profile, body, log });
   const fallback = result.levels.length === 0;
   const supported = fallback ? null : await resolveTargetLevels(target);
@@ -308,13 +337,19 @@ export async function applyThinkingClassifier(body, log, target = null) {
     ? resolveFallbackLevel(profile)
     : pickFirstSupported(result.levels, supported);
 
-  writeEffortField(body, field, level);
+  // Explicit tier: rewrite the exact field the client used. Default tier: no
+  // effort field existed, so write the canonical OpenAI effort field —
+  // extractThinking reads it format-agnostically and applyThinking re-emits it
+  // in the target's native shape downstream.
+  if (field) writeEffortField(body, field, level);
+  else body.reasoning_effort = level;
 
   const via = result.usedModel ? ` via ${result.usedModel}` : "";
   const note = fallback
     ? `classifier failed (${result.error}) → fallback ${level}`
     : `→ ${level}${result.levels.length > 1 ? ` (from ${result.levels.join(",")})` : ""}${via}`;
-  log?.info?.("CLASSIFIER", `system one (${profile.name}) ${note} · ${result.latencyMs}ms`);
+  const label = isDefault ? `default system one (${profile.name})` : `system one (${profile.name})`;
+  log?.info?.("CLASSIFIER", `${label} ${note} · ${result.latencyMs}ms`);
 
   return {
     profile: profile.name,

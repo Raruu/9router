@@ -256,6 +256,81 @@ describe("applyThinkingClassifier", () => {
   });
 });
 
+// The default tier runs only when the client expressed NO thinking intent at
+// all; any real effort/thinking intent always wins.
+describe("default tier", () => {
+  it("classifies a no-effort request and writes reasoning_effort", async () => {
+    const body = { messages: [{ role: "user", content: "refactor the parser" }] };
+    const decision = await applyThinkingClassifier(body, null, { defaultClassifier: "laya" });
+    expect(decision).toMatchObject({ profile: "laya", requested: "laya", level: "max", fallback: false });
+    expect(body.reasoning_effort).toBe("max");
+    expect(mocks.handleSystemoneCore).toHaveBeenCalledTimes(1);
+  });
+
+  it("is a no-op when no default is configured", async () => {
+    const body = { messages: [{ role: "user", content: "hi" }] };
+    expect(await applyThinkingClassifier(body, null, { defaultClassifier: "" })).toBeNull();
+    expect(body.reasoning_effort).toBeUndefined();
+    expect(mocks.handleSystemoneCore).not.toHaveBeenCalled();
+  });
+
+  it("ignores a stored default that is not an active profile", async () => {
+    mocks.profile = null;
+    const body = { messages: [{ role: "user", content: "hi" }] };
+    expect(await applyThinkingClassifier(body, null, { defaultClassifier: "ghost" })).toBeNull();
+    expect(body.reasoning_effort).toBeUndefined();
+    expect(mocks.handleSystemoneCore).not.toHaveBeenCalled();
+  });
+
+  it("ignores an inactive stored default", async () => {
+    mocks.profile = { ...PROFILE, isActive: false };
+    const body = { messages: [{ role: "user", content: "hi" }] };
+    expect(await applyThinkingClassifier(body, null, { defaultClassifier: "laya" })).toBeNull();
+    expect(mocks.handleSystemoneCore).not.toHaveBeenCalled();
+  });
+
+  it("respects a client's own thinking intent (Claude thinking object)", async () => {
+    const body = { thinking: { type: "enabled", budget_tokens: 8192 }, messages: [{ role: "user", content: "hi" }] };
+    expect(await applyThinkingClassifier(body, null, { defaultClassifier: "laya" })).toBeNull();
+    expect(body.reasoning_effort).toBeUndefined();
+    expect(body.thinking).toEqual({ type: "enabled", budget_tokens: 8192 });
+    expect(mocks.handleSystemoneCore).not.toHaveBeenCalled();
+  });
+
+  it("respects a client's own effort even when it is not a profile", async () => {
+    const body = { reasoning_effort: "high", messages: [{ role: "user", content: "hi" }] };
+    expect(await applyThinkingClassifier(body, null, { defaultClassifier: "laya" })).toBeNull();
+    expect(body.reasoning_effort).toBe("high");
+    expect(mocks.handleSystemoneCore).not.toHaveBeenCalled();
+  });
+
+  it("respects an explicit tier over the default", async () => {
+    const body = { reasoning_effort: "laya", messages: [{ role: "user", content: "hi" }] };
+    const decision = await applyThinkingClassifier(body, null, { defaultClassifier: "other" });
+    expect(decision.requested).toBe("laya");
+    expect(body.reasoning_effort).toBe("max");
+  });
+
+  it("falls back to fallbackLevel when the default's classifier fails", async () => {
+    mocks.handleSystemoneCore.mockImplementation(async () => ({ success: false, error: "down" }));
+    const body = { messages: [{ role: "user", content: "hi" }] };
+    const decision = await applyThinkingClassifier(body, null, { defaultClassifier: "laya" });
+    expect(decision).toMatchObject({ profile: "laya", fallback: true, level: "medium" });
+    expect(body.reasoning_effort).toBe("medium");
+  });
+
+  it("picks the first supported level from the default's chain", async () => {
+    mocks.supportedLevels = ["none", "low", "medium", "high"];
+    const body = { messages: [{ role: "user", content: "hi" }] };
+    const decision = await applyThinkingClassifier(body, null, {
+      modelStr: "qwen/qwen3-max",
+      defaultClassifier: "laya",
+    });
+    expect(decision.level).toBe("high");
+    expect(body.reasoning_effort).toBe("high");
+  });
+});
+
 // The profile's models are fallbacks tried in order: the first model that
 // returns a usable decision wins; every other outcome advances to the next.
 describe("model fallback chain", () => {

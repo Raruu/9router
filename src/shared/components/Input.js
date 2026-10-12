@@ -1,5 +1,6 @@
 "use client";
 
+import { useLayoutEffect, useRef } from "react";
 import { cn } from "@/shared/utils/cn";
 
 export default function Input({
@@ -15,6 +16,7 @@ export default function Input({
   required = false,
   multiline = false,
   rows = 3,
+  autoResize = false,
   className,
   inputClassName,
   min,
@@ -22,6 +24,19 @@ export default function Input({
   step,
   ...props
 }) {
+  // Opt-in: grow the textarea to fit its content (min one `rows` tall). Runs
+  // before paint so the field never flashes a scrollbar mid-typing.
+  const textareaRef = useRef(null);
+  useLayoutEffect(() => {
+    if (!multiline || !autoResize) return;
+    const el = textareaRef.current;
+    if (!el) return;
+    // `scrollHeight` excludes the border, and Tailwind's preflight makes the
+    // textarea border-box, so add the border back or the last line clips.
+    const borders = el.offsetHeight - el.clientHeight;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight + borders}px`;
+  }, [multiline, autoResize, value]);
   // Shared field chrome so the textarea variant is visually identical to the
   // single-line input (label/error/hint, iOS zoom fix, focus ring).
   const fieldClassName = cn(
@@ -53,12 +68,13 @@ export default function Input({
           // `type` and the numeric constraints are deliberately not forwarded —
           // they are meaningless on a textarea.
           <textarea
+            ref={textareaRef}
             rows={rows}
             placeholder={placeholder}
             value={value}
             onChange={onChange}
             disabled={disabled}
-            className={cn(fieldClassName, "resize-y")}
+            className={cn(fieldClassName, autoResize ? "resize-none overflow-hidden" : "resize-y")}
             {...props}
           />
         ) : (

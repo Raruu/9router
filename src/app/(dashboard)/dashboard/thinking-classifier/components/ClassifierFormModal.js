@@ -180,6 +180,16 @@ export default function ClassifierFormModal({
       }
     >
       <div className="flex flex-col gap-5 max-h-[70vh] overflow-y-auto pr-1">
+        <div className="flex items-center justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-text-main">Active</p>
+            <p className="text-xs text-text-muted">
+              Active classifiers are advertised in every reasoning model&apos;s effort_tiers and accepted as an effort value.
+            </p>
+          </div>
+          <Toggle checked={form.isActive} onChange={(v) => set({ isActive: v })} className="shrink-0" />
+        </div>
+
         <Input
           label="Tier name"
           required
@@ -228,6 +238,7 @@ export default function ClassifierFormModal({
                   variant="ghost"
                   size="sm"
                   icon="delete"
+                  className="!text-red-500 hover:!bg-red-500/10"
                   onClick={() => removeModelRow(i)}
                   disabled={form.models.length <= 1}
                   title="Remove"
@@ -278,13 +289,6 @@ export default function ClassifierFormModal({
           )}
         </div>
 
-        <Toggle
-          checked={form.isActive}
-          onChange={(v) => set({ isActive: v })}
-          label="Active"
-          description="Active classifiers are advertised in every reasoning model's effort_tiers and accepted as an effort value."
-        />
-
         {form.mode === "argmax" ? (
           <div className="flex flex-col gap-3">
             <div>
@@ -308,6 +312,7 @@ export default function ClassifierFormModal({
                 <Input
                   className="flex-1"
                   multiline
+                  autoResize
                   rows={2}
                   value={q.instructions}
                   onChange={(e) => setQuestion(i, { instructions: e.target.value })}
@@ -317,11 +322,11 @@ export default function ClassifierFormModal({
                   variant="ghost"
                   size="sm"
                   icon="delete"
+                  className="!text-red-500 hover:!bg-red-500/10"
                   onClick={() => set({ questions: form.questions.filter((_, idx) => idx !== i) })}
                   disabled={form.questions.length <= 1}
-                >
-                  Remove
-                </Button>
+                  title="Remove"
+                />
               </div>
             ))}
             <Button
@@ -344,6 +349,7 @@ export default function ClassifierFormModal({
             </div>
             <Input
               multiline
+              autoResize
               rows={3}
               value={form.threshold.question.instructions}
               onChange={(e) => set({ threshold: { ...form.threshold, question: { ...form.threshold.question, instructions: e.target.value } } })}
@@ -372,11 +378,11 @@ export default function ClassifierFormModal({
                   variant="ghost"
                   size="sm"
                   icon="delete"
+                  className="!text-red-500 hover:!bg-red-500/10"
                   onClick={() => set({ threshold: { ...form.threshold, cuts: form.threshold.cuts.filter((_, idx) => idx !== i) } })}
                   disabled={form.threshold.cuts.length <= 1}
-                >
-                  Remove
-                </Button>
+                  title="Remove"
+                />
               </div>
             ))}
             <Button

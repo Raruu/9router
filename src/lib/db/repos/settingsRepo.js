@@ -38,6 +38,11 @@ export const DEFAULT_SETTINGS = {
   // request to what the serving member accepts); "intersection" = only levels
   // every member supports.
   comboEffortStrategy: "union",
+  // Name of a thinking-classifier profile to run when a client sends NO thinking
+  // intent at all (no effort value, no thinking/thinkingConfig object). Empty =
+  // leave such requests untouched (the pre-existing behavior). A name that is
+  // unknown or inactive is ignored (fail-open), same as an explicit tier.
+  defaultClassifier: "",
   // What GET /v1/models advertises: "all" | "combos" | "models".
   modelsExposure: "all",
   // Which non-LLM kinds (image/imageToText/video/stt/tts/embedding/systemone)
