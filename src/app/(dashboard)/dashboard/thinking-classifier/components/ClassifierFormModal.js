@@ -238,6 +238,7 @@ export default function ClassifierFormModal({
                   variant="ghost"
                   size="sm"
                   icon="delete"
+                  className="!text-red-500 hover:!bg-red-500/10"
                   onClick={() => removeModelRow(i)}
                   disabled={form.models.length <= 1}
                   title="Remove"
@@ -311,6 +312,7 @@ export default function ClassifierFormModal({
                 <Input
                   className="flex-1"
                   multiline
+                  autoResize
                   rows={2}
                   value={q.instructions}
                   onChange={(e) => setQuestion(i, { instructions: e.target.value })}
@@ -320,11 +322,11 @@ export default function ClassifierFormModal({
                   variant="ghost"
                   size="sm"
                   icon="delete"
+                  className="!text-red-500 hover:!bg-red-500/10"
                   onClick={() => set({ questions: form.questions.filter((_, idx) => idx !== i) })}
                   disabled={form.questions.length <= 1}
-                >
-                  Remove
-                </Button>
+                  title="Remove"
+                />
               </div>
             ))}
             <Button
@@ -347,6 +349,7 @@ export default function ClassifierFormModal({
             </div>
             <Input
               multiline
+              autoResize
               rows={3}
               value={form.threshold.question.instructions}
               onChange={(e) => set({ threshold: { ...form.threshold, question: { ...form.threshold.question, instructions: e.target.value } } })}
@@ -375,11 +378,11 @@ export default function ClassifierFormModal({
                   variant="ghost"
                   size="sm"
                   icon="delete"
+                  className="!text-red-500 hover:!bg-red-500/10"
                   onClick={() => set({ threshold: { ...form.threshold, cuts: form.threshold.cuts.filter((_, idx) => idx !== i) } })}
                   disabled={form.threshold.cuts.length <= 1}
-                >
-                  Remove
-                </Button>
+                  title="Remove"
+                />
               </div>
             ))}
             <Button

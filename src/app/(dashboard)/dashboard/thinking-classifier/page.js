@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Badge, Button, Card, CardSkeleton, ConfirmModal, Input, ModelSelectModal, Toggle } from "@/shared/components";
+import { Badge, Button, Card, CardSkeleton, ConfirmModal, Input, ModelSelectModal, Select, Toggle } from "@/shared/components";
 import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useNotificationStore } from "@/store/notificationStore";
 import { getProviderByAlias } from "@/shared/constants/providers";
@@ -28,6 +28,8 @@ function modelsSummary(profile) {
 export default function ThinkingClassifierPage() {
   const [classifiers, setClassifiers] = useState([]);
   const [activeProviders, setActiveProviders] = useState([]);
+  // Name of the profile run for requests that carry no thinking intent at all.
+  const [defaultClassifier, setDefaultClassifier] = useState("");
   const [loading, setLoading] = useState(true);
   const [showFormModal, setShowFormModal] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -47,14 +49,17 @@ export default function ThinkingClassifierPage() {
 
   const fetchData = useCallback(async () => {
     try {
-      const [classifiersRes, providersRes] = await Promise.all([
+      const [classifiersRes, providersRes, settingsRes] = await Promise.all([
         fetch("/api/thinking-classifiers", { cache: "no-store" }),
         fetch("/api/providers"),
+        fetch("/api/settings", { cache: "no-store" }),
       ]);
       const classifiersData = await classifiersRes.json();
       const providersData = providersRes.ok ? await providersRes.json() : {};
+      const settingsData = settingsRes.ok ? await settingsRes.json() : {};
       if (classifiersRes.ok) setClassifiers(classifiersData.classifiers || []);
       setActiveProviders(providersData.connections || []);
+      setDefaultClassifier(typeof settingsData.defaultClassifier === "string" ? settingsData.defaultClassifier : "");
     } catch (error) {
       console.log("Error fetching thinking classifiers:", error);
     } finally {
@@ -101,6 +106,23 @@ export default function ThinkingClassifierPage() {
       notify.error("Failed to save classifier");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleSetDefaultClassifier = async (next) => {
+    const previous = defaultClassifier;
+    setDefaultClassifier(next);
+    try {
+      const res = await fetch("/api/settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ defaultClassifier: next }),
+      });
+      if (!res.ok) throw new Error("update failed");
+    } catch (error) {
+      console.log("Error updating default classifier:", error);
+      setDefaultClassifier(previous);
+      notify.error("Failed to update the default classifier");
     }
   };
 
@@ -231,8 +253,42 @@ export default function ThinkingClassifierPage() {
     }
   };
 
+  // Active tiers plus, if the stored default no longer exists/is inactive, the
+  // stored name itself so the select reflects reality instead of silently
+  // snapping to "Default" (the resolver ignores an inactive name anyway).
+  const defaultClassifierOptions = (() => {
+    const options = [{ value: "", label: "Default (no classifier)" }];
+    const active = classifiers.filter((c) => c.isActive !== false);
+    for (const c of active) options.push({ value: c.name, label: c.name });
+    if (defaultClassifier && !active.some((c) => c.name === defaultClassifier)) {
+      options.push({ value: defaultClassifier, label: `${defaultClassifier} (inactive)` });
+    }
+    return options;
+  })();
+
   return (
     <div className="flex flex-col gap-4">
+        <Card>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-text-main">Default tier</p>
+              <p className="text-xs text-text-muted mt-0.5">
+                Runs this tier&apos;s classifier when a client sends no effort at all. &quot;Default&quot;
+                leaves such requests untouched.
+              </p>
+            </div>
+            <div className="w-full sm:w-[220px] shrink-0">
+              <Select
+                value={defaultClassifier}
+                onChange={(e) => handleSetDefaultClassifier(e.target.value)}
+                selectClassName="py-1.5 text-xs"
+                aria-label="Default thinking classifier tier"
+                options={defaultClassifierOptions}
+              />
+            </div>
+          </div>
+        </Card>
+
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="text-xl font-semibold text-text-main">Thinking Effort Classifier</h1>
@@ -303,7 +359,15 @@ export default function ThinkingClassifierPage() {
                     Export
                   </Button>
                   <Button variant="ghost" size="sm" icon="edit" onClick={() => openEditModal(classifier)}>Edit</Button>
-                  <Button variant="ghost" size="sm" icon="delete" onClick={() => handleDelete(classifier)}>Delete</Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    icon="delete"
+                    className="!text-red-500 hover:!bg-red-500/10"
+                    onClick={() => handleDelete(classifier)}
+                  >
+                    Delete
+                  </Button>
                 </div>
               </div>
 
