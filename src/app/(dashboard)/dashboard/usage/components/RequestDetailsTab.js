@@ -395,6 +395,19 @@ export default function RequestDetailsTab() {
                   )}
                 </div>
               )}
+              {/* Which classifier model answered and how long it took. Hidden on
+                  the fallback path, where no model produced the level. */}
+              {selectedDetail.thinking?.classifierModel && (
+                <div>
+                  <span className="text-text-muted">System-one:</span>{" "}
+                  <span className="text-text-main font-mono">
+                    {selectedDetail.thinking.classifierModel}
+                    {Number.isFinite(selectedDetail.thinking.classifierMs)
+                      ? ` · ${selectedDetail.thinking.classifierMs}ms`
+                      : ""}
+                  </span>
+                </div>
+              )}
               <div>
                 <span className="text-text-muted">Status:</span>{" "}
                 <span className={cn(

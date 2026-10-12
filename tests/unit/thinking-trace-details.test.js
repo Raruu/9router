@@ -89,11 +89,42 @@ describe("buildThinkingTrace", () => {
     });
     expect("scores" in empty).toBe(false);
   });
+
+  it("carries the answering model and its duration", () => {
+    expect(buildThinkingTrace({
+      requested: { mode: "level", level: "max" },
+      applied: { mode: "level", level: "max" },
+      classifier: { profile: "laya", requested: "laya", fallback: false, usedModel: "oc/jev-1.13-free", latencyMs: 812 },
+    })).toMatchObject({ classifierModel: "oc/jev-1.13-free", classifierMs: 812 });
+  });
+
+  it("omits the model and duration on the fallback path (no model answered)", () => {
+    const trace = buildThinkingTrace({
+      requested: { mode: "level", level: "laya" },
+      applied: { mode: "level", level: "medium" },
+      classifier: { profile: "laya", requested: "laya", fallback: true, usedModel: null, latencyMs: 30 },
+    });
+    expect("classifierModel" in trace).toBe(false);
+    // Duration is hidden with the model — the row does not render at all.
+    expect(trace.classifierMs).toBe(30);
+    expect(trace.fallback).toBe(true);
+  });
+
+  it("omits a non-finite duration but keeps a real 0ms", () => {
+    const base = { profile: "laya", requested: "laya", fallback: false, usedModel: "oc/a" };
+    expect("classifierMs" in buildThinkingTrace({ requested: null, applied: null, classifier: { ...base, latencyMs: NaN } })).toBe(false);
+    expect("classifierMs" in buildThinkingTrace({ requested: null, applied: null, classifier: { ...base, latencyMs: "slow" } })).toBe(false);
+    expect(buildThinkingTrace({ requested: null, applied: null, classifier: { ...base, latencyMs: 0 } }).classifierMs).toBe(0);
+  });
 });
 
 describe("request detail persistence", () => {
   it("persists the thinking trace through the repo whitelist", async () => {
-    const trace = { requested: "max", applied: "high", classifier: "laya", requestedTier: "laya", fallback: false };
+    const trace = {
+      requested: "max", applied: "high", classifier: "laya", requestedTier: "laya", fallback: false,
+      classifierModel: "oc/jev-1.13-free", classifierMs: 812,
+      scores: [{ level: "max", score: 0.9 }, { level: "low", score: 0.1 }],
+    };
     await db.saveRequestDetail(buildRequestDetail({
       provider: "openai",
       model: "gpt-5.4",

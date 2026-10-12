@@ -96,7 +96,9 @@ export function describeThinkingIntent(intent) {
 // and which classifier profile picked the level (null when none did). The
 // classifier's per-question scores ride along so the drawer can show why it
 // chose that level; the API trims them to the winner when request bodies are
-// hidden from the dashboard.
+// hidden from the dashboard. `classifierModel` names the model that answered
+// (absent on the fallback path, where no model did) and `classifierMs` is how
+// long that call took — both are metadata, never gated by the bodies toggle.
 export function buildThinkingTrace({ requested, applied, classifier }) {
   const requestedLabel = describeThinkingIntent(requested);
   const appliedLabel = describeThinkingIntent(applied);
@@ -104,10 +106,16 @@ export function buildThinkingTrace({ requested, applied, classifier }) {
   const scores = Array.isArray(classifier?.scores) && classifier.scores.length > 0
     ? classifier.scores
     : null;
+  const classifierModel = typeof classifier?.usedModel === "string" && classifier.usedModel
+    ? classifier.usedModel
+    : null;
+  const classifierMs = Number.isFinite(classifier?.latencyMs) ? classifier.latencyMs : null;
   return {
     ...(requestedLabel ? { requested: requestedLabel } : {}),
     ...(appliedLabel ? { applied: appliedLabel } : {}),
     ...(classifier ? { classifier: classifier.profile, requestedTier: classifier.requested, fallback: classifier.fallback === true } : {}),
+    ...(classifierModel ? { classifierModel } : {}),
+    ...(classifierMs !== null ? { classifierMs } : {}),
     ...(scores ? { scores } : {}),
   };
 }
