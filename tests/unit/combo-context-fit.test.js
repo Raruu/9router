@@ -4,7 +4,7 @@
 // wasting an upstream 400 on a 200K one. Non-fitting members stay as last
 // resort. With the setting off (default), order is byte-identical to before.
 import { describe, it, expect, vi } from "vitest";
-import { estimateRequestTokens, contextFitBudget, CONTEXT_FIT_HEADROOM } from "../../open-sse/utils/tokenEstimate.js";
+import { estimateRequestTokens, estimateTextTokens, contextFitBudget, CONTEXT_FIT_HEADROOM } from "../../open-sse/utils/tokenEstimate.js";
 import { reorderByCapabilities, handleComboChat } from "../../open-sse/services/combo.js";
 import { mergeWithDefaults } from "../../src/lib/db/repos/settingsRepo.js";
 
@@ -54,6 +54,20 @@ describe("estimateRequestTokens", () => {
   it("applies the shared headroom formula", () => {
     expect(CONTEXT_FIT_HEADROOM).toBe(0.15);
     expect(contextFitBudget(100000)).toBe(115000);
+  });
+});
+
+describe("estimateTextTokens", () => {
+  it("counts a raw string without JSON envelope overhead", () => {
+    expect(estimateTextTokens("a".repeat(4000))).toBe(1000);
+    expect(estimateTextTokens("中".repeat(100))).toBe(100);
+  });
+
+  it("returns 0 for empty or non-string input", () => {
+    expect(estimateTextTokens("")).toBe(0);
+    expect(estimateTextTokens(null)).toBe(0);
+    expect(estimateTextTokens(undefined)).toBe(0);
+    expect(estimateTextTokens(123)).toBe(0);
   });
 });
 

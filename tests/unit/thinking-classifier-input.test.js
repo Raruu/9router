@@ -55,7 +55,7 @@ describe("normalizeClassifierInput", () => {
     const { value } = normalizeClassifierInput({ name: "tier", model: "m" });
     expect(value.inputMode).toBe("latest-turn");
     expect(value.tailTurns).toBe(6);
-    expect(value.tailChars).toBe(2000);
+    expect(value.tailTokens).toBe(500);
   });
 
   it("accepts a known input mode and rejects an unknown one", () => {
@@ -65,9 +65,9 @@ describe("normalizeClassifierInput", () => {
   });
 
   it("clamps the tail window bounds", () => {
-    expect(normalizeClassifierInput({ name: "tier", model: "m", tailTurns: 999, tailChars: 1 }).value).toMatchObject({ tailTurns: 20, tailChars: 200 });
-    expect(normalizeClassifierInput({ name: "tier", model: "m", tailTurns: 0, tailChars: 99999 }).value).toMatchObject({ tailTurns: 1, tailChars: 4000 });
-    expect(normalizeClassifierInput({ name: "tier", model: "m", tailTurns: "x", tailChars: "y" }).value).toMatchObject({ tailTurns: 6, tailChars: 2000 });
+    expect(normalizeClassifierInput({ name: "tier", model: "m", tailTurns: 999, tailTokens: 1 }).value).toMatchObject({ tailTurns: 20, tailTokens: 50 });
+    expect(normalizeClassifierInput({ name: "tier", model: "m", tailTurns: 0, tailTokens: 99999 }).value).toMatchObject({ tailTurns: 1, tailTokens: 1000 });
+    expect(normalizeClassifierInput({ name: "tier", model: "m", tailTurns: "x", tailTokens: "y" }).value).toMatchObject({ tailTurns: 6, tailTokens: 500 });
   });
 
   it("rejects reserved and malformed names", () => {

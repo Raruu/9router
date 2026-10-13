@@ -22,6 +22,19 @@ const DATA_URI_PLACEHOLDER = "data:image/placeholder;base64,AA";
 export const CONTEXT_FIT_HEADROOM = 0.15;
 
 /**
+ * Estimate the token count of a raw text string (no JSON wrapper overhead).
+ * Same heuristic as estimateRequestTokens: CJK codepoints ~1 token each, the
+ * rest ~4 chars/token. Used to bound the classifier's tail-window by tokens.
+ * @param {string} text
+ * @returns {number} estimated tokens (0 for empty/unusable input)
+ */
+export function estimateTextTokens(text) {
+  if (typeof text !== "string" || !text) return 0;
+  const cjk = (text.match(CJK_RE) || []).length;
+  return Math.ceil(cjk + (text.length - cjk) / CHARS_PER_TOKEN);
+}
+
+/**
  * Estimate the prompt token count of a request body.
  * @param {object} body - client request body in any supported format
  * @returns {number} estimated prompt tokens (0 for unusable input)
@@ -35,9 +48,7 @@ export function estimateRequestTokens(body) {
     return 0;
   }
   if (!text) return 0;
-  text = text.replace(DATA_URI_RE, DATA_URI_PLACEHOLDER);
-  const cjk = (text.match(CJK_RE) || []).length;
-  return Math.ceil(cjk + (text.length - cjk) / CHARS_PER_TOKEN);
+  return estimateTextTokens(text.replace(DATA_URI_RE, DATA_URI_PLACEHOLDER));
 }
 
 /**

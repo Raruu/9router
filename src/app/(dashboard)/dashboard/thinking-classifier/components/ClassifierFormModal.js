@@ -11,20 +11,20 @@ import {
   DEFAULT_CLASSIFIER_TIMEOUT_MODE,
   DEFAULT_CLASSIFIER_INPUT_MODE,
   DEFAULT_CLASSIFIER_TAIL_TURNS,
-  DEFAULT_CLASSIFIER_TAIL_CHARS,
+  DEFAULT_CLASSIFIER_TAIL_TOKENS,
   GENERIC_ARGMAX_QUESTIONS,
   GENERIC_THRESHOLD_QUESTION,
   GENERIC_THRESHOLD_CUTS,
   MAX_CLASSIFIER_MODELS,
   MAX_CLASSIFIER_TIMEOUT_MS,
   MAX_CLASSIFIER_TAIL_TURNS,
-  MAX_CLASSIFIER_TAIL_CHARS,
+  MAX_CLASSIFIER_TAIL_TOKENS,
   MIN_CLASSIFIER_TIMEOUT_MS,
   MIN_CLASSIFIER_TAIL_TURNS,
-  MIN_CLASSIFIER_TAIL_CHARS,
+  MIN_CLASSIFIER_TAIL_TOKENS,
   clampClassifierTimeout,
   clampClassifierTailTurns,
-  clampClassifierTailChars,
+  clampClassifierTailTokens,
   normalizeClassifierModels,
   parseLevelList,
   questionLevels,
@@ -75,7 +75,7 @@ export function classifierToForm(classifier = {}) {
       ? classifier.inputMode
       : DEFAULT_CLASSIFIER_INPUT_MODE,
     tailTurns: clampClassifierTailTurns(classifier.tailTurns) ?? DEFAULT_CLASSIFIER_TAIL_TURNS,
-    tailChars: clampClassifierTailChars(classifier.tailChars) ?? DEFAULT_CLASSIFIER_TAIL_CHARS,
+    tailTokens: clampClassifierTailTokens(classifier.tailTokens) ?? DEFAULT_CLASSIFIER_TAIL_TOKENS,
     isActive: classifier.isActive !== false,
     questions,
     threshold,
@@ -96,7 +96,7 @@ const INPUT_MODE_OPTIONS = [
 const INPUT_MODE_HINTS = {
   "latest-turn": "The newest turn with any text, including a tool result or an assistant message. The input shifts as an agent progresses — the default.",
   "last-user": "The newest user message only. Tool results and assistant turns are skipped, so the classifier always sees the original task text.",
-  "tail-window": "The last few turns joined (any role, tool results included), bounded by the turn count and character budget below.",
+  "tail-window": "The last few turns joined (any role, tool results included), bounded by the turn count and token budget below.",
 };
 
 export default function ClassifierFormModal({
@@ -178,7 +178,7 @@ export default function ClassifierFormModal({
     mode: form.mode,
     inputMode: form.inputMode,
     tailTurns: Number(form.tailTurns) || DEFAULT_CLASSIFIER_TAIL_TURNS,
-    tailChars: Number(form.tailChars) || DEFAULT_CLASSIFIER_TAIL_CHARS,
+    tailTokens: Number(form.tailTokens) || DEFAULT_CLASSIFIER_TAIL_TOKENS,
     isActive: form.isActive,
     questions: form.questions.map((q) => ({
       levels: parseLevelList(q.levelsText),
@@ -357,13 +357,13 @@ export default function ClassifierFormModal({
                 </div>
                 <div className="min-w-0 flex-1 basis-full sm:basis-44">
                   <Input
-                    label="Characters"
+                    label="Tokens"
                     type="number"
-                    min={MIN_CLASSIFIER_TAIL_CHARS}
-                    max={MAX_CLASSIFIER_TAIL_CHARS}
-                    value={form.tailChars}
-                    onChange={(e) => set({ tailChars: e.target.value })}
-                    hint="Character budget for the joined turns"
+                    min={MIN_CLASSIFIER_TAIL_TOKENS}
+                    max={MAX_CLASSIFIER_TAIL_TOKENS}
+                    value={form.tailTokens}
+                    onChange={(e) => set({ tailTokens: e.target.value })}
+                    hint="Token budget for the joined turns (approximate)"
                   />
                 </div>
               </>

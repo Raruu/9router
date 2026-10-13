@@ -9,7 +9,7 @@
 //     "version": 1,
 //     "exportedAt": "<ISO>",
 //     "classifier": { name, models, timeoutMode, timeoutMs, mode, inputMode,
-//                     tailTurns, tailChars, questions, threshold, fallbackLevel }
+//                     tailTurns, tailTokens, questions, threshold, fallbackLevel }
 //   }
 //
 // `id`, timestamps and `isActive` are deliberately NOT exported: ids are
@@ -25,12 +25,12 @@ import {
   DEFAULT_CLASSIFIER_FALLBACK_LEVEL,
   DEFAULT_CLASSIFIER_INPUT_MODE,
   DEFAULT_CLASSIFIER_TAIL_TURNS,
-  DEFAULT_CLASSIFIER_TAIL_CHARS,
+  DEFAULT_CLASSIFIER_TAIL_TOKENS,
   MAX_CLASSIFIER_MODELS,
   validateClassifierName,
   clampClassifierTimeout,
   clampClassifierTailTurns,
-  clampClassifierTailChars,
+  clampClassifierTailTokens,
   normalizeClassifierModels,
   questionLevels,
   questionIdFromLevels,
@@ -61,7 +61,7 @@ export function buildClassifierExport(classifier, date = new Date()) {
       mode: CLASSIFIER_MODES.includes(classifier?.mode) ? classifier.mode : "argmax",
       inputMode: CLASSIFIER_INPUT_MODES.includes(classifier?.inputMode) ? classifier.inputMode : DEFAULT_CLASSIFIER_INPUT_MODE,
       tailTurns: clampClassifierTailTurns(classifier?.tailTurns) ?? DEFAULT_CLASSIFIER_TAIL_TURNS,
-      tailChars: clampClassifierTailChars(classifier?.tailChars) ?? DEFAULT_CLASSIFIER_TAIL_CHARS,
+      tailTokens: clampClassifierTailTokens(classifier?.tailTokens) ?? DEFAULT_CLASSIFIER_TAIL_TOKENS,
       questions: Array.isArray(classifier?.questions) ? classifier.questions : [],
       threshold: classifier?.threshold && typeof classifier.threshold === "object" ? classifier.threshold : {},
       fallbackLevel: CLASSIFIER_FALLBACK_LEVELS.includes(classifier?.fallbackLevel)
@@ -158,7 +158,7 @@ export function parseClassifierImport(text) {
       mode,
       inputMode: CLASSIFIER_INPUT_MODES.includes(raw.inputMode) ? raw.inputMode : DEFAULT_CLASSIFIER_INPUT_MODE,
       tailTurns: clampClassifierTailTurns(raw.tailTurns) ?? DEFAULT_CLASSIFIER_TAIL_TURNS,
-      tailChars: clampClassifierTailChars(raw.tailChars) ?? DEFAULT_CLASSIFIER_TAIL_CHARS,
+      tailTokens: clampClassifierTailTokens(raw.tailTokens) ?? DEFAULT_CLASSIFIER_TAIL_TOKENS,
       questions,
       threshold,
       fallbackLevel: CLASSIFIER_FALLBACK_LEVELS.includes(raw.fallbackLevel)

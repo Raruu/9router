@@ -20,6 +20,7 @@ import { handleSystemoneCore } from "open-sse/handlers/systemoneCore.js";
 import { extractTextContent } from "open-sse/translator/formats/gemini.js";
 import { coerceResponsesOutput } from "open-sse/translator/formats/responsesApi.js";
 import { CLAUDE_BLOCK, RESPONSES_ITEM } from "open-sse/translator/schema/index.js";
+import { estimateTextTokens } from "open-sse/utils/tokenEstimate.js";
 import { extractThinking } from "open-sse/translator/concerns/thinkingUnified.js";
 import { comboEffortTiers } from "open-sse/providers/comboCapabilities.js";
 import { getThinkingLevels } from "open-sse/providers/thinkingLevels.js";
@@ -30,12 +31,12 @@ import {
   pickFirstSupported,
   profileModels,
   clampClassifierTailTurns,
-  clampClassifierTailChars,
+  clampClassifierTailTokens,
   DEFAULT_CLASSIFIER_TIMEOUT_MS,
   DEFAULT_CLASSIFIER_FALLBACK_LEVEL,
   DEFAULT_CLASSIFIER_INPUT_MODE,
   DEFAULT_CLASSIFIER_TAIL_TURNS,
-  DEFAULT_CLASSIFIER_TAIL_CHARS,
+  DEFAULT_CLASSIFIER_TAIL_TOKENS,
   CLASSIFIER_FALLBACK_LEVELS,
   CLASSIFIER_INPUT_MODES,
 } from "@/shared/constants/thinkingClassifier.js";
@@ -202,11 +203,21 @@ export function collectTurns(body) {
   return turns;
 }
 
-// Keep the newest `maxChars` characters (front-truncate), so the freshest text
-// survives the budget. Returns the input unchanged when it already fits.
-function clampFromFront(text, maxChars) {
-  if (text.length <= maxChars) return text;
-  return text.slice(text.length - maxChars).trimStart();
+// Keep the newest text that fits `maxTokens` (front-truncate), so the freshest
+// text survives the budget. Returns the input unchanged when it already fits.
+// The estimate grows monotonically with suffix length, so binary-search the
+// largest fitting suffix instead of estimating every prefix.
+function clampToTokenBudget(text, maxTokens) {
+  if (estimateTextTokens(text) <= maxTokens) return text;
+  // Largest suffix length that still fits (the estimate grows with length).
+  let lo = 0;
+  let hi = text.length;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (estimateTextTokens(text.slice(text.length - mid)) <= maxTokens) lo = mid;
+    else hi = mid - 1;
+  }
+  return text.slice(text.length - lo).trimStart();
 }
 
 /**
@@ -216,7 +227,7 @@ function clampFromFront(text, maxChars) {
  *   last-user   — the newest user turn's text, skipping tool results and
  *                 assistant turns (the original single-message behavior).
  *   tail-window — the last N turns joined (any role), bounded by a turn count
- *                 and a character budget.
+ *                 and a token budget.
  * The caller applies the final PROMPT_TEXT_MAX cap.
  */
 export function extractPromptText(body, options = {}) {
@@ -233,14 +244,14 @@ export function extractPromptText(body, options = {}) {
 
   if (mode === "tail-window") {
     const maxTurns = clampClassifierTailTurns(options.tailTurns) ?? DEFAULT_CLASSIFIER_TAIL_TURNS;
-    const maxChars = clampClassifierTailChars(options.tailChars) ?? DEFAULT_CLASSIFIER_TAIL_CHARS;
+    const maxTokens = clampClassifierTailTokens(options.tailTokens) ?? DEFAULT_CLASSIFIER_TAIL_TOKENS;
     const picked = [];
     for (let i = turns.length - 1; i >= 0 && picked.length < maxTurns; i--) {
       const text = (turns[i].text || turns[i].toolText).trim();
       if (text) picked.push(text);
     }
     picked.reverse();
-    return clampFromFront(picked.join("\n"), maxChars);
+    return clampToTokenBudget(picked.join("\n"), maxTokens);
   }
 
   // last-user
@@ -283,7 +294,7 @@ export async function classifyWithProfile({ profile, body, log }) {
     const text = extractPromptText(body, {
       mode: profile?.inputMode,
       tailTurns: profile?.tailTurns,
-      tailChars: profile?.tailChars,
+      tailTokens: profile?.tailTokens,
     }).slice(0, PROMPT_TEXT_MAX);
     if (!text) return fail("no prompt text");
 

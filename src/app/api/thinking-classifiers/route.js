@@ -14,7 +14,7 @@ import {
   DEFAULT_CLASSIFIER_TIMEOUT_MODE,
   DEFAULT_CLASSIFIER_INPUT_MODE,
   DEFAULT_CLASSIFIER_TAIL_TURNS,
-  DEFAULT_CLASSIFIER_TAIL_CHARS,
+  DEFAULT_CLASSIFIER_TAIL_TOKENS,
   GENERIC_ARGMAX_QUESTIONS,
   GENERIC_THRESHOLD_QUESTION,
   GENERIC_THRESHOLD_CUTS,
@@ -22,7 +22,7 @@ import {
   questionIdFromLevels,
   clampClassifierTimeout,
   clampClassifierTailTurns,
-  clampClassifierTailChars,
+  clampClassifierTailTokens,
   normalizeClassifierModels,
 } from "@/shared/constants/thinkingClassifier.js";
 
@@ -108,7 +108,7 @@ export function normalizeClassifierInput(body = {}) {
       timeoutMs,
       inputMode: CLASSIFIER_INPUT_MODES.includes(body.inputMode) ? body.inputMode : DEFAULT_CLASSIFIER_INPUT_MODE,
       tailTurns: clampClassifierTailTurns(body.tailTurns) ?? DEFAULT_CLASSIFIER_TAIL_TURNS,
-      tailChars: clampClassifierTailChars(body.tailChars) ?? DEFAULT_CLASSIFIER_TAIL_CHARS,
+      tailTokens: clampClassifierTailTokens(body.tailTokens) ?? DEFAULT_CLASSIFIER_TAIL_TOKENS,
     },
   };
 }

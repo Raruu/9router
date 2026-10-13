@@ -51,20 +51,21 @@ export const MAX_CLASSIFIER_MODELS = 8;
 //                 are skipped (the original behavior, kept for profiles that
 //                 want the task text alone).
 //   tail-window — the last N turns (any role, tool results included) joined,
-//                 bounded by a turn count and a character budget.
+//                 bounded by a turn count and a token budget.
 export const CLASSIFIER_INPUT_MODES = Object.freeze(["latest-turn", "last-user", "tail-window"]);
 export const DEFAULT_CLASSIFIER_INPUT_MODE = "latest-turn";
 
 // Tail-window sizing (both controls apply): keep the newest turns until either
-// the turn count or the character budget is reached.
+// the turn count or the token budget is reached.
 export const DEFAULT_CLASSIFIER_TAIL_TURNS = 6;
 export const MIN_CLASSIFIER_TAIL_TURNS = 1;
 export const MAX_CLASSIFIER_TAIL_TURNS = 20;
-export const DEFAULT_CLASSIFIER_TAIL_CHARS = 2000;
-export const MIN_CLASSIFIER_TAIL_CHARS = 200;
+export const DEFAULT_CLASSIFIER_TAIL_TOKENS = 500;
+export const MIN_CLASSIFIER_TAIL_TOKENS = 50;
 // The extractor's hard ceiling on the text handed to the decision model
-// (mirrors PROMPT_TEXT_MAX in the server-side classifier service).
-export const MAX_CLASSIFIER_TAIL_CHARS = 4000;
+// (mirrors PROMPT_TEXT_MAX in the server-side classifier service; at the
+// heuristic ~4 chars/token, 1000 tokens ≈ the 4000-char cap).
+export const MAX_CLASSIFIER_TAIL_TOKENS = 1000;
 
 // Clamp a timeout to the accepted range, or null when not a finite number.
 export function clampClassifierTimeout(value) {
@@ -80,11 +81,11 @@ export function clampClassifierTailTurns(value) {
   return Math.min(MAX_CLASSIFIER_TAIL_TURNS, Math.max(MIN_CLASSIFIER_TAIL_TURNS, Math.round(n)));
 }
 
-// Clamp a tail-window character budget, or null when not a finite number.
-export function clampClassifierTailChars(value) {
+// Clamp a tail-window token budget, or null when not a finite number.
+export function clampClassifierTailTokens(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return null;
-  return Math.min(MAX_CLASSIFIER_TAIL_CHARS, Math.max(MIN_CLASSIFIER_TAIL_CHARS, Math.round(n)));
+  return Math.min(MAX_CLASSIFIER_TAIL_TOKENS, Math.max(MIN_CLASSIFIER_TAIL_TOKENS, Math.round(n)));
 }
 
 // Normalize a profile's model list into `[{ model, timeoutMs }]`, tried in
@@ -235,7 +236,7 @@ export function genericClassifierTemplate() {
     timeoutMode: DEFAULT_CLASSIFIER_TIMEOUT_MODE,
     inputMode: DEFAULT_CLASSIFIER_INPUT_MODE,
     tailTurns: DEFAULT_CLASSIFIER_TAIL_TURNS,
-    tailChars: DEFAULT_CLASSIFIER_TAIL_CHARS,
+    tailTokens: DEFAULT_CLASSIFIER_TAIL_TOKENS,
     mode: "argmax",
     questions: GENERIC_ARGMAX_QUESTIONS.map((q) => ({ ...q, levels: [...q.levels] })),
     threshold: {

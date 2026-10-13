@@ -7,6 +7,7 @@ import {
   collectTurns,
   extractPromptText,
 } from "../../src/sse/services/thinkingClassifier.js";
+import { estimateTextTokens } from "../../open-sse/utils/tokenEstimate.js";
 
 const lastUser = (body) => extractPromptText(body, { mode: "last-user" });
 const latestTurn = (body) => extractPromptText(body, { mode: "latest-turn" });
@@ -115,17 +116,26 @@ describe("tail-window mode (last N turns, bounded by chars)", () => {
     expect(tailWindow(conversation, { tailTurns: 10 })).toBe("one\ntwo\nthree\nfour");
   });
 
-  it("keeps the newest characters when the char budget is small", () => {
-    const long = "x".repeat(300);
+  it("keeps the newest tokens when the token budget is small", () => {
+    const long = "x".repeat(1000); // ~250 tokens
     const body = { messages: [
       { role: "user", content: long },
       { role: "user", content: "the newest tail" },
     ] };
-    const result = tailWindow(body, { tailTurns: 2, tailChars: 200 });
-    // The joined text (300 + newline + 15) is front-truncated to the 200 budget,
-    // so the newest turn survives whole.
-    expect(result.length).toBe(200);
+    const result = tailWindow(body, { tailTurns: 2, tailTokens: 100 });
+    // The joined text is front-truncated to ~100 tokens (~400 chars), so the
+    // newest turn survives whole and the estimate stays within budget.
+    expect(estimateTextTokens(result)).toBeLessThanOrEqual(100);
+    expect(result.length).toBeLessThan(500);
     expect(result.endsWith("the newest tail")).toBe(true);
+  });
+
+  it("counts CJK characters as roughly one token each", () => {
+    const body = { messages: [{ role: "user", content: "中".repeat(2000) }] };
+    const result = tailWindow(body, { tailTurns: 1, tailTokens: 100 });
+    // ~1 token per CJK char: a 100-token budget keeps ~100 chars, far fewer
+    // than the ~400 the ASCII heuristic would allow.
+    expect(result.length).toBeLessThanOrEqual(110);
   });
 
   it("includes tool results as turns", () => {

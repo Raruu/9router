@@ -19,7 +19,7 @@ const PROFILE = {
   mode: "argmax",
   inputMode: "tail-window",
   tailTurns: 8,
-  tailChars: 1500,
+  tailTokens: 800,
   questions: [
     { id: "q_low", levels: ["low"], instructions: "simple?" },
     { id: "q_high", levels: ["max", "high"], instructions: "hard?" },
@@ -42,7 +42,7 @@ describe("buildClassifierExport", () => {
     expect(payload.classifier.fallbackLevel).toBe("high");
     expect(payload.classifier.inputMode).toBe("tail-window");
     expect(payload.classifier.tailTurns).toBe(8);
-    expect(payload.classifier.tailChars).toBe(1500);
+    expect(payload.classifier.tailTokens).toBe(800);
     // Routing state and install-local identity must not travel in a file.
     expect("id" in payload.classifier).toBe(false);
     expect("isActive" in payload.classifier).toBe(false);
@@ -78,7 +78,7 @@ describe("parseClassifierImport", () => {
     expect(classifier.fallbackLevel).toBe("high");
     expect(classifier.inputMode).toBe("tail-window");
     expect(classifier.tailTurns).toBe(8);
-    expect(classifier.tailChars).toBe(1500);
+    expect(classifier.tailTokens).toBe(800);
   });
 
   it("defaults the input mode when a file omits it", () => {
@@ -90,7 +90,7 @@ describe("parseClassifierImport", () => {
     }));
     expect(classifier.inputMode).toBe("latest-turn");
     expect(classifier.tailTurns).toBe(6);
-    expect(classifier.tailChars).toBe(2000);
+    expect(classifier.tailTokens).toBe(500);
   });
 
   it("clamps an out-of-range tail window from a file", () => {
@@ -100,11 +100,11 @@ describe("parseClassifierImport", () => {
       mode: "argmax",
       inputMode: "tail-window",
       tailTurns: 999,
-      tailChars: 1,
+      tailTokens: 1,
       questions: [{ id: "q", levels: ["low"] }],
     }));
     expect(classifier.tailTurns).toBe(20);
-    expect(classifier.tailChars).toBe(200);
+    expect(classifier.tailTokens).toBe(50);
   });
 
   it("accepts a bare classifier object", () => {
