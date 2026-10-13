@@ -143,6 +143,27 @@ describe("applyThinkingClassifier", () => {
     ]);
   });
 
+  it("defaults to the newest turn as the state (no stored inputMode)", async () => {
+    const body = { reasoning_effort: "laya", messages: [
+      { role: "user", content: "the original goal" },
+      { role: "assistant", tool_calls: [{ id: "t1" }] },
+      { role: "tool", tool_call_id: "t1", content: "a big tool result" },
+    ] };
+    await applyThinkingClassifier(body, null, { modelStr: "anthropic/claude-opus-4.6" });
+    expect(mocks.handleSystemoneCore.mock.calls[0][0].body.state).toBe("a big tool result");
+  });
+
+  it("sends the last user message when the profile selects last-user", async () => {
+    mocks.profile = { ...PROFILE, inputMode: "last-user" };
+    const body = { reasoning_effort: "laya", messages: [
+      { role: "user", content: "the original goal" },
+      { role: "assistant", tool_calls: [{ id: "t1" }] },
+      { role: "tool", tool_call_id: "t1", content: "a big tool result" },
+    ] };
+    await applyThinkingClassifier(body, null, { modelStr: "anthropic/claude-opus-4.6" });
+    expect(mocks.handleSystemoneCore.mock.calls[0][0].body.state).toBe("the original goal");
+  });
+
   it("reports no scores when the classifier fails", async () => {
     mocks.handleSystemoneCore.mockImplementation(async () => ({ success: false, error: "down" }));
     const body = { reasoning_effort: "laya", messages: [{ role: "user", content: "hi" }] };

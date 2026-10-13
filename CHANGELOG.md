@@ -1,3 +1,22 @@
+# v0.5.99-5 (2026-10-13)
+
+## Features
+- **Thinking Classifier**: a profile chooses what text its decision model
+  classifies — the newest turn with any text, tool results and assistant
+  messages included (the new default), the newest user message (the previous
+  behavior), or a tail window of the last few turns bounded by a turn count and
+  a token budget. Later requests in an agent run are tool results, not user
+  messages, so the old input re-sent the original prompt and decided the same
+  level for the whole run. The extractor reads all four wire shapes (OpenAI
+  tool results, Claude `tool_result` blocks, Gemini `functionResponse`,
+  Responses `function_call_output`), the Gemini scan is now role-aware, and the
+  token budget uses the same CJK-aware estimate as combo context fit
+
+## Improvements
+- **Thinking Classifier**: the create/edit form lays its settings out as
+  full-width wrapping fields — Timeout mode sits directly before Timeout (ms),
+  a lone field fills its row, and threshold cut rows stretch to the full width
+
 # v0.5.99-4 (2026-10-12)
 
 ## Features

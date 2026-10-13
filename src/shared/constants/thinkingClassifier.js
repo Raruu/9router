@@ -43,11 +43,49 @@ export const DEFAULT_CLASSIFIER_TIMEOUT_MODE = "uniform";
 // A profile tries its models in order as fallbacks; this caps the list.
 export const MAX_CLASSIFIER_MODELS = 8;
 
+// Which text of a request is sent to the decision model:
+//   latest-turn — the newest turn with any text, including a tool result or an
+//                 assistant message, so the input shifts as an agent progresses.
+//                 Default.
+//   last-user   — the newest user turn's text; tool results and assistant turns
+//                 are skipped (the original behavior, kept for profiles that
+//                 want the task text alone).
+//   tail-window — the last N turns (any role, tool results included) joined,
+//                 bounded by a turn count and a token budget.
+export const CLASSIFIER_INPUT_MODES = Object.freeze(["latest-turn", "last-user", "tail-window"]);
+export const DEFAULT_CLASSIFIER_INPUT_MODE = "latest-turn";
+
+// Tail-window sizing (both controls apply): keep the newest turns until either
+// the turn count or the token budget is reached.
+export const DEFAULT_CLASSIFIER_TAIL_TURNS = 6;
+export const MIN_CLASSIFIER_TAIL_TURNS = 1;
+export const MAX_CLASSIFIER_TAIL_TURNS = 20;
+export const DEFAULT_CLASSIFIER_TAIL_TOKENS = 500;
+export const MIN_CLASSIFIER_TAIL_TOKENS = 50;
+// The extractor's hard ceiling on the text handed to the decision model
+// (mirrors PROMPT_TEXT_MAX in the server-side classifier service; at the
+// heuristic ~4 chars/token, 1000 tokens ≈ the 4000-char cap).
+export const MAX_CLASSIFIER_TAIL_TOKENS = 1000;
+
 // Clamp a timeout to the accepted range, or null when not a finite number.
 export function clampClassifierTimeout(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return null;
   return Math.min(MAX_CLASSIFIER_TIMEOUT_MS, Math.max(MIN_CLASSIFIER_TIMEOUT_MS, Math.round(n)));
+}
+
+// Clamp a tail-window turn count, or null when not a finite number.
+export function clampClassifierTailTurns(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.min(MAX_CLASSIFIER_TAIL_TURNS, Math.max(MIN_CLASSIFIER_TAIL_TURNS, Math.round(n)));
+}
+
+// Clamp a tail-window token budget, or null when not a finite number.
+export function clampClassifierTailTokens(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.min(MAX_CLASSIFIER_TAIL_TOKENS, Math.max(MIN_CLASSIFIER_TAIL_TOKENS, Math.round(n)));
 }
 
 // Normalize a profile's model list into `[{ model, timeoutMs }]`, tried in
@@ -196,6 +234,9 @@ export function genericClassifierTemplate() {
   return {
     models: [{ model: "oc/jev-1.13-free", timeoutMs: DEFAULT_CLASSIFIER_TIMEOUT_MS }],
     timeoutMode: DEFAULT_CLASSIFIER_TIMEOUT_MODE,
+    inputMode: DEFAULT_CLASSIFIER_INPUT_MODE,
+    tailTurns: DEFAULT_CLASSIFIER_TAIL_TURNS,
+    tailTokens: DEFAULT_CLASSIFIER_TAIL_TOKENS,
     mode: "argmax",
     questions: GENERIC_ARGMAX_QUESTIONS.map((q) => ({ ...q, levels: [...q.levels] })),
     threshold: {

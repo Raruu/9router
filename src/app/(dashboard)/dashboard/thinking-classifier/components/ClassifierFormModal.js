@@ -6,15 +6,25 @@ import {
   CLASSIFIER_FALLBACK_LEVELS,
   CLASSIFIER_MODES,
   CLASSIFIER_TIMEOUT_MODES,
+  CLASSIFIER_INPUT_MODES,
   DEFAULT_CLASSIFIER_TIMEOUT_MS,
   DEFAULT_CLASSIFIER_TIMEOUT_MODE,
+  DEFAULT_CLASSIFIER_INPUT_MODE,
+  DEFAULT_CLASSIFIER_TAIL_TURNS,
+  DEFAULT_CLASSIFIER_TAIL_TOKENS,
   GENERIC_ARGMAX_QUESTIONS,
   GENERIC_THRESHOLD_QUESTION,
   GENERIC_THRESHOLD_CUTS,
   MAX_CLASSIFIER_MODELS,
   MAX_CLASSIFIER_TIMEOUT_MS,
+  MAX_CLASSIFIER_TAIL_TURNS,
+  MAX_CLASSIFIER_TAIL_TOKENS,
   MIN_CLASSIFIER_TIMEOUT_MS,
+  MIN_CLASSIFIER_TAIL_TURNS,
+  MIN_CLASSIFIER_TAIL_TOKENS,
   clampClassifierTimeout,
+  clampClassifierTailTurns,
+  clampClassifierTailTokens,
   normalizeClassifierModels,
   parseLevelList,
   questionLevels,
@@ -61,6 +71,11 @@ export function classifierToForm(classifier = {}) {
       ? classifier.timeoutMode
       : DEFAULT_CLASSIFIER_TIMEOUT_MODE,
     mode,
+    inputMode: CLASSIFIER_INPUT_MODES.includes(classifier.inputMode)
+      ? classifier.inputMode
+      : DEFAULT_CLASSIFIER_INPUT_MODE,
+    tailTurns: clampClassifierTailTurns(classifier.tailTurns) ?? DEFAULT_CLASSIFIER_TAIL_TURNS,
+    tailTokens: clampClassifierTailTokens(classifier.tailTokens) ?? DEFAULT_CLASSIFIER_TAIL_TOKENS,
     isActive: classifier.isActive !== false,
     questions,
     threshold,
@@ -70,6 +85,19 @@ export function classifierToForm(classifier = {}) {
 }
 
 const FALLBACK_OPTIONS = CLASSIFIER_FALLBACK_LEVELS.map((level) => ({ value: level, label: level.charAt(0).toUpperCase() + level.slice(1) }));
+
+const INPUT_MODE_OPTIONS = [
+  { value: "latest-turn", label: "Latest turn (any role)" },
+  { value: "last-user", label: "Last user message" },
+  { value: "tail-window", label: "Tail window" },
+];
+
+// One-line explanation per input mode, shown under the select.
+const INPUT_MODE_HINTS = {
+  "latest-turn": "The newest turn with any text, including a tool result or an assistant message. The input shifts as an agent progresses — the default.",
+  "last-user": "The newest user message only. Tool results and assistant turns are skipped, so the classifier always sees the original task text.",
+  "tail-window": "The last few turns joined (any role, tool results included), bounded by the turn count and token budget below.",
+};
 
 export default function ClassifierFormModal({
   isOpen,
@@ -148,6 +176,9 @@ export default function ClassifierFormModal({
       .filter((m) => m.model),
     timeoutMode: form.timeoutMode,
     mode: form.mode,
+    inputMode: form.inputMode,
+    tailTurns: Number(form.tailTurns) || DEFAULT_CLASSIFIER_TAIL_TURNS,
+    tailTokens: Number(form.tailTokens) || DEFAULT_CLASSIFIER_TAIL_TOKENS,
     isActive: form.isActive,
     questions: form.questions.map((q) => ({
       levels: parseLevelList(q.levelsText),
@@ -251,42 +282,93 @@ export default function ClassifierFormModal({
           )}
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-          <Select
-            label="Mode"
-            value={form.mode}
-            onChange={(e) => set({ mode: e.target.value })}
-            options={[
-              { value: "argmax", label: "Per-level questions (argmax)" },
-              { value: "threshold", label: "Single score + thresholds" },
-            ]}
-          />
-          <Select
-            label="Fallback level"
-            value={form.fallbackLevel}
-            onChange={(e) => set({ fallbackLevel: e.target.value })}
-            options={FALLBACK_OPTIONS}
-          />
-          <Select
-            label="Timeout mode"
-            value={form.timeoutMode}
-            onChange={(e) => set({ timeoutMode: e.target.value })}
-            options={[
-              { value: "uniform", label: "Same for every model" },
-              { value: "per-model", label: "Per model" },
-            ]}
-          />
-          {!perModelTimeout && (
-            <Input
-              label="Timeout (ms)"
-              type="number"
-              min={MIN_CLASSIFIER_TIMEOUT_MS}
-              max={MAX_CLASSIFIER_TIMEOUT_MS}
-              value={form.timeoutMs}
-              onChange={(e) => set({ timeoutMs: e.target.value })}
-              hint="Applied to each model attempt"
+        <div className="flex flex-wrap gap-4">
+          <div className="min-w-0 flex-1 basis-full sm:basis-44">
+            <Select
+              label="Mode"
+              value={form.mode}
+              onChange={(e) => set({ mode: e.target.value })}
+              options={[
+                { value: "argmax", label: "Per-level questions (argmax)" },
+                { value: "threshold", label: "Single score + thresholds" },
+              ]}
             />
+          </div>
+          <div className="min-w-0 flex-1 basis-full sm:basis-44">
+            <Select
+              label="Fallback level"
+              value={form.fallbackLevel}
+              onChange={(e) => set({ fallbackLevel: e.target.value })}
+              options={FALLBACK_OPTIONS}
+            />
+          </div>
+          <div className="min-w-0 flex-1 basis-full sm:basis-44">
+            <Select
+              label="Timeout mode"
+              value={form.timeoutMode}
+              onChange={(e) => set({ timeoutMode: e.target.value })}
+              options={[
+                { value: "uniform", label: "Same for every model" },
+                { value: "per-model", label: "Per model" },
+              ]}
+            />
+          </div>
+          {!perModelTimeout && (
+            <div className="min-w-0 flex-1 basis-full sm:basis-44">
+              <Input
+                label="Timeout (ms)"
+                type="number"
+                min={MIN_CLASSIFIER_TIMEOUT_MS}
+                max={MAX_CLASSIFIER_TIMEOUT_MS}
+                value={form.timeoutMs}
+                onChange={(e) => set({ timeoutMs: e.target.value })}
+                hint="Applied to each model attempt"
+              />
+            </div>
           )}
+        </div>
+
+        <div className="flex flex-col gap-3">
+          <div>
+            <p className="text-sm font-medium text-text-main">What to classify</p>
+            <p className="text-xs text-text-muted">{INPUT_MODE_HINTS[form.inputMode]}</p>
+          </div>
+          <div className="flex flex-wrap gap-4">
+            <div className="min-w-0 flex-1 basis-full sm:basis-44">
+              <Select
+                label="Input"
+                value={form.inputMode}
+                onChange={(e) => set({ inputMode: e.target.value })}
+                options={INPUT_MODE_OPTIONS}
+              />
+            </div>
+            {form.inputMode === "tail-window" && (
+              <>
+                <div className="min-w-0 flex-1 basis-full sm:basis-44">
+                  <Input
+                    label="Turns"
+                    type="number"
+                    min={MIN_CLASSIFIER_TAIL_TURNS}
+                    max={MAX_CLASSIFIER_TAIL_TURNS}
+                    value={form.tailTurns}
+                    onChange={(e) => set({ tailTurns: e.target.value })}
+                    hint="How many of the newest turns to include"
+                  />
+                </div>
+                <div className="min-w-0 flex-1 basis-full sm:basis-44">
+                  <Input
+                    label="Tokens"
+                    type="number"
+                    min={MIN_CLASSIFIER_TAIL_TOKENS}
+                    max={MAX_CLASSIFIER_TAIL_TOKENS}
+                    value={form.tailTokens}
+                    onChange={(e) => set({ tailTokens: e.target.value })}
+                    hint="Token budget for the joined turns (approximate)"
+                  />
+                </div>
+              </>
+            )}
+          </div>
         </div>
 
         {form.mode === "argmax" ? (
@@ -369,7 +451,7 @@ export default function ClassifierFormModal({
                 />
                 <span className="text-xs text-text-muted">→</span>
                 <Input
-                  className="w-40"
+                  className="flex-1 min-w-0"
                   value={c.levelsText}
                   onChange={(e) => setCut(i, { levelsText: e.target.value })}
                   placeholder="high,xhigh"
@@ -397,7 +479,7 @@ export default function ClassifierFormModal({
         )}
 
         <p className="text-xs text-text-muted">
-          The last user message of each request that selects this tier is sent to the classifier model above.
+          The selected slice of each request that picks this tier is sent to the classifier model above.
           If classification fails, requests fall back to the fallback level.
         </p>
       </div>

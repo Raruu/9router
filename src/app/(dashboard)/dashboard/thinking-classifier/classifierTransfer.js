@@ -8,8 +8,8 @@
 //     "format": "9router-thinking-classifiers",
 //     "version": 1,
 //     "exportedAt": "<ISO>",
-//     "classifier": { name, models, timeoutMode, timeoutMs, mode, questions,
-//                     threshold, fallbackLevel }
+//     "classifier": { name, models, timeoutMode, timeoutMs, mode, inputMode,
+//                     tailTurns, tailTokens, questions, threshold, fallbackLevel }
 //   }
 //
 // `id`, timestamps and `isActive` are deliberately NOT exported: ids are
@@ -19,12 +19,18 @@ import {
   CLASSIFIER_MODES,
   CLASSIFIER_TIMEOUT_MODES,
   CLASSIFIER_FALLBACK_LEVELS,
+  CLASSIFIER_INPUT_MODES,
   DEFAULT_CLASSIFIER_TIMEOUT_MS,
   DEFAULT_CLASSIFIER_TIMEOUT_MODE,
   DEFAULT_CLASSIFIER_FALLBACK_LEVEL,
+  DEFAULT_CLASSIFIER_INPUT_MODE,
+  DEFAULT_CLASSIFIER_TAIL_TURNS,
+  DEFAULT_CLASSIFIER_TAIL_TOKENS,
   MAX_CLASSIFIER_MODELS,
   validateClassifierName,
   clampClassifierTimeout,
+  clampClassifierTailTurns,
+  clampClassifierTailTokens,
   normalizeClassifierModels,
   questionLevels,
   questionIdFromLevels,
@@ -53,6 +59,9 @@ export function buildClassifierExport(classifier, date = new Date()) {
         : DEFAULT_CLASSIFIER_TIMEOUT_MODE,
       timeoutMs: clampClassifierTimeout(classifier?.timeoutMs) ?? DEFAULT_CLASSIFIER_TIMEOUT_MS,
       mode: CLASSIFIER_MODES.includes(classifier?.mode) ? classifier.mode : "argmax",
+      inputMode: CLASSIFIER_INPUT_MODES.includes(classifier?.inputMode) ? classifier.inputMode : DEFAULT_CLASSIFIER_INPUT_MODE,
+      tailTurns: clampClassifierTailTurns(classifier?.tailTurns) ?? DEFAULT_CLASSIFIER_TAIL_TURNS,
+      tailTokens: clampClassifierTailTokens(classifier?.tailTokens) ?? DEFAULT_CLASSIFIER_TAIL_TOKENS,
       questions: Array.isArray(classifier?.questions) ? classifier.questions : [],
       threshold: classifier?.threshold && typeof classifier.threshold === "object" ? classifier.threshold : {},
       fallbackLevel: CLASSIFIER_FALLBACK_LEVELS.includes(classifier?.fallbackLevel)
@@ -147,6 +156,9 @@ export function parseClassifierImport(text) {
         : DEFAULT_CLASSIFIER_TIMEOUT_MODE,
       timeoutMs: clampClassifierTimeout(raw.timeoutMs) ?? DEFAULT_CLASSIFIER_TIMEOUT_MS,
       mode,
+      inputMode: CLASSIFIER_INPUT_MODES.includes(raw.inputMode) ? raw.inputMode : DEFAULT_CLASSIFIER_INPUT_MODE,
+      tailTurns: clampClassifierTailTurns(raw.tailTurns) ?? DEFAULT_CLASSIFIER_TAIL_TURNS,
+      tailTokens: clampClassifierTailTokens(raw.tailTokens) ?? DEFAULT_CLASSIFIER_TAIL_TOKENS,
       questions,
       threshold,
       fallbackLevel: CLASSIFIER_FALLBACK_LEVELS.includes(raw.fallbackLevel)

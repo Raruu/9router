@@ -9,14 +9,20 @@ import {
   CLASSIFIER_MODES,
   CLASSIFIER_FALLBACK_LEVELS,
   CLASSIFIER_TIMEOUT_MODES,
+  CLASSIFIER_INPUT_MODES,
   DEFAULT_CLASSIFIER_TIMEOUT_MS,
   DEFAULT_CLASSIFIER_TIMEOUT_MODE,
+  DEFAULT_CLASSIFIER_INPUT_MODE,
+  DEFAULT_CLASSIFIER_TAIL_TURNS,
+  DEFAULT_CLASSIFIER_TAIL_TOKENS,
   GENERIC_ARGMAX_QUESTIONS,
   GENERIC_THRESHOLD_QUESTION,
   GENERIC_THRESHOLD_CUTS,
   questionLevels,
   questionIdFromLevels,
   clampClassifierTimeout,
+  clampClassifierTailTurns,
+  clampClassifierTailTokens,
   normalizeClassifierModels,
 } from "@/shared/constants/thinkingClassifier.js";
 
@@ -100,6 +106,9 @@ export function normalizeClassifierInput(body = {}) {
       },
       fallbackLevel: CLASSIFIER_FALLBACK_LEVELS.includes(body.fallbackLevel) ? body.fallbackLevel : "medium",
       timeoutMs,
+      inputMode: CLASSIFIER_INPUT_MODES.includes(body.inputMode) ? body.inputMode : DEFAULT_CLASSIFIER_INPUT_MODE,
+      tailTurns: clampClassifierTailTurns(body.tailTurns) ?? DEFAULT_CLASSIFIER_TAIL_TURNS,
+      tailTokens: clampClassifierTailTokens(body.tailTokens) ?? DEFAULT_CLASSIFIER_TAIL_TOKENS,
     },
   };
 }
