@@ -18,6 +18,10 @@ vi.mock("@/models", () => ({
   getModelAliases: vi.fn(async () => ({})),
   setModelAlias: vi.fn(),
   getCustomModels: vi.fn(async () => []),
+  // The fork's route also resolves compatible-node prefixes; without these the
+  // handler throws and every assertion sees an empty list.
+  getProviderConnections: vi.fn(async () => []),
+  getProviderNodes: vi.fn(async () => []),
 }));
 vi.mock("@/lib/disabledModelsDb", () => ({
   getDisabledModels: vi.fn(async () => ({})),
