@@ -1,3 +1,12 @@
+# v0.5.99-6 (2026-10-16)
+
+## Fixes
+- **CodeBuddy Intl**: every `cbai/*` request failed with HTTP 400 code 11128
+  ("conversation id missing") after the intl gateway added channel verification
+  on 2026-10-15 — the executor now sends the `X-Conversation-*` header family
+  the official IDE sends: a conversation id derived stably from the session
+  key, plus fresh per-request and per-message UUIDs (#4928)
+
 # v0.5.99-5 (2026-10-13)
 
 ## Features
