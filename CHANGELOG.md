@@ -1,3 +1,55 @@
+# v0.5.104-1 (2026-10-16)
+
+Merged upstream v0.5.104 into the fork. This section includes the full upstream
+release notes and the fork-side merge work.
+
+## Features
+- **Gemini**: add Gemini 4 Argon (`gemini`/`vertex`, plus a `high` tier on Antigravity) — non-dismissible gemini-level thinking, 1M context, Vertex defaults to `global` location
+- **Usage**: Cursor IDE quota via DashboardService (spend + request buckets) (#4689)
+- **Cursor**: resolve Auto (Server Picks) to the account's default agent model (#4692)
+- **Quota**: anchored auto-ping schedule at fixed local times with timezone/DST support and schedule modal (#4848); unify mode selection into a 3-way toggle, default timezone to local, bring schedule config to the quota page
+- **Providers**: add Nous Research OAuth + free-tier provider
+- **UI**: model picker regex/negation search, Select/Deselect All, provider filtering, and per-provider wildcards
+- **Hermes**: audio transcription via 9router — an "Audio STT" toggle in the card points the profile's `stt.openai.base_url` at `/v1/audio/transcriptions` with an STT-kind model picker (#4763)
+
+## Fixes
+- **Nous**: add missing attribution tags to API-key requests through compatible Chat Completions connections, preserving caller tags and identities (#4745)
+- **Cursor**: recover long sessions from empty AgentService turns (#4690); hold strictProxy on the AgentService h2 path (#4696)
+- **OpenCode**: encode inverted timestamp in translated session IDs so non-OpenCode clients pass Zen free-tier checks (#4780); inject `reasoning_content` placeholder for Zen multi-turn chats (#4805); move free tier to `/inference/v1` with the v2 client fingerprint (#4842)
+- **OpenCode Zen**: use attested free-tier identity for `-free` models on keyed lane (#4784)
+- **OpenCode Go**: route `claude-haiku-5-5` to `/messages` with adaptive thinking (#4727); drop `response_format` for the deepseek family (relay rejects with a bare 400)
+- **Capabilities**: add missing OpenCode Free reasoning entries (space-bunny & co) so `reasoning_effort` stops being silently stripped; advertise PDF input for current Claude models (#4761)
+- **Combos**: fallback when a model returns HTTP 200 with zero usable content (#4750)
+- **Qoder**: surface add-on (free-credit promo) quota in the quota tracker (#4758)
+- **Translator**: return Claude messages for forced SSE JSON responses (#4789)
+- **Vertex**: honor API-key project/location for Gemini 4 Argon (#4821)
+- **GitHub**: route Copilot embeddings to `api.githubcopilot.com` (#4793)
+- **Codex**: drop retired gpt-5.5 from registry, image, and auto-ping; CLI preset default to `gpt-6.1-sol`
+- **Gemini**: drop sampling params and order functionResponse-last for Gemini 4 (#4802)
+- **Models**: expose no-auth free providers in `/v1/models`; prune custom models on node deletion
+- **Usage**: token fallback for `input_tokens` rows in 24h/today stats; stable key masking
+- **Dashboard**: unclip proxy dropdown and tooltips via body portal
+- Avoid Headroom compression warnings caused by large unchanged tool schemas (#4809)
+
+## Fork merge notes
+- Conflict resolutions kept both sides: `package.json` / `cli/package.json`
+  stay on the fork version (`0.5.104-1`) and keep the fork's `@raruu/9router`
+  name; `CHANGELOG.md` keeps the fork section layout (upstream's v0.5.99 notes
+  were already folded into `v0.5.99-1`, so only its two late additions — Hermes
+  audio STT #4763 and the Headroom warning #4809 — moved into this entry).
+- The CodeBuddy Intl `X-Conversation-*` fix (#4928, `v0.5.99-6`) and the
+  Thinking Classifier work (`v0.5.99-1`…`-5`) are retained.
+- `ModelSelectModal` unions the fork's kind/strict filtering and configured-list
+  catalog with upstream's live connection fetch, deactivated-provider filter,
+  `enabledModels` filter, regex/negation search, batch select and wildcard
+  headers; `filterModelSelectGroups` now parses the structured query.
+- `usageRepo` keeps the fork's mask-keyed per-key aggregation (raw keys never
+  reach the client) alongside upstream's `trim()` masking and `input_tokens`
+  fallback; `combo.js` keeps the fork's same-member retry loop, and upstream's
+  zero-content fallback advances to the next member instead of re-running it.
+- OpenCode tests track the v2 fingerprint (`read`/`shell`, `/inference/v1`);
+  the providers baseline was regenerated and the baseline verifiers pass.
+
 # v0.5.99-6 (2026-10-16)
 
 ## Fixes

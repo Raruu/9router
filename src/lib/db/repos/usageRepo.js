@@ -10,11 +10,12 @@ import { purgeDeleteStatements } from "../helpers/purgeOps.js";
 // Hide machineId and keep the discriminating tail instead.
 function maskApiKey(key) {
   if (!key || typeof key !== "string") return null;
-  if (key.length <= 8) return key.charAt(0) + "***";
+  const trimmed = key.trim();
+  if (trimmed.length <= 8) return trimmed.charAt(0) + "***";
   // Keep keyId only; machineId and crc stay hidden so the key can't be reassembled.
-  const parts = key.split("-");
+  const parts = trimmed.split("-");
   if (parts.length === 4) return `${parts[0]}-***-${parts[2]}-***`;
-  return `${key.slice(0, 4)}***${key.slice(-4)}`;
+  return `${trimmed.slice(0, 4)}***${trimmed.slice(-4)}`;
 }
 
 const COST_FIELDS = ["inputCost", "cachedCost", "cacheWriteCost", "outputCost"];
@@ -499,7 +500,9 @@ export async function getUsageStats(period = "all") {
   let allApiKeys = [];
   try { allApiKeys = await getApiKeys(); } catch {}
   const apiKeyMap = {};
-  for (const k of allApiKeys) apiKeyMap[k.key] = { name: k.name, id: k.id, createdAt: k.createdAt };
+  for (const k of allApiKeys) {
+    if (k.key) apiKeyMap[k.key.trim()] = { name: k.name, id: k.id, createdAt: k.createdAt };
+  }
 
   // recentRequests from live history (last 100 entries enough for 20 deduped)
   const recentRows = db.all(`SELECT timestamp, provider, model, tokens, status FROM usageHistory ORDER BY id DESC LIMIT 100`);
@@ -662,10 +665,10 @@ export async function getUsageStats(period = "all") {
         const rawModel = ak.rawModel || "";
         const provider = ak.provider || "";
         const providerDisplayName = providerNodeNameMap[provider] || provider;
-        const apiKeyVal = ak.apiKey;
+        const apiKeyVal = ak.apiKey ? ak.apiKey.trim() : null;
         const keyInfo = apiKeyVal ? apiKeyMap[apiKeyVal] : null;
         const apiKeyMasked = maskApiKey(apiKeyVal);
-        const keyName = keyInfo?.name || (apiKeyMasked || "Local (No API Key)");
+        const keyName = keyInfo?.name || apiKeyMasked || "Local (No API Key)";
         const apiKeyKey = apiKeyMasked || "local-no-key";
         // Re-key on the mask: day buckets are keyed by the raw key, which must not
         // reach the client. Model/provider come from the bucket, not the day key,
@@ -757,7 +760,8 @@ export async function getUsageStats(period = "all") {
     for (const r of filtered) {
       const tokens = parseJson(r.tokens, {}) || {};
       // The persisted columns are normalized by saveRequestUsage and work for
-      // both OpenAI (prompt/completion) and Anthropic (input/output) shapes.
+      // both OpenAI (prompt/completion) and Anthropic (input/output) shapes;
+      // the JSON blob is the fallback for rows without the columns.
       const promptTokens = r.promptTokens || tokens.prompt_tokens || tokens.input_tokens || 0;
       const completionTokens = r.completionTokens || tokens.completion_tokens || tokens.output_tokens || 0;
       const cachedTokens = tokens.cached_tokens || tokens.cache_read_input_tokens || 0;
@@ -810,8 +814,9 @@ export async function getUsageStats(period = "all") {
       }
 
       if (r.apiKey && typeof r.apiKey === "string") {
-        const keyInfo = apiKeyMap[r.apiKey];
-        const apiKeyMasked = maskApiKey(r.apiKey);
+        const apiKeyVal = r.apiKey.trim();
+        const keyInfo = apiKeyMap[apiKeyVal];
+        const apiKeyMasked = maskApiKey(apiKeyVal);
         // Key by the mask (never the raw key): the fork's mask keeps keyId, so
         // keys sharing a machineId stay in separate buckets, and the raw key
         // never reaches the client payload. The daily rollup and the lastUsed

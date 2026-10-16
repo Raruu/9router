@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { PROVIDERS } from "../../open-sse/config/providers.js";
 import { OpenCodeExecutor } from "../../open-sse/executors/opencode.js";
 import { proxyAwareFetch } from "../../open-sse/utils/proxyFetch.js";
+import { OPENCODE_FINGERPRINT_TOOLS } from "../../open-sse/utils/opencodeFingerprint.js";
 
 vi.mock("../../open-sse/utils/proxyFetch.js", () => ({
   proxyAwareFetch: vi.fn(async () => ({ ok: true, status: 200, headers: { get: () => "" } })),
@@ -10,16 +11,16 @@ vi.mock("../../open-sse/utils/proxyFetch.js", () => ({
 // Break caught: Muse Spark free Responses models 400 vì upstream
 // chỉ nhận tool_choice "auto"; named/required/none phải demote sang "auto".
 // Live 2026-09-19: both 1.2-free and 1.3-free reject non-auto with 400, and any
-// Responses request without the full bash/glob/grep/read fingerprint returns
+// Responses request without OpenCode's read/shell fingerprint returns
 // 403 FreeTierError (see utils/opencodeFingerprint.js).
 const FREE_12 = "muse-spark-1.2-contributor-free";
 const FREE_13 = "muse-spark-1.3-contributor-free";
 const CREDS = { connectionId: "opencode-free-tool-choice-test" };
 const INPUT = [{ type: "message", role: "user", content: [{ type: "input_text", text: "hi" }] }];
 const TOOLS = [{ type: "function", name: "get_weather", description: "w", parameters: { type: "object", properties: {} } }];
-// Fingerprint quartet appended after caller tools when absent.
-const FINGERPRINT = ["bash", "glob", "grep", "read"];
-const TOOLS_WITH_FINGERPRINT = ["get_weather", ...FINGERPRINT];
+// Free-tier gate: client tools pass through verbatim, then the fingerprint
+// read/shell definitions are appended or upstream answers 403 FreeTierError.
+const WIRE_TOOLS = [...TOOLS, ...OPENCODE_FINGERPRINT_TOOLS.map((name) => expect.objectContaining({ type: "function", name }))];
 
 function responsesBody(model, tool_choice) {
   const body = { model, input: structuredClone(INPUT), tools: structuredClone(TOOLS) };
@@ -43,26 +44,25 @@ describe("opencode Free tool_choice auto-only", () => {
       const body = responsesBody(model, structuredClone(choice));
       const out = new OpenCodeExecutor().transformRequest(model, body, true, CREDS);
       expect(out.tool_choice).toBe("auto");
-      // Fingerprint: original tool preserved + quartet appended (prevents 403 FreeTierError)
-      expect(out.tools.map((t) => t.name)).toEqual(TOOLS_WITH_FINGERPRINT);
+      expect(out.tools).toEqual(WIRE_TOOLS);
       expect(out.input).toEqual(INPUT);
     }
   });
 
-  it("giữ auto và default absent sang auto; tools/input nguyên vẹn + decoys", () => {
+  it("giữ auto và default absent sang auto; tools/input nguyên vẹn", () => {
     const autoOut = new OpenCodeExecutor().transformRequest(
       FREE_13, responsesBody(FREE_13, "auto"), true, CREDS,
     );
     expect(autoOut.tool_choice).toBe("auto");
-    expect(autoOut.tools.map((t) => t.name)).toEqual(TOOLS_WITH_FINGERPRINT);
+    expect(autoOut.tools).toEqual(WIRE_TOOLS);
     expect(autoOut.input).toEqual(INPUT);
 
     const absentOut = new OpenCodeExecutor().transformRequest(
       FREE_13, responsesBody(FREE_13, undefined), true, CREDS,
     );
-    // Fingerprint defaults missing choice to auto so upstream never sees absent + tools
+    // Fingerprint pass fills an absent choice with "auto" (the API default once tools exist).
     expect(absentOut.tool_choice).toBe("auto");
-    expect(absentOut.tools.map((t) => t.name)).toEqual(TOOLS_WITH_FINGERPRINT);
+    expect(absentOut.tools).toEqual(WIRE_TOOLS);
     expect(absentOut.input).toEqual(INPUT);
   });
 
@@ -77,50 +77,50 @@ describe("opencode Free tool_choice auto-only", () => {
     expect(out.tool_choice).toEqual(choice);
   });
 
-  it("wire: execute gửi choice auto + decoys tới /zen/v1/responses", async () => {
+  it("wire: execute gửi choice auto tới /inference/v1/responses", async () => {
     proxyAwareFetch.mockClear();
     const ex = new OpenCodeExecutor();
     const body = responsesBody(FREE_13, { type: "function", name: "get_weather" });
     const { url, transformedBody } = await ex.execute({
       model: FREE_13, body, stream: true, credentials: CREDS,
     });
-    expect(url).toBe("https://opencode.ai/zen/v1/responses");
+    expect(url).toBe("https://opencode.ai/inference/v1/responses");
     expect(transformedBody.tool_choice).toBe("auto");
     expect(proxyAwareFetch).toHaveBeenCalledTimes(1);
     const [actualUrl, actualInit] = proxyAwareFetch.mock.calls[0];
-    expect(actualUrl).toBe("https://opencode.ai/zen/v1/responses");
+    expect(actualUrl).toBe("https://opencode.ai/inference/v1/responses");
     const sent = JSON.parse(actualInit.body);
     expect(sent.tool_choice).toBe("auto");
     expect(sent.model).toBe(FREE_13);
-    expect(sent.tools.map((t) => t.name)).toEqual(TOOLS_WITH_FINGERPRINT);
+    expect(sent.tools).toEqual(WIRE_TOOLS);
     expect(sent.input).toEqual(INPUT);
   });
 
-  it("fingerprint 46 external tools: tambah kuartet agar lolos FreeTierError", () => {
+  it("fingerprint 46 external tools: tambah read/shell agar lolos FreeTierError", () => {
     const tools46 = Array.from({ length: 46 }, (_, i) => ({
       type: "function", name: `ext_tool_${i}`, description: "d", parameters: { type: "object", properties: {} },
     }));
     const body = { model: FREE_13, input: structuredClone(INPUT), tools: tools46 };
     const out = new OpenCodeExecutor().transformRequest(FREE_13, body, true, CREDS);
-    expect(out.tools).toHaveLength(50);
+    expect(out.tools).toHaveLength(48);
     const names = new Set(out.tools.map((t) => t.name));
-    for (const n of FINGERPRINT) expect(names.has(n)).toBe(true);
+    for (const n of OPENCODE_FINGERPRINT_TOOLS) expect(names.has(n)).toBe(true);
     expect(names.has("ext_tool_0")).toBe(true);
     expect(out.tool_choice).toBe("auto");
   });
 
-  it("fingerprint: canonicalise case variants and drop duplicate quartet members", () => {
+  it("fingerprint: caller tool reusing a fingerprint name travels under an alias", () => {
     const body = {
       model: FREE_13,
       input: structuredClone(INPUT),
       tools: [
-        { type: "function", name: "Bash", description: "x", parameters: { type: "object", properties: {} } },
-        { type: "function", name: "bash", description: "y", parameters: { type: "object", properties: {} } },
+        { type: "function", name: "read", description: "x", parameters: { type: "object", properties: {} } },
         ...structuredClone(TOOLS),
       ],
     };
     const out = new OpenCodeExecutor().transformRequest(FREE_13, body, true, CREDS);
-    // Only one lowercase 'bash' survives; the quartet is completed.
-    expect(out.tools.map((t) => t.name)).toEqual(["bash", "get_weather", ...FINGERPRINT.filter((n) => n !== "bash")]);
+    // The caller's own `read` is concealed as read_client; the exact read/shell
+    // definitions are appended so the free-tier gate passes.
+    expect(out.tools.map((t) => t.name)).toEqual(["read_client", "get_weather", ...OPENCODE_FINGERPRINT_TOOLS]);
   });
 });

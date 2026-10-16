@@ -3,6 +3,7 @@ import { restoreToolNames } from "../../utils/opencodeFingerprint.js";
 import { createErrorResult } from "../../utils/error.js";
 import { HTTP_STATUS } from "../../config/runtimeConfig.js";
 import { FORMATS } from "../../translator/formats.js";
+import { openAICompletionToClaudeMessage } from "../../translator/concerns/claudeMessage.js";
 import { PROVIDERS } from "../../config/providers.js";
 import { buildRequestDetail, extractRequestConfig, saveUsageStats, formatDoneLine } from "./requestDetail.js";
 import { ROLE, RESPONSES_ITEM } from "../../translator/schema/index.js";
@@ -287,7 +288,11 @@ export async function handleForcedSSEToJson({ providerResponse, sourceFormat, ta
         };
       }
 
-const finalRespOut = restoreToolNames(finalResp, toolNameMap);
+      if (sourceFormat === FORMATS.CLAUDE) {
+        finalResp = openAICompletionToClaudeMessage(finalResp);
+      }
+
+      const finalRespOut = restoreToolNames(finalResp, toolNameMap);
       applyResponseModelOverride(finalRespOut, responseModelOverride);
 
       return { success: true, response: new Response(JSON.stringify(finalRespOut), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
@@ -365,9 +370,11 @@ const finalRespOut = restoreToolNames(finalResp, toolNameMap);
     // already imports parseSSEToOpenAIResponse from this module.
     const finalBody = sourceFormat === FORMATS.OPENAI_RESPONSES
       ? chatCompletionToResponses(parsed, customToolNames)
-      : parsed;
+      : sourceFormat === FORMATS.CLAUDE
+        ? openAICompletionToClaudeMessage(parsed)
+        : parsed;
 
-const finalBodyOut = restoreToolNames(finalBody, toolNameMap);
+    const finalBodyOut = restoreToolNames(finalBody, toolNameMap);
     applyResponseModelOverride(finalBodyOut, responseModelOverride);
 
     return { success: true, response: new Response(JSON.stringify(finalBodyOut), { headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" } }) };
