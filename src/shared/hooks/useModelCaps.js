@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { getCapabilitiesForModel } from "open-sse/providers/capabilities.js";
+import { ALIAS_TO_ID } from "@/shared/constants/providers";
 
 // Module cache: one /api/models fetch shared by every useModelCaps instance.
 let cache = null; // maps | null
@@ -69,12 +70,17 @@ function bareModel(key) {
 }
 
 // Resolve caps from a "provider/model" string or a bare model id.
-function resolveCaps(maps, key) {
+// The seat prefix is a UI alias (ocg, cmc, …); the capability tables are keyed
+// by provider id (opencode-go, commandcode, …), so map it before the lookup —
+// an unmapped alias falls through to the generic patterns and under-reports
+// (e.g. any *claude*haiku* id reads as 200k regardless of the provider entry).
+export function resolveCaps(byFull, byId, key) {
   if (!key) return null;
-  if (maps.byFull[key]) return maps.byFull[key];
+  if (byFull[key]) return byFull[key];
   const bare = bareModel(key);
-  if (maps.byId[bare]) return maps.byId[bare];
-  const provider = key.includes("/") ? key.slice(0, key.indexOf("/")) : null;
+  if (byId[bare]) return byId[bare];
+  const alias = key.includes("/") ? key.slice(0, key.indexOf("/")) : null;
+  const provider = alias ? (ALIAS_TO_ID[alias] || alias) : null;
   return getCapabilitiesForModel(provider, bare);
 }
 
@@ -113,7 +119,7 @@ export function useModelCaps() {
   }, []);
 
   const getCaps = useCallback(
-    (key) => resolveCaps(maps, key),
+    (key) => resolveCaps(maps.byFull, maps.byId, key),
     [maps],
   );
 
