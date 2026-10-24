@@ -44,13 +44,17 @@ describe("CodeBuddy Intl block backoff (#5024)", () => {
   });
 
   it.each(["openai", "codebuddy-cn", null])("keeps the same text request-scoped for provider %s", (provider) => {
+    // checkFallbackError now also reports `requestScoped`, which answers a
+    // different question from `shouldFallback` (healthy credential, unservable
+    // request). Both are false here: no account cooldown, and the request is
+    // not the culprit either — the provider simply doesn't carry that block rule.
     expect(checkFallbackError(400, "request illegal", 0, provider))
-      .toEqual({ shouldFallback: false, cooldownMs: 0 });
+      .toEqual({ shouldFallback: false, cooldownMs: 0, requestScoped: true });
   });
 
   it("does not classify every 11128 code as a block", () => {
     expect(checkFallbackError(400, { code: 11128, msg: "first message is not system prompt" }, 0, "codebuddy-intl"))
-      .toEqual({ shouldFallback: false, cooldownMs: 0 });
+      .toEqual({ shouldFallback: false, cooldownMs: 0, requestScoped: true });
   });
 
   it("persists the account cooldown and incremented backoff level through the cbai alias", async () => {
@@ -82,7 +86,10 @@ describe("CodeBuddy Intl block backoff (#5024)", () => {
     ]);
   });
 
-  it("still stops a combo on a malformed CodeBuddy request", async () => {
+  // Upstream expected the combo to stop here. Since #5057 a malformed request
+  // is request-scoped: the member is healthy, another member may still serve
+  // it, so the combo advances instead — and no account is cooled down.
+  it("advances a combo past a malformed CodeBuddy request without cooling the account", async () => {
     const error = Response.json({ error: { message: "first message is not system prompt" } }, { status: 400 });
     const dispatch = vi.fn().mockResolvedValue(error);
     const result = await handleComboChat({
@@ -91,7 +98,7 @@ describe("CodeBuddy Intl block backoff (#5024)", () => {
       comboName: "malformed-combo", comboStrategy: "fallback",
     });
     expect(result).toBe(error);
-    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledTimes(2);
     expect(db.updateProviderConnection).not.toHaveBeenCalled();
   });
 });

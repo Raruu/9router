@@ -13,6 +13,11 @@ vi.mock("../../src/sse/services/auth.js", () => ({
   clearAccountError: vi.fn(),
   extractApiKey: () => "client-key",
   isValidApiKey: vi.fn(),
+  // The fork gates image keys through validateApiKeyWithRules (per-key limits +
+  // allowed models) and labels logs via resolveProviderDisplayLabel; a mock
+  // missing either breaks the import.
+  validateApiKeyWithRules: async () => ({ valid: true }),
+  resolveProviderDisplayLabel: async (provider) => provider,
 }));
 
 vi.mock("@/lib/localDb", () => ({

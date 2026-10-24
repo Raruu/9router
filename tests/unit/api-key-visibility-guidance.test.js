@@ -10,7 +10,10 @@ const source = readFileSync(
 
 describe("API key visibility guidance source verification", () => {
   it("explains that created keys remain available in the API Keys list", () => {
-    const modal = source.match(/title="API Key Created"[\s\S]*?<\/Modal>/)?.[0];
+    // The fork renders one shared Created/Rotated modal with a dynamic title
+    // (`title={createdKeyTitle}`), so match the marker comment rather than
+    // upstream's literal title attribute.
+    const modal = source.match(/\{\/\* Created \/ Rotated Key Modal \*\/\}[\s\S]*?<\/Modal>/)?.[0];
     expect(modal).toBeDefined();
     expect(modal).toContain(guidance);
     expect(modal).not.toContain(oldGuidance);

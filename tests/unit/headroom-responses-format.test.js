@@ -48,11 +48,15 @@ describe("compressWithHeadroom openai-responses format (#1998)", () => {
     expect(typeof body.input[0].content).not.toBe("string");
   });
 
-  it("skips Responses tool/reasoning history instead of collapsing it into a message (#2132)", async () => {
+  // Since a440ef43 (#4070) a Responses body with tool/reasoning history is
+  // compressed in place: only `function_call_output.output` text is rewritten,
+  // and every other item (message, function_call, reasoning) must survive
+  // byte-identical. It is no longer skipped.
+  it("compresses function_call_output in place without collapsing Responses history (#2132)", async () => {
     global.fetch = vi.fn(async () => ({
       ok: true,
       json: async () => ({
-        messages: [{ role: "user", content: "compressed tool history" }],
+        messages: [{ role: "tool", tool_call_id: "headroom-tool-0", content: "compressed tool history" }],
         tokens_saved: 10,
       }),
     }));
@@ -72,7 +76,7 @@ describe("compressWithHeadroom openai-responses format (#1998)", () => {
       {
         type: "function_call_output",
         call_id: "call_apply_patch_123",
-        output: "ok",
+        output: "a long tool output body ".repeat(20),
       },
       {
         type: "reasoning",
@@ -91,7 +95,7 @@ describe("compressWithHeadroom openai-responses format (#1998)", () => {
     };
     const diagnostics = {};
 
-    const data = await compressWithHeadroom(body, {
+    await compressWithHeadroom(body, {
       enabled: true,
       url: "http://headroom.test",
       model: "gpt-5",
@@ -99,9 +103,14 @@ describe("compressWithHeadroom openai-responses format (#1998)", () => {
       diagnostics,
     });
 
-    expect(data).toBeNull();
-    expect(global.fetch).not.toHaveBeenCalled();
-    expect(body.input).toEqual(input);
-    expect(diagnostics.reason).toBe("skipped: openai-responses tool/reasoning input is not safe to compress");
+    // Only the tool output text changed; the array stays Responses-shaped and
+    // every other item is untouched.
+    expect(body.input).toHaveLength(input.length);
+    expect(body.input[0]).toEqual(input[0]);
+    expect(body.input[1]).toEqual(input[1]);
+    expect(body.input[3]).toEqual(input[3]);
+    expect(body.input[2].type).toBe("function_call_output");
+    expect(body.input[2].call_id).toBe("call_apply_patch_123");
+    expect(body.input[2].output).toBe("compressed tool history");
   });
 });

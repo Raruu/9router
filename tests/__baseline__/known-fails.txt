@@ -18,14 +18,18 @@ tests/unit/translator-request-normalization.test.js :: request normalization fil
 tests/unit/translator-request-normalization.test.js :: request normalization parseSSELine supports provider raw NDJSON stream lines
 tests/unit/translator-request-normalization.test.js :: request normalization translateRequest keeps /v1/messages Claude->OpenAI text payloads string-safe
 
-# Real bug: /api/usage/stats serializes raw API keys as byApiKey property names (GHSA-vjc7).
-# Fixed by decolua/9router#4286.
-tests/unit/security-audit.test.js :: AUDIT-002: API key masking byApiKey object keys should use masked key, not raw key
+# (GHSA-vjc7 / AUDIT-002 was fixed on this fork by the mask-keyed byApiKey
+# aggregation in usageRepo — the test passes, so it is no longer listed here.)
 
 # Stale expectations fixed by decolua/9router#3665 (search auto-switch disabled on purpose;
 # reorder returns a copy).
 tests/unit/combo-autoswitch.test.js :: detectRequiredCapabilities web_search tool -> search
 tests/unit/combo-autoswitch.test.js :: reorderByCapabilities keeps order when no model matches
+
+# Pre-existing on this fork before the v0.5.109 merge (added by 24664f2c). The
+# test expects a raw DNS failure from https://nonexistent.invalid; behind an
+# outbound proxy the transport error is wrapped and mentions strictProxy.
+tests/unit/strict-proxy-enforcement.test.js :: strictProxy refuses a direct connection (#4333) does not block a caller that sets strictProxy with no proxy configured
 
 # Live call: the upstream now answers "Unsupported model mimo-auto", the only model the
 # (hidden since 6d96e24b) mimo-free / mmf providers list.
