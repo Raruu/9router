@@ -232,7 +232,9 @@ export default function ModelSelectModal({
     const groups = {};
 
     // Strict mode (key permission editor): the LLM view must not mix in typed
-    // custom models, so non-LLM entries are dropped there too.
+    // custom models, so non-LLM entries are dropped there too. The kind tables
+    // live in shared/constants/modelSelectKinds.js and already cover systemone
+    // and video, so upstream's inline copies are deliberately not re-added.
     const filterByKind = (models) => filterModelsForKind(models, effectiveKind, { strict });
 
     // Get all active provider IDs from connections (filtered by kind if set)

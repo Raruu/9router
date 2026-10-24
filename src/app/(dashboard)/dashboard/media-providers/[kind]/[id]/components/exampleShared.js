@@ -49,6 +49,8 @@ export const KIND_EXAMPLE_CONFIG = {
       { key: "response_format", label: "Format", type: "select", default: "", options: ["", "url", "b64_json"] },
       { key: "image_detail", label: "Image Detail", type: "select", default: "high", options: ["auto", "low", "high", "original"] },
       { key: "output_format", label: "Codec", type: "select", default: "png", options: ["png", "jpeg", "webp"] },
+      { key: "watermark", label: "Watermark", type: "boolean", default: true },
+      { key: "prompt_extend", label: "Prompt Extend", type: "boolean", default: true },
     ],
   },
   imageToText: {
@@ -65,10 +67,12 @@ export const KIND_EXAMPLE_CONFIG = {
     defaultInput: "A serene lake at sunset",
     bodyKey: "prompt",
     defaultResponse: `{\n  "data": [\n    { "url": "..." }\n  ]\n}`,
-    // Image-to-video models (Runway gen*_turbo, Vertex Veo with an image) take
-    // a source image. Shown only for models whose `params` list it.
+    // Image-to-video models (Runway gen*_turbo, Vertex Veo with an image, and
+    // the executor-driven web providers) take a source image. Shown only for
+    // models whose `params` list it. `type: "image"` accepts a URL or an
+    // uploaded file (sent as a data: URL).
     extraFields: [
-      { key: "image", label: "Image URL", type: "text", default: "", placeholder: "https://example.com/source.png" },
+      { key: "image", label: "Image (URL or upload)", type: "image", default: "" },
     ],
   },
   music: {
