@@ -903,7 +903,8 @@ async function testApiKeyConnection(connection, effectiveProxy = null) {
       case "qoder":
       case "qoder-cn": {
         // PAT (pt-...) exchange → job token. A successful exchange proves the PAT.
-        const exchangeUrl = provider === "qoder-cn"
+        // `provider` is not in scope in this helper; the connection carries it.
+        const exchangeUrl = connection.provider === "qoder-cn"
           ? "https://openapi.qoder.com.cn/api/v1/jobToken/exchange"
           : "https://openapi.qoder.sh/api/v1/jobToken/exchange";
         const raw = connection.apiKey || "";

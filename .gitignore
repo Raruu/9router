@@ -102,3 +102,7 @@ graphify-out/*
 start-dev-silent.cjs
 debug.log
 .scratch/
+
+# local merge/debug scratch
+.lintcmp/
+.lintcmp-raw.log

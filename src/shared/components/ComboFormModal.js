@@ -8,6 +8,12 @@ import CapacityBadges from "./CapacityBadges";
 import ModelSelectModal from "./ModelSelectModal";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 
+// Same rule the combos API enforces (src/app/api/combos/route.js), so the modal
+// rejects a name before the request does instead of throwing on the first
+// keystroke. Kept local: this component is also used by the Cowork CLI-tools
+// flow, which never loads the dashboard combos page.
+const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\-]+$/;
+
 // Inline editable model item
 function ModelItem({ index, model, caps, isFirst, isLast, onEdit, onMoveUp, onMoveDown, onRemove }) {
   const [editing, setEditing] = useState(false);

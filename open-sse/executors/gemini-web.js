@@ -17,8 +17,6 @@ import { isMissingBrowserExecutable, resolveSystemChromeExecutable, launchChromi
 import { loadRuntimeDep } from "../services/lazyRuntime.js";
 import { normalizeGeminiCookieInput } from "../utils/geminiCookies.js";
 import { toPlaywrightCookies } from "../utils/webCookieAuth.js";
-import { prepareToolMessages } from "../translator/webTools.js";
-import { buildToolModeResponse } from "./chatgptWebTools.js";
 import {
   checkGeminiWebUnsupportedControls,
   GEMINI_WEB_UNSUPPORTED_CONTROL_CODE,
@@ -140,8 +138,7 @@ export function buildGeminiPrompt(messages) {
 
 /**
  * Build the plain-text prompt typed into the Gemini web UI when a tool
- * contract is active — every system message (the client's own instruction(s)
- * plus the synthetic tool contract that `prepareToolMessages()` appends last)
+ * contract is active — every system message (the client's own instruction(s))
  * prepended, in order, to the last user message. gemini-web only ever sends
  * a single flat string (no native message array), so the tool contract and
  * the user's ask are concatenated.
@@ -194,26 +191,6 @@ export function buildGeminiToolPrompt(effectiveMessages) {
   parts.push(`Previous conversation:\n${prior.join("\n\n")}`);
   parts.push(`Current user message:\n${userText}`);
   return parts.join("\n\n");
-}
-
-/**
- * Tool mode: wrap the buffered Gemini response text in the standard OpenAI
- * completion shape, then delegate to the shared `buildToolModeResponse()` —
- * parses `<tool>{...}</tool>` blocks out of the text into `tool_calls`
- * (malformed JSON degrades to ordinary `content`, never throws) and replays
- * either buffered JSON or a terminal SSE chunk depending on `stream`.
- */
-export async function buildGeminiToolResponse(responseText, requestedTools, stream, model, cid, created) {
-  const bufferedJson = new Response(JSON.stringify(formatChatCompletion(responseText, model)), {
-    status: 200,
-    headers: { "Content-Type": "application/json" },
-  });
-  return buildToolModeResponse(bufferedJson, requestedTools, stream, {
-    cid,
-    created,
-    model,
-    idSeed: "gwe",
-  });
 }
 
 const GEMINI_APP_ERROR_TEXT =
@@ -593,25 +570,6 @@ export class GeminiWebExecutor extends BaseExecutor {
       // and those bodies can't be re-read via CDP once the stream completes.
       const baseReply = await readReplyState(page);
 
-      if (hasTools) {
-        const responseText = await waitForGeminiReply({
-          page,
-          baseCount: baseReply.count,
-          baseText: baseReply.lastText,
-          signal,
-        });
-        const cid = `chatcmpl-gwe-${crypto.randomUUID().slice(0, 12)}`;
-        const created = Math.floor(Date.now() / 1000);
-        const toolResponse = await buildGeminiToolResponse(
-          responseText,
-          requestedTools,
-          Boolean(stream),
-          modelId,
-          cid,
-          created
-        );
-        return { response: toolResponse, url: GEMINI_URL, headers: {}, transformedBody: body };
-      }
 
       if (stream) {
         const encoder = new TextEncoder();
