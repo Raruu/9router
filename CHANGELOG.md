@@ -1,4 +1,7 @@
-# v0.5.109 (2026-10-23)
+# v0.5.109-2 (2026-10-24)
+
+Merged upstream v0.5.109 into the fork. This section includes the full upstream
+release notes and the fork-side merge work.
 
 ## Features
 - **Combos**: add Smart Router (System One) evaluation with adaptive session stickiness (Smart Switch, Strict Lock, Per-Turn) to retain prompt cache; introduce SmartPolicyModal and System One router picker in dashboard (#4975)
@@ -42,6 +45,51 @@
 - **Search**: reset regex state between model matches in search filters (#5853a88)
 - **Pi Settings**: declare `existingProvider` before use in POST handler to prevent ReferenceError 500 (#342ecb0)
 - **Tests**: triage master test suite (GLM-5.2 effort, gpt-6.1-sol codex capabilities, image SSRF mocks, refresh known-fails) (#b6a9ca4)
+
+## Fork merge notes
+- `package.json` / `cli/package.json` stay on the fork version (`0.5.109-2`)
+  and keep the fork's `@raruu/9router` name. Upstream's dependency moves are
+  taken (Next 16.4.2, Monaco 0.57.0, undici 7.30.1, `playwright-core`,
+  `wreq-js`, `overrides` for dompurify/ip-address, optional `ajv`/`ws`);
+  `express`, `http-proxy-middleware`, `selfsigned` and `react-is` are dropped
+  because nothing in the tree imports them, while the fork's `sharp` (provider
+  icon conversion) and `allowScripts` block are kept.
+- `combo.js` is a real union: the fork's round-robin rotation, capability
+  auto-switch, context-fit ordering and same-member retry loop run alongside
+  upstream's Smart Router (sticky/strict/per-turn), the empty-stream failover
+  peek, and the request-scoped 4xx advance — which now sets `advancing = true`
+  so it leaves the same-member loop instead of re-running the member.
+- `stream.js` exposes ONE `createPassthroughStreamWithLogger` carrying both
+  `toolNameMap` and `responseModelOverride`. Keeping both sides would have
+  declared the function twice, which `node --check` does not catch but is a
+  hard `SyntaxError` at ESM import time.
+- `thinkingUnified` keeps the fork's user-catalog `thinkingFormatOverride`
+  above upstream's new per-transport `thinkingFormat`.
+- `qoder` keeps upstream's `sendOnce` refactor and re-applies the fork's
+  per-provider connect timeout inside it, leaving no dead `mergedSignal`.
+- `stt` keeps the fork's `validateApiKeyWithRules` and `resolveSttConfig`
+  (custom compatible nodes) and adds upstream's Codex OAuth refresh, retry and
+  proxy handling; `sttCore` takes `signal`/`proxyOptions` alongside the fork's
+  display label and compat-node URL resolution.
+- `systemoneCore`: the compat-node kind URL still wins, the registry URL is
+  built by `buildSystemoneUrl`, and `x-opencode-session` is sent only to the
+  OpenCode lanes.
+- Combos page keeps the fork's header-driven search as the single filter path
+  (upstream's inline search box and its local state are dropped, since the
+  dashboard header already owns the input); upstream's filtered count,
+  search-scoped select-all, `SmartPolicyModal`, System One router picker and
+  policy badge are kept, as are the fork's `ModelDetailModal` and its
+  deliberate removal of the ctx/max row.
+- `ModelSelectModal` keeps the fork's shared kind tables (which already include
+  `systemone` and `video`) instead of upstream's inline copies.
+- Media providers take upstream's image `extraField` (URL or upload) since the
+  upload branch is now in `GenericExampleCard`, plus the fork's
+  `providerServesKind` guard.
+- Nine upstream tests were aligned with the merged behaviour (see the
+  `fix(merge)` commit); the providers/alias baselines were regenerated and are
+  additive only (`sensenova`, `ollama-local`). `known-fails.txt` drops the
+  GHSA-vjc7 entry the fork had already fixed and records the pre-existing
+  `strict-proxy` transport-message failure.
 
 # v0.5.104-1 (2026-10-16)
 
