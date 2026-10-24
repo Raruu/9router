@@ -51,7 +51,10 @@ describe("Latency backfill v3", () => {
     const { getAdapter: g2 } = await import("@/lib/db/driver.js");
     const db2 = await g2();
 
-    expect(latestVersion()).toBe(3);
+    // The fork appends migrations 004 (model catalog) and 005 (thinking
+    // classifiers) after upstream's v3, so assert the backfill ran rather than
+    // pinning the schema to 3.
+    expect(latestVersion()).toBeGreaterThanOrEqual(3);
 
     const row = db2.get(`SELECT ttft, totalLatency FROM usageHistory WHERE id = ?`, [uhId]);
     expect(row.ttft).toBe(200);
