@@ -3,6 +3,7 @@
 import { getCapabilitiesForModel } from "./capabilities.js";
 import { matchPattern } from "./pricing.js";
 import { resolveKiroEffortPath } from "../config/kiroConstants.js";
+import { isCompatNodeProvider } from "../config/kindEndpoints.js";
 import { getProviderModels } from "../config/providerModels.js";
 
 // Shared level sets (deduped) — verified against provider docs + wire in thinkingUnified.applyFormat.
@@ -100,6 +101,11 @@ const PATTERN_THINKING = [
   { provider: "minimax-code-global", pattern: "MiniMax-M3", levels: ["none", "high"] },
 ];
 
+// OpenAI documents reasoning.effort "max" for GPT-5.6 and GPT-6 (#5186). The codex rows
+// above already carry it; an OpenAI Compatible node serving the same ids gets the same
+// set, otherwise the "openai" format list (no max) clamps max to xhigh on the wire.
+const OPENAI_MAX_EFFORT_MODEL = /(?:^|\/)gpt-(?:5\.6|6)(?:[.-]|$)/i;
+
 // Returns valid thinking levels for a model, or null when the model has no reasoning.
 // `capsOverride` lets a caller that already resolved capabilities (e.g. the
 // /api/models route) avoid a second lookup.
@@ -135,7 +141,9 @@ export function getThinkingLevels(provider, model, capsOverride = null) {
     const hit = PATTERN_THINKING.find((entry) =>
       (!entry.provider || entry.provider === provider) && matchPattern(entry.pattern, model)
     );
-    levels = modelLevels || hit?.levels || FORMAT_LEVELS[caps.thinkingFormat] || L.base;
+    levels = modelLevels || hit?.levels
+      || (isCompatNodeProvider(provider) && OPENAI_MAX_EFFORT_MODEL.test(baseId) ? CODEX_GPT_5_6_LEVELS : null)
+      || FORMAT_LEVELS[caps.thinkingFormat] || L.base;
   }
 
   // A rule that enforces the level sends it verbatim, so "none" stays

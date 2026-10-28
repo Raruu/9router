@@ -39,7 +39,7 @@ export async function handleTts(request) {
 
   const url = new URL(request.url);
   const modelStr = body.model;
-  const responseFormat = url.searchParams.get("response_format") || "mp3"; // mp3 (default) | json
+  const responseFormat = url.searchParams.get("response_format") || body.response_format || "mp3"; // mp3 (default) | json
   const language = body.language || ""; // Optional language hint (currently used by Gemini)
   const style = body.style || ""; // Optional style/voice instructions (e.g. Xiaomi MiMo)
   log.request("POST", `${url.pathname} | ${modelStr} | format=${responseFormat}${language ? ` | lang=${language}` : ""}`);
@@ -119,6 +119,13 @@ async function handleSingleModelTts(body, modelStr, responseFormat, language, st
         return unavailableResponse(status, `[${tag}] ${msg}`, credentials.retryAfter, credentials.retryAfterHuman);
       }
       if (excludeConnectionIds.size === 0) {
+        // ollama-local serves a local Ollama install and needs no connection —
+        // run it without credentials instead of rejecting the request.
+        if (provider === "ollama-local") {
+          const result = await handleTtsCore({ provider, model, input: body.input, credentials: null, responseFormat, language, style });
+          if (result.success) return result.response;
+          return errorResponse(result.status || HTTP_STATUS.BAD_GATEWAY, result.error || "TTS failed");
+        }
         const label = await resolveProviderDisplayLabel(provider);
         return errorResponse(HTTP_STATUS.BAD_REQUEST, `No credentials for provider: ${label}`);
       }
