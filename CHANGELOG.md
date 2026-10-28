@@ -1,4 +1,7 @@
-# v0.5.111 (2026-10-26)
+# v0.5.111-1 (2026-10-28)
+
+Merged upstream v0.5.111 into the fork. This section includes the full upstream
+release notes and the fork-side merge work.
 
 ## Features
 - **Ollama**: add `ollama-local` TTS provider serving the Phonon family (15 tags, 38 preset voices), normalizing the requested format to wav/pcm, falling back to an installed tag and the `default` voice, and wrapping raw PCM in a WAV header so the dashboard can preview it
@@ -20,6 +23,29 @@
 - **Thinking**: keep `reasoning_effort: max` for GPT-5.6 / GPT-6 served through OpenAI Compatible nodes instead of clamping it to `xhigh` (#5186)
 - **Codex Image**: drive the `image_generation` tool call from `gpt-6-sol` instead of the legacy `gpt-5.6-terra` host, and add `cx/gpt-6-sol-image`; drop the `gpt-5.6-{sol,terra,luna}-image` aliases they supersede
 - **Capabilities**: match `*gpt-6*image*` before the generic `gpt-6` family pattern so `gpt-6-sol-image` resolves as an image model instead of inheriting the chat caps (vision/reasoning/1.05M window) and losing `imageOutput`
+
+## Fork merge notes
+- `package.json` / `cli/package.json` stay on the fork version (`0.5.111-1`)
+  and keep the fork's `@raruu/9router` name. Upstream changed no dependencies
+  in v0.5.111 (version lines only).
+- `executors/base.js` `execute()` carries both parameter families: the fork's
+  `timeoutMs`/`timeoutOverride` per-provider connect timeout and upstream's
+  `directFetch` transport override for the OpenCode TLS fingerprint.
+- `thinkingLevels` keeps the fork's precedence (explicit user-catalog list >
+  `thinkingFormatOverride` > codex registry levels > pattern table > format)
+  and the `thinkingEnforce` exception; upstream's #5186 fix (effort `max` for
+  GPT-5.6/GPT-6 on OpenAI Compatible nodes) is inserted into the fallback
+  chain, gated by the fork's `isCompatNodeProvider` instead of upstream's
+  inline `openai-compatible-` prefix check.
+- `tts.js` keeps the fork's auth (`validateApiKeyWithVoiceFallback`, provider
+  display labels, `needsCredentials`) and folds in upstream's `ollama-local`
+  no-credentials path and `body.response_format` fallback.
+- The `ollamaLocal` TTS/embedding adapters register beside the fork's
+  compat-node adapters; `openaiCompatNode` dispatch is kept in both registries.
+- No inherited tests needed alignment (every upstream suite passes against the
+  merged behaviour); providers/alias baselines regenerated, additive only
+  (`runcrate`, ollama-local TTS keys); the no-regression gate's path key is
+  now checkout-portable.
 
 # v0.5.109-2 (2026-10-24)
 
