@@ -38,10 +38,9 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
   // missing", 9router #4892): the intl gateway now rejects any request that
   // does not carry the X-Conversation-* header family the official IDE sends
   // on every turn — a conversation id derived stably from the session key,
-  // plus fresh UUIDs for the request and the message. Verified A/B against
-  // the live upstream: same credentials and body, headers absent -> 11128,
-  // headers present -> 200 SSE. codebuddy-cn (copilot.tencent.com) is not
-  // gated yet, so only the intl executor grows these headers.
+  // plus request/message ids. Verified A/B against the live upstream: same
+  // credentials and body, headers absent -> 11128, headers present -> 200 SSE.
+  // codebuddy-cn is covered by the shared codebuddyHeaders hook in default.js.
   buildHeaders(credentials, stream = true, url, model, body = null) {
     const headers = super.buildHeaders(credentials, stream, url, model, body);
 
@@ -66,11 +65,18 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
           : "";
     const conversationKey = sessionKey || (userText ? `cbai:${userText}` : null);
 
+    // One request id is shared across X-Request-ID / X-Conversation-Request-ID
+    // / X-Conversation-Message-ID — the pair the official plugin reuses
+    // (upstream's codebuddyHeaders hook already set X-Request-ID; fall back to
+    // a fresh id if the hook ever stops running). The fork's stable
+    // conversation id keeps winning over the hook's per-request one.
+    const requestId = headers["X-Request-ID"] || randomUUID();
+    headers["X-Request-ID"] = requestId;
     headers["X-Conversation-ID"] = conversationKey
       ? stableUuidFrom(conversationKey)
       : randomUUID();
-    headers["X-Conversation-Request-ID"] = randomUUID();
-    headers["X-Conversation-Message-ID"] = randomUUID();
+    headers["X-Conversation-Request-ID"] = requestId;
+    headers["X-Conversation-Message-ID"] = requestId;
 
     return headers;
   }
