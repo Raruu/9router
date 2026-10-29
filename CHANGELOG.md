@@ -1,4 +1,7 @@
-# v0.5.112 (2026-10-28)
+# v0.5.112-1 (2026-10-29)
+
+Merged upstream v0.5.112 into the fork. This section includes the full upstream
+release notes and the fork-side merge work.
 
 ## Features
 - **MiniMax Code**: add lease auth mode that rides the desktop app's sign-in through a named-pipe/unix-socket broker (length-prefixed JSON protocol, broker-owned token refresh — no refresh token held locally since MiniMax tokens are single-use), with a dashboard lease button and usage attribution
@@ -15,6 +18,29 @@
 - **Providers**: keep full `LLM|id|secret` (Muse) key strings opaque in bulk-add instead of splitting on the first pipe into name/key, auto-naming them LLM 1, LLM 2, …
 - **DeepSeek**: replace the vendored PoW hash implementation with a noble-hashes keccak port (DeepSeekHashV1, SHA3-256 with round 0 skipped), shrinking `deepseek-pow-hash.js` by ~430 lines
 - **GitHub Copilot**: apply Claude 5.5 thinking rules to Copilot's dotted model ids (`claude-opus-5.5*`, `claude-sonnet-5.5`) and make `claude-haiku-5.5` adaptive-only on its Anthropic-native shim, whose budget-shaped thinking comes back 400
+
+## Fork merge notes
+- `package.json` / `cli/package.json` stay on the fork version (`0.5.112-1`)
+  and keep the fork's `@raruu/9router` name. Upstream changed no dependencies
+  in v0.5.112 (version lines only).
+- `thinkingUnified.js` keeps the fork's `effectiveCfg` call (level clamping
+  with the `thinkingEnforce` opt-out) and takes upstream's new `cleanModel`
+  argument for the Claude 5.5 adaptive-display fix; the fork's `enforce`
+  block and `thinkingFormatOverride` precedence are untouched.
+- `codebuddy-intl.js` is the semantic union of two fixes for the same 11128
+  channel-verification rejection: the fork's stable per-conversation
+  `X-Conversation-ID` (uuid5 over the session key, A/B verified live) is
+  kept, while `X-Request-ID` / `X-Conversation-Request-ID` /
+  `X-Conversation-Message-ID` now share one request id as the official
+  plugin sends (upstream's contract, locked by `codebuddy-channel-headers`).
+- `codebuddy-block-backoff.test.js` is a comment-level union — both sides
+  made the same semantic change (request-scoped asserts, combo advances, no
+  cooldown); the fork's test name and header comment stay.
+- No inherited tests needed alignment; providers/alias baselines verify
+  byte-for-byte (upstream's `nace`/`gpt-6.1-terra`/commandcode entries merge
+  alongside the fork's `runcrate`/ollama-local ones) and `known-fails.txt`
+  is unchanged. MiniMax lease endpoints sit in `ALWAYS_PROTECTED` +
+  `LOCAL_ONLY_PATHS` in `dashboardGuard`.
 
 # v0.5.111-1 (2026-10-28)
 
