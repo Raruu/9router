@@ -48,12 +48,49 @@ const HEADER_HOOKS = {
   // from an official client" — the request never reaches the model.
   // The same request WITH these headers passes channel verification and gets
   // as far as the real rate limiter (429 / 6004).
-  codebuddyHeaders: (h) => {
+  codebuddyHeaders: (h, c) => {
     const requestId = randomUUID();
     h["X-Request-ID"] = requestId;
     h["X-Conversation-ID"] = randomUUID();
     h["X-Conversation-Request-ID"] = requestId;
+    h["X-Root-Request-ID"] = requestId;
     h["X-Conversation-Message-ID"] = requestId;
+    const intl = h["X-IDE-Type"] === "IDE" || String(h["User-Agent"] || "").includes("workbuddy-ai");
+    h["User-Agent"] = intl
+      ? "WorkBuddy/5.9.3 workbuddy-ai/5.9.3 CLI/2.165.0"
+      : "WorkBuddy/5.9.3 WorkBuddy/5.9.3 CLI/2.165.0";
+    h["X-Product"] = "SaaS";
+    h["X-IDE-Type"] = "WorkBuddy";
+    h["X-IDE-Name"] = "WorkBuddy";
+    h["X-IDE-Version"] = "5.9.3";
+    h["X-Agent-Intent"] = "craft";
+    h["X-Agent-Purpose"] = "conversation";
+    h["X-Agent-Type"] = "main";
+    h["X-Agent-Runtime"] = "local-agent";
+    const apiKey = typeof c?.apiKey === "string" ? c.apiKey.trim() : "";
+    if (apiKey && !c?.accessToken) {
+      c.apiKey = apiKey;
+      h["X-API-Key"] = apiKey;
+      h["X-User-Id"] = "anonymous_" + apiKey.slice(-8);
+      delete h["X-Domain"];
+    } else if (typeof c?.accessToken === "string" && c.accessToken) {
+      delete h["X-API-Key"];
+      h["X-Domain"] = intl ? "www.codebuddy.ai" : "copilot.tencent.com";
+      try {
+        const parts = c.accessToken.split(".");
+        if (parts.length >= 2) {
+          const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+          if (typeof payload?.sub === "string" && payload.sub.trim()) {
+            h["X-User-Id"] = payload.sub.trim();
+          }
+          if (typeof payload?.enterprise_id === "string" && payload.enterprise_id.trim()) {
+            const ent = payload.enterprise_id.trim();
+            h["X-Enterprise-Id"] = ent;
+            h["X-Tenant-Id"] = ent;
+          }
+        }
+      } catch {}
+    }
   },
   // Stable device_id from OAuth connection (CLIProxyAPI KimiTokenStorage.DeviceID)
   kimiHeaders: (h, c) => Object.assign(h, buildKimiHeaders(c?.providerSpecificData?.deviceId)),
@@ -71,6 +108,53 @@ const HEADER_HOOKS = {
   clineHeaders: (h, c) => Object.assign(h, buildClineHeaders(c.apiKey || c.accessToken)),
   kilocodeOrg: (h, c) => { if (c.providerSpecificData?.orgId) h["X-Kilocode-OrganizationID"] = c.providerSpecificData.orgId; },
 };
+
+// Compose the header set a provider sends upstream from the registry transport
+// plus its header hooks — the static half of DefaultExecutor.buildHeaders().
+//
+// The dashboard's Custom Headers card used to read PROVIDERS[id].headers
+// directly, which is only the pre-hook value: any provider whose hook rewrites
+// a header (codebuddy's WorkBuddy attribution, kimi's device block) advertised
+// defaults it never actually sent. Auth is deliberately NOT applied here — the
+// card shows what a user may override, and auth is blocked from override.
+//
+// Hooks run twice and any key whose value differs between the runs is dropped:
+// per-request state (request/conversation ids, session ids, timezone offsets)
+// is not a default anyone can sensibly pin, and rendering it would produce a
+// row that changes on every page load.
+export function resolveStaticHeaders(providerId) {
+  const config = PROVIDERS[providerId];
+  if (!config) return {};
+  const desc = AUTH_DESCRIPTORS[providerId] || {};
+
+  const build = () => {
+    const headers = { "Content-Type": "application/json", ...config.headers };
+    // Fresh credentials per run: a hook may mutate the object it is handed.
+    const credentials = {};
+    for (const hook of desc.hooks || []) {
+      try {
+        HEADER_HOOKS[hook]?.(headers, credentials);
+      } catch {
+        // A hook that cannot run without a real credential is not a default.
+      }
+    }
+    if (desc.anthropicVersion && !headers["anthropic-version"]) {
+      headers["anthropic-version"] = ANTHROPIC_API_VERSION;
+    }
+    return headers;
+  };
+
+  const first = build();
+  const second = build();
+
+  const stable = {};
+  for (const [name, value] of Object.entries(first)) {
+    if (typeof value !== "string") continue;
+    if (second[name] !== value) continue;
+    stable[name] = value;
+  }
+  return stable;
+}
 
 // Config-driven OAuth refresh grants — derived from registry oauth.refresh.
 const REFRESH_GRANTS = Object.fromEntries(

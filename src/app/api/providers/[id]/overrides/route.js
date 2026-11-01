@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSettings, updateSettings } from "@/lib/localDb";
-import { PROVIDERS } from "open-sse/config/providers.js";
+import { resolveStaticHeaders } from "open-sse/executors/default.js";
 import { resolveProviderAlias } from "open-sse/services/model.js";
 
 export const dynamic = "force-dynamic";
@@ -72,11 +72,19 @@ export async function GET(request, { params }) {
     // URL may use an alias (gcli, cc…) — key everything by canonical registry id
     const canonical = resolveProviderAlias(id);
     const override = (await readOverrides())[canonical] || {};
-    // Built-in headers come straight from the registry transport — single source of
-    // truth, so the UI pre-fills exactly what this provider sends upstream.
+    // Built-in headers are the ones this provider actually sends: registry
+    // transport with its header hooks applied. Reading PROVIDERS[id].headers
+    // directly would advertise pre-hook values the request path then rewrites.
+    // Headers the override API refuses to accept are omitted too — showing a row
+    // that cannot be saved is worse than hiding it.
+    const builtinHeaders = {};
+    for (const [name, value] of Object.entries(resolveStaticHeaders(canonical))) {
+      if (BLOCKED_HEADERS.has(name.toLowerCase())) continue;
+      builtinHeaders[name] = value;
+    }
     return NextResponse.json({
       headers: override.headers || {},
-      builtinHeaders: PROVIDERS[canonical]?.headers || {},
+      builtinHeaders,
     });
   } catch (error) {
     console.log("Error getting provider overrides:", error);

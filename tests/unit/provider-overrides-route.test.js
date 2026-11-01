@@ -85,4 +85,62 @@ describe("provider overrides route", () => {
     expect(Object.keys(get.body.builtinHeaders).length).toBeGreaterThan(0);
     expect(get.body.headers).toEqual({});
   });
+
+  // The card is the only place a user can see what a provider sends, so it has
+  // to show the post-hook values. Reading PROVIDERS[id].headers directly showed
+  // codebuddy's pre-hook IDE/CLI attribution while the request path rewrote it
+  // to WorkBuddy, and offered rows that could never take effect.
+  describe("builtin headers are the ones actually sent", () => {
+    it("reflects the codebuddy WorkBuddy rewrite instead of the registry value", async () => {
+      const intl = await GET(null, { params: params("codebuddy-intl") });
+      expect(intl.body.builtinHeaders["User-Agent"]).toBe("WorkBuddy/5.9.3 workbuddy-ai/5.9.3 CLI/2.165.0");
+      expect(intl.body.builtinHeaders["X-IDE-Type"]).toBe("WorkBuddy");
+      expect(intl.body.builtinHeaders["X-IDE-Name"]).toBe("WorkBuddy");
+      expect(intl.body.builtinHeaders["X-IDE-Version"]).toBe("5.9.3");
+      expect(intl.body.builtinHeaders["X-Agent-Intent"]).toBe("craft");
+
+      // CN differs only in the UA variant — the hook picks it from the registry
+      // X-IDE-Type, which is still "CLI" there.
+      const cn = await GET(null, { params: params("codebuddy-cn") });
+      expect(cn.body.builtinHeaders["User-Agent"]).toBe("WorkBuddy/5.9.3 WorkBuddy/5.9.3 CLI/2.165.0");
+      expect(cn.body.builtinHeaders["X-IDE-Type"]).toBe("WorkBuddy");
+    });
+
+    it("omits per-request headers so the card never shows a value that churns", async () => {
+      const get = await GET(null, { params: params("codebuddy-intl") });
+      const builtin = get.body.builtinHeaders;
+      for (const volatile of [
+        "X-Request-ID",
+        "X-Root-Request-ID",
+        "X-Conversation-ID",
+        "X-Conversation-Request-ID",
+        "X-Conversation-Message-ID",
+      ]) {
+        expect(builtin[volatile], `${volatile} must not be advertised as a default`).toBeUndefined();
+      }
+    });
+
+    it("omits headers the override API refuses to accept", async () => {
+      const get = await GET(null, { params: params("codebuddy-intl") });
+      const builtin = get.body.builtinHeaders;
+      for (const blocked of ["Content-Type", "Authorization", "Cookie", "Host"]) {
+        expect(builtin[blocked]).toBeUndefined();
+      }
+      // Everything advertised must round-trip through PUT, otherwise the card
+      // offers a row whose save is rejected with "cannot be overridden".
+      for (const name of Object.keys(builtin)) {
+        const res = await PUT(req({ headers: { [name]: "probe" } }), { params: params("codebuddy-intl") });
+        expect(res.status, `${name} must be overridable`).toBe(200);
+      }
+    });
+
+    it("keeps stable hook values and drops only the volatile ones", async () => {
+      const get = await GET(null, { params: params("minimax-code") });
+      const builtin = get.body.builtinHeaders;
+      // Timezone offset is derived but stable across calls, so it is a real default.
+      expect(builtin["X-Mavis-Timezone-Offset"]).toBeDefined();
+      // Session id is regenerated per call.
+      expect(builtin["X-Mavis-Session-Id"]).toBeUndefined();
+    });
+  });
 });

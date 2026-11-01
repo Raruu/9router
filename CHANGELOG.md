@@ -1,3 +1,38 @@
+# v0.5.112-2 (2026-11-01)
+
+## Features
+- **CodeBuddy**: port the two still-open upstream PRs. #5342 adds the WorkBuddy
+  5.9.3 attribution headers and `X-Root-Request-ID`, dual auth for `ck_` API
+  keys (`X-API-Key` + `X-User-Id anonymous_<last8>`, no `X-Domain`) and OAuth
+  JWT `sub`/`enterprise_id` extraction; rewrites `developer`→`system` and
+  `max_completion_tokens`→`max_tokens` plus `reasoning_content`→`reasoning`
+  for multi-turn thinking context in both CN and Intl; keeps caller system
+  prompts on Intl instead of dropping every one; covers API-key-only
+  connections in the test/validate/usage paths; and adds error rules for
+  11158 / 14018 / 11140. #5217 reworks the conversation headers:
+  `withConversationHeaders()` reads and writes case-insensitively, derives a
+  stable id, is idempotent on a second pass and preserves caller ids; the Intl
+  error parser branches on the 11128 message instead of the code; and
+  `session_id` / `prompt_cache_key` / `conversation_id` are forwarded in the
+  body. The CLI build also scrubs `.build-home` from `.nft.json` traces and
+  fails before `npm pack` if a stray one survives. #5032 and #5132 are
+  deliberately excluded: #5132 is already implemented here, and #5032 targets
+  a `buildHeaders` signature that no longer exists
+
+## Fixes
+- **Providers**: the Custom Headers card now advertises the post-hook values
+  requests actually send. `resolveStaticHeaders()` composes the registry
+  transport with the header hooks — the static half of
+  `DefaultExecutor.buildHeaders()` — and the overrides route serves it as
+  `builtinHeaders`, with blocked names filtered out and per-request ids
+  dropped (hooks run twice, differing keys discarded) so no row changes on
+  reload. Auth is never applied, so every advertised row stays saveable, and a
+  row saved from stale values no longer silently reverts the hook rewrite:
+  codebuddy-intl showed `IDE/2.108.1` / `IDE` while requests went out as
+  `WorkBuddy/5.9.3` / `WorkBuddy`, and the same drift is fixed for kimi, cline
+  and minimax. Diff-on-save in the card compares against what is actually
+  sent, so untouched rows still never become overrides.
+
 # v0.5.112-1 (2026-10-29)
 
 Merged upstream v0.5.112 into the fork. This section includes the full upstream
