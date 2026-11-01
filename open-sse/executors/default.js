@@ -109,6 +109,53 @@ const HEADER_HOOKS = {
   kilocodeOrg: (h, c) => { if (c.providerSpecificData?.orgId) h["X-Kilocode-OrganizationID"] = c.providerSpecificData.orgId; },
 };
 
+// Compose the header set a provider sends upstream from the registry transport
+// plus its header hooks — the static half of DefaultExecutor.buildHeaders().
+//
+// The dashboard's Custom Headers card used to read PROVIDERS[id].headers
+// directly, which is only the pre-hook value: any provider whose hook rewrites
+// a header (codebuddy's WorkBuddy attribution, kimi's device block) advertised
+// defaults it never actually sent. Auth is deliberately NOT applied here — the
+// card shows what a user may override, and auth is blocked from override.
+//
+// Hooks run twice and any key whose value differs between the runs is dropped:
+// per-request state (request/conversation ids, session ids, timezone offsets)
+// is not a default anyone can sensibly pin, and rendering it would produce a
+// row that changes on every page load.
+export function resolveStaticHeaders(providerId) {
+  const config = PROVIDERS[providerId];
+  if (!config) return {};
+  const desc = AUTH_DESCRIPTORS[providerId] || {};
+
+  const build = () => {
+    const headers = { "Content-Type": "application/json", ...config.headers };
+    // Fresh credentials per run: a hook may mutate the object it is handed.
+    const credentials = {};
+    for (const hook of desc.hooks || []) {
+      try {
+        HEADER_HOOKS[hook]?.(headers, credentials);
+      } catch {
+        // A hook that cannot run without a real credential is not a default.
+      }
+    }
+    if (desc.anthropicVersion && !headers["anthropic-version"]) {
+      headers["anthropic-version"] = ANTHROPIC_API_VERSION;
+    }
+    return headers;
+  };
+
+  const first = build();
+  const second = build();
+
+  const stable = {};
+  for (const [name, value] of Object.entries(first)) {
+    if (typeof value !== "string") continue;
+    if (second[name] !== value) continue;
+    stable[name] = value;
+  }
+  return stable;
+}
+
 // Config-driven OAuth refresh grants — derived from registry oauth.refresh.
 const REFRESH_GRANTS = Object.fromEntries(
   Object.entries(PROVIDER_OAUTH)
