@@ -97,8 +97,13 @@ describe("CodeBuddy Intl block backoff (#5024)", () => {
       handleSingleModel: dispatch, log: { info: vi.fn(), warn: vi.fn() },
       comboName: "malformed-combo", comboStrategy: "fallback",
     });
-    expect(result).toBe(error);
+    // A malformed body is request-scoped: it says nothing about the credential,
+    // so the combo tries the next member instead of stopping on the first error.
     expect(dispatch).toHaveBeenCalledTimes(2);
+    // No member served it, so the first request-scoped failure is handed back —
+    // the caller still sees the member that named the real cause.
+    expect(result).toBe(error);
+    // Crucially, no account cooldown is persisted for a client-side fault.
     expect(db.updateProviderConnection).not.toHaveBeenCalled();
   });
 });
