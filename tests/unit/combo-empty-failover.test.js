@@ -394,4 +394,27 @@ describe("combo fall-through per client format (real combo.js + streaming pipeli
       expect(out).toContain('"reason":"content_filter"');
     });
   });
+
+  // Regression guard for the same-member retry loop swallowing fall-through
+  // `continue`s: an empty member must be attempted exactly once. The mock
+  // fails fast after 3 calls per member so a re-run loop surfaces as a wrong
+  // `tried` sequence in milliseconds instead of starving timers until OOM.
+  it("an empty member is attempted exactly once (no same-member re-run)", async () => {
+    const tried = [];
+    const bound = async (_b, m) => {
+      const calls = tried.filter((t) => t === m).length;
+      tried.push(m);
+      if (calls >= 3) throw new Error(`same-member re-run detected: ${m} called ${calls + 1} times`);
+      return memberResponse(m === "openai/m0" ? [ROLE, STOP, DONE] : [ROLE, C("from-m1"), STOP, DONE], FORMATS.OPENAI, FORMATS.OPENAI, m);
+    };
+    const res = await handleComboChat({
+      body: { messages: [{ role: "user", content: "hi" }] },
+      models: ["openai/m0", "openai/m1"],
+      handleSingleModel: bound,
+      log: LOG, comboName: `c-bounded-${Math.random()}`, comboStrategy: "fallback",
+    });
+    const out = await res.text();
+    expect(tried).toEqual(["openai/m0", "openai/m1"]);
+    expect(out).toContain("from-m1");
+  });
 });
