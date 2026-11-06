@@ -25,7 +25,7 @@ import { useNotificationStore } from "@/store/notificationStore";
 import { useHeaderSearchStore } from "@/store/headerSearchStore";
 import ModelAvailabilityBadge from "./components/ModelAvailabilityBadge";
 import AddCompatibleModal from "./components/AddCompatibleModal";
-import { STATUS_FILTER_OPTIONS, matchesStatusFilter } from "./utils";
+import { STATUS_FILTER_OPTIONS, apiFamilyBadge, matchesStatusFilter } from "./utils";
 
 function getStatusDisplay(connected, error, errorCode) {
   const parts = [];
@@ -829,6 +829,9 @@ function ApiKeyProviderCard({
   const isAnthropicCompatible = providerId.startsWith(
     ANTHROPIC_COMPATIBLE_PREFIX,
   );
+  // Pill only for custom compatible nodes; built-in providers already name
+  // their family (an "OpenAI" chip on the OpenAI card is noise).
+  const familyBadge = apiFamilyBadge(providerId);
 
   const dotColors = {
     free: "bg-green-500",
@@ -925,15 +928,15 @@ function ApiKeyProviderCard({
             )}
           </div>
         </div>
-        {isAnthropicCompatible ? (
+        {familyBadge === "anthropic" ? (
           <Badge variant="anthropic" size="sm" className="absolute right-3 top-3">
             Anthropic
           </Badge>
-        ) : (
+        ) : familyBadge === "openai" ? (
           <Badge variant="openai" size="sm" className="absolute right-3 top-3">
             OpenAI
           </Badge>
-        )}
+        ) : null}
       </Card>
     </Link>
   );
