@@ -156,6 +156,26 @@ export default function ModelCatalogPage() {
     }
   };
 
+  const changePricingEnforce = async (value) => {
+    const previous = catalog.pricingEnforce === true;
+    setCatalog((current) => ({ ...current, pricingEnforce: value }));
+    setBusy("pricing");
+    try {
+      await requestJson("/api/models/catalog/pricing-enforce", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pricingEnforce: value }),
+      });
+      invalidateModelCapabilities();
+      notify.success(value ? "Catalog pricing enforced" : "Catalog pricing released to Pricing page overrides");
+    } catch (error) {
+      setCatalog((current) => ({ ...current, pricingEnforce: previous }));
+      notify.error(error.message);
+    } finally {
+      setBusy("");
+    }
+  };
+
   const saveUser = async (entry) => {
     const wasEditing = editing?.source === "user";
     setBusy("user");
@@ -314,6 +334,18 @@ export default function ModelCatalogPage() {
             onChange={changeClamp}
             disabled={busy === "clamp"}
             aria-label="Clamp output to Max output"
+          />
+        </div>
+        <div className="border-t border-border-subtle pt-3 flex items-center justify-between gap-4">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium">Enforce catalog pricing</p>
+            <p className="text-xs text-text-muted mt-0.5">When on, request cost uses the price resolved by the Resolution order above; a per-model override on the Pricing page is ignored for usage while the catalog resolves a price. When off, the Pricing page override wins.</p>
+          </div>
+          <Toggle
+            checked={catalog.pricingEnforce === true}
+            onChange={changePricingEnforce}
+            disabled={busy === "pricing"}
+            aria-label="Enforce catalog pricing"
           />
         </div>
       </div>

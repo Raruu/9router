@@ -442,6 +442,13 @@ export function setCatalogPricingSource(source) {
   globalThis[CATALOG_PRICING_SOURCE_KEY] = source;
 }
 
+// Model Catalog → "Enforce catalog pricing". The flag rides the installed
+// source so cost/usage code can read it synchronously (no settings lookup per
+// token calculation). Absent source (cold start, tests) means off.
+export function isCatalogPricingEnforced() {
+  return globalThis[CATALOG_PRICING_SOURCE_KEY]?.enforcePricing === true;
+}
+
 function getHardcodedPricing(provider, model) {
   if (!model) return null;
   if (provider && PROVIDER_PRICING[provider]?.[model]) return PROVIDER_PRICING[provider][model];

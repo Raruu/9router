@@ -57,10 +57,15 @@ export async function getPricing() {
 export async function getPricingForModel(provider, model) {
   if (!model) return null;
   const userPricing = await getUserPricing();
-  const { getPricingForModel: resolveConst } = await import("open-sse/providers/pricing.js");
+  const { getPricingForModel: resolveConst, isCatalogPricingEnforced } = await import("open-sse/providers/pricing.js");
   const catalogPricing = resolveConst(provider, model);
   const override = provider && userPricing[provider]?.[model];
   if (!override) return catalogPricing;
+  // Model Catalog → "Enforce catalog pricing": the Resolution order governs
+  // usage whenever it resolves a price, so a Pricing-page override no longer
+  // wins. An override still applies when the catalog cannot price the model at
+  // all — dropping it there would report $0 for the only rate the user set.
+  if (catalogPricing && isCatalogPricingEnforced()) return catalogPricing;
   return { ...(catalogPricing || {}), ...override };
 }
 

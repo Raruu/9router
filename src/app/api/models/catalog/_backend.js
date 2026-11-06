@@ -68,6 +68,7 @@ export async function getCatalog() {
   return {
     priority: settings.modelCatalogPriority,
     clampMaxOutput: settings.modelCatalogClampMaxOutput === true,
+    pricingEnforce: settings.modelCatalogEnforcePricing === true,
     userDefined: users.map((row) => ({ source: "user", ...row, ...row.data, pricingPerMillion: true })),
     openrouter: {
       models: openrouter.map((row) => ({ source: "openrouter", provider: "*", matchType: "glob", ...row, ...row.data, pricingPerMillion: true })),
@@ -248,6 +249,13 @@ export async function setClampMaxOutput(value) {
     throw new CatalogBackendError("clampMaxOutput must be a boolean", 400);
   }
   return await updateSettings({ modelCatalogClampMaxOutput: value });
+}
+
+export async function setEnforcePricing(value) {
+  if (typeof value !== "boolean") {
+    throw new CatalogBackendError("pricingEnforce must be a boolean", 400);
+  }
+  return await updateSettings({ modelCatalogEnforcePricing: value });
 }
 
 export function validateOpenRouterResponse(payload) {

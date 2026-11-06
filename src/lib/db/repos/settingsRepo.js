@@ -113,6 +113,11 @@ export const DEFAULT_SETTINGS = {
   // that leave `clampMaxOutput` on inherit lower a client-sent output cap to
   // the model's explicit Max output. A rule's own true/false overrides it.
   modelCatalogClampMaxOutput: false,
+  // When on, usage/cost resolves pricing through the Model Catalog order
+  // (user rules > OpenRouter > hardcoded) and ignores the per-model overrides
+  // edited on the Pricing page whenever the catalog resolves a price. Off keeps
+  // the historical precedence: a Pricing-page override always wins.
+  modelCatalogEnforcePricing: false,
   // Per-provider user header overrides applied at dispatch: { [providerId]: { headers: {..} } }
   providerOverrides: {},
 };
@@ -169,6 +174,9 @@ export async function updateSettings(updates) {
   if (Object.prototype.hasOwnProperty.call(updates || {}, "modelCatalogClampMaxOutput")) {
     if (typeof updates.modelCatalogClampMaxOutput !== "boolean") throw new Error("Invalid model catalog clamp setting");
   }
+  if (Object.prototype.hasOwnProperty.call(updates || {}, "modelCatalogEnforcePricing")) {
+    if (typeof updates.modelCatalogEnforcePricing !== "boolean") throw new Error("Invalid model catalog pricing enforce setting");
+  }
   const db = await getAdapter();
   let next;
   db.transaction(function () {
@@ -180,11 +188,12 @@ export async function updateSettings(updates) {
       [stringifyJson(next)],
     );
   });
-  // Both keys change how the runtime resolver answers, so the installed
+  // These keys change how the runtime resolver answers, so the installed
   // catalog source must be rebuilt before the next request reads it.
   if (
     Object.prototype.hasOwnProperty.call(updates || {}, "modelCatalogPriority")
     || Object.prototype.hasOwnProperty.call(updates || {}, "modelCatalogClampMaxOutput")
+    || Object.prototype.hasOwnProperty.call(updates || {}, "modelCatalogEnforcePricing")
   ) {
     const { refreshModelCatalogRuntime } = await import("../../modelCatalog/runtime.js");
     await refreshModelCatalogRuntime();
