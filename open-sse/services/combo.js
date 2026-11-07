@@ -621,6 +621,10 @@ export async function handleComboChat({
                   }
                   lastError = "Zero usable content";
                   lastStatus = 200;
+                  // Leave the same-member retry loop (advancing) so the for-loop
+                  // reaches the next member — a bare `continue` here would re-run
+                  // this member forever on a persistently empty upstream.
+                  advancing = true;
                   continue;
                 }
               } catch {
@@ -656,6 +660,9 @@ export async function handleComboChat({
         peeked.response.body?.cancel?.().catch(() => {});
         lastError = `empty generation (${reasonLabel})`;
         if (!lastStatus) lastStatus = 502;
+        // Same as above: advance out of the same-member retry loop instead of
+        // re-running a member that keeps producing empty generations.
+        advancing = true;
         continue;
       }
 

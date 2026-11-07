@@ -52,6 +52,10 @@ export async function refreshModelCatalogRuntime() {
       return caps;
     },
     getPricing: resolver.getPricing,
+    // Read by pricingRepo.getPricingForModel via isCatalogPricingEnforced():
+    // when on, the resolved catalog price is authoritative for usage and the
+    // Pricing-page override only fills models the catalog cannot price.
+    enforcePricing: settings.modelCatalogEnforcePricing === true,
   };
   setCatalogSource(source);
   setCatalogPricingSource(source);

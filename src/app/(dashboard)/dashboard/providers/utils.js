@@ -1,9 +1,24 @@
+import {
+  isAnthropicCompatibleProvider,
+  isOpenAICompatibleProvider,
+} from "@/shared/constants/providers";
+
 export const STATUS_FILTER_OPTIONS = [
   { value: "all", label: "All" },
   { value: "active", label: "Active" },
   { value: "inactive", label: "Inactive" },
   { value: "none", label: "No connection" },
 ];
+
+// The API-family pill on a provider card ("OpenAI" / "Anthropic") only tells
+// the user something for custom compatible nodes, whose family is chosen at
+// creation time. On a built-in provider the name already says it (an "OpenAI"
+// chip on the OpenAI card is noise), so those cards render no pill.
+export function apiFamilyBadge(providerId) {
+  if (isAnthropicCompatibleProvider(providerId)) return "anthropic";
+  if (isOpenAICompatibleProvider(providerId)) return "openai";
+  return null;
+}
 
 // noAuth providers (e.g. free proxies) are always usable even though they
 // never have a stored connection record, so they never fall into "none".

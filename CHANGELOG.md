@@ -1,3 +1,27 @@
+# v0.5.112-3 (2026-11-06)
+
+## Features
+- **Model Catalog**: add an "Enforce catalog pricing" switch (default off).
+  When on, request cost uses the price resolved by the Resolution order above
+  and a per-model override edited on the Pricing page is ignored for usage
+  while the catalog resolves a price; the override still fills models the
+  catalog cannot price at all. Off keeps the previous precedence, where the
+  Pricing-page override always won. The flag rides the process-global catalog
+  source, so the per-token cost path and independently bundled chunks agree,
+  and toggling it refreshes the resolver like priority/clamp do
+
+## Fixes
+- **Combos**: a combo member answering HTTP 200 with zero usable content — or
+  an empty generation — re-ran the same member forever instead of advancing,
+  hanging the request until the worker ran out of memory. The same-member retry
+  loop swallowed the fall-through `continue`s; both paths now leave the retry
+  loop so the combo tries the next member. Last-member and `content_filter`
+  empties still return as-is, and transient-failure retries are unchanged
+- **Providers**: the API-family pill ("OpenAI" / "Anthropic") is gone from
+  built-in provider cards and now renders only for custom compatible nodes,
+  whose family is user-chosen — an "OpenAI" chip on the OpenAI card said
+  nothing
+
 # v0.5.112-2 (2026-11-01)
 
 ## Features
