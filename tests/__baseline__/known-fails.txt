@@ -3,7 +3,11 @@
 
 # Catalogued before the June translator refactor (9532ec80); expected behavior not
 # re-established from current code, needs the maintainer.
+# The got-scraping JA3 path is disabled in proxyFetch ("Disabled: not in use"), so
+# neither test can observe it; upstream v0.5.116 removed the remaining transport
+# hook that once made the fallback assertion pass.
 tests/unit/claude-header-forwarding.test.js :: proxyAwareFetch — api.anthropic.com routing routes api.anthropic.com to gotScraping (non-streaming) and returns ok response
+tests/unit/claude-header-forwarding.test.js :: proxyAwareFetch — api.anthropic.com routing falls back gracefully when got-scraping throws on non-streaming path
 tests/unit/oauth-cursor-auto-import.test.js :: GET /api/oauth/cursor/auto-import extracts tokens using exact keys
 tests/unit/oauth-cursor-auto-import.test.js :: GET /api/oauth/cursor/auto-import falls back to fuzzy key matching on macOS when exact keys are missing
 tests/unit/oauth-cursor-auto-import.test.js :: GET /api/oauth/cursor/auto-import linux uses single hardcoded path and original error message

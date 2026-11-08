@@ -14,6 +14,7 @@ describe("Kiro external_idp (CLIProxyAPI) import and refresh", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
+    vi.doUnmock("undici");
     global.fetch = originalFetch;
   });
 
@@ -21,8 +22,20 @@ describe("Kiro external_idp (CLIProxyAPI) import and refresh", () => {
     vi.doUnmock("next/server");
     vi.doUnmock("@/models");
     vi.doUnmock("../../open-sse/utils/proxyFetch.js");
+    vi.doUnmock("undici");
     global.fetch = originalFetch;
   });
+
+  // proxyAwareFetch uses the undici package's fetch (undici 8 dispatcher rule),
+  // so the refresh call needs the transport mocked too.
+  function stubFetch(fn) {
+    global.fetch = fn;
+    vi.doMock("undici", async () => ({
+      ...(await vi.importActual("undici")),
+      fetch: fn,
+    }));
+    return fn;
+  }
 
   it("refreshes Microsoft external_idp tokens with form-encoded OAuth body", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
@@ -33,7 +46,7 @@ describe("Kiro external_idp (CLIProxyAPI) import and refresh", () => {
         expires_in: 3600,
       }),
     });
-    global.fetch = fetchMock;
+    stubFetch(fetchMock);
 
     const { refreshKiroToken } = await import("../../open-sse/services/tokenRefresh.js");
     const result = await refreshKiroToken("old-refresh-token", {
@@ -79,7 +92,7 @@ describe("Kiro external_idp (CLIProxyAPI) import and refresh", () => {
   it("rejects external_idp refresh endpoints outside Microsoft login", async () => {
     const { refreshKiroToken } = await import("../../open-sse/services/tokenRefresh.js");
     const fetchMock = vi.fn();
-    global.fetch = fetchMock;
+    stubFetch(fetchMock);
 
     const result = await refreshKiroToken("old-refresh-token", {
       authMethod: "external_idp",
