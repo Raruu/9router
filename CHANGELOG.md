@@ -1,4 +1,7 @@
-# v0.5.116 (2026-11-08)
+# v0.5.116-1 (2026-11-08)
+
+Merged upstream v0.5.116 into the fork. This section includes the full upstream
+release notes and the fork-side merge work.
 
 ## Features
 - **CommandCode**: align data bridge with official CLI v1.88.5 and add credential auto-import
@@ -30,6 +33,34 @@
 - **CLI Tools**: Add All Active Models now includes no-auth, alias and custom models (#5449)
 - **Runtime**: pass `--global=false` so npm hooks can't create stray global installs (#5443)
 - **Dedupe**: drop `tool_reference` blocks naming tools stripped by MCP dedupe (z.ai 400)
+
+## Fork merge notes
+- `package.json` / `cli/package.json` stay on the fork version (`0.5.116-1`)
+  and keep the fork's `@raruu/9router` name. Upstream's `undici ^8.12.3` bump is
+  taken (node_modules refreshed locally; the lock is gitignored).
+- `thinkingUnified` passes both the fork's clamp-aware `effectiveCfg`
+  (`thinkingEnforce` opt-out) and upstream's new `budgetPassthrough` flag, so
+  DeepSeek budgets survive on compat nodes while the fork's enforce block and
+  precedence are untouched.
+- `codebuddy-intl` keeps the fork's ordered-system-prompt implementation from
+  #5342/#5217 (multi-system preservation, >2000-char neutralization, extra agent
+  markers, `max_completion_tokens` rename, session-id forwarding) and adopts
+  upstream's official-client fallback `"You are CodeBuddy Code."` when no
+  system prompt is supplied.
+- `build-cli.js` exports and runs both the fork's `.build-home` scrub + pre-pack
+  leak check and upstream's DeepSeek PoW copy/assert; the build-artifacts test
+  carries both suites.
+- **Security**: the new `/api/oauth/commandcode/auto-import` route reads
+  `~/.commandcode/auth.json` and returns the API key, so it now joins the
+  cursor/kiro/zed auto-import routes in `ALWAYS_PROTECTED` and
+  `LOCAL_ONLY_PATHS` (dashboard session required even with `requireLogin` off;
+  loopback or CLI token only), with guard tests pinning 403/401.
+- Transport tests were aligned with the undici-8 fetch path (global.fetch stubs
+  alone no longer intercept `proxyAwareFetch`); the direct no-proxy path now
+  carries an Agent dispatcher by design. The second got-scraping assertion is
+  recorded in `known-fails` because that JA3 path is disabled.
+- Providers/alias/OAuth-URL baselines verify byte-for-byte. No fork behaviour
+  was overwritten by the merge.
 
 # v0.5.112-3 (2026-11-06)
 
