@@ -13,6 +13,7 @@ import runwayml from "./runwayml.js";
 import cloudflareAi from "./cloudflareAi.js";
 import antigravity from "./antigravity.js";
 import openaiCompatNode from "./openaiCompatNode.js";
+import sensenova from "./sensenova.js";
 import { isCompatNodeProvider } from "../../config/kindEndpoints.js";
 import museWeb from "./muse-web.js";
 import chatgptWeb from "./chatgpt-web.js";
@@ -28,7 +29,7 @@ const ADAPTERS = {
   recraft: createOpenAIAdapter("recraft"),
   "vercel-ai-gateway": createOpenAIAdapter("vercel-ai-gateway"),
   xai: createOpenAIAdapter("xai"),
-  sensenova: createOpenAIAdapter("sensenova"),
+  sensenova,
   gemini,
   codex,
   sdwebui,
