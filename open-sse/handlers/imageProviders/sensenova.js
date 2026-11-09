@@ -17,6 +17,7 @@ const sensenovaImageAdapter = {
       postUrl: ctx.url || base.buildUrl(),
       headers: ctx.headers,
       job: payload,
+      timeoutMs: ctx.jobTimeoutMs,
     });
   },
   normalize: (responseBody, prompt) => normalizeImageResult(responseBody, prompt),

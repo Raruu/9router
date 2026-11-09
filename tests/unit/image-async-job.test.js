@@ -194,6 +194,26 @@ describe("async image jobs", () => {
     expect((await result.response.json()).data[0].url).toBe("https://cdn.test/out-7.png");
   });
 
+  it("honours an explicit jobTimeoutMs override", async () => {
+    global.fetch
+      .mockResolvedValueOnce(job("job-8"))
+      .mockImplementation(async () => json({ status: "processing" }));
+
+    const pending = handleImageGenerationCore({
+      body: { prompt: "a river" },
+      modelInfo: compatModel,
+      credentials: compatCreds(),
+      jobTimeoutMs: 5000,
+      log: null,
+    });
+    await vi.advanceTimersByTimeAsync(5000);
+    const result = await pending;
+
+    expect(result.success).toBe(false);
+    expect(result.status).toBe(502);
+    expect(result.error).toContain("timed out after 5s");
+  });
+
   it("passes a synchronous image response through unchanged", async () => {
     global.fetch.mockResolvedValueOnce(json({
       created: 123,

@@ -1,5 +1,7 @@
 // Shared helpers for image provider adapters
 
+import { resolveImageJobTimeoutMs } from "../../config/timeouts.js";
+
 export const POLL_INTERVAL_MS = 1500;
 export const POLL_TIMEOUT_MS = 120000;
 
@@ -187,7 +189,7 @@ export async function pollImageJob({
   fetchImpl = fetch,
   intervalMs = IMAGE_JOB_POLL_START_MS,
   maxIntervalMs = IMAGE_JOB_POLL_MAX_MS,
-  timeoutMs = POLL_TIMEOUT_MS,
+  timeoutMs = resolveImageJobTimeoutMs(null),
 } = {}) {
   const jobId = jobIdOf(job);
   const pollUrl = resolveJobPollUrl(postUrl, job);

@@ -77,7 +77,12 @@ const openaiCompatNodeImageAdapter = {
   async parseResponse(response, ctx = {}) {
     const payload = await response.json();
     if (!isImageJob(payload)) return payload;
-    return await pollImageJob({ postUrl: editPollBase(ctx.url), headers: ctx.headers, job: payload });
+    return await pollImageJob({
+      postUrl: editPollBase(ctx.url),
+      headers: ctx.headers,
+      job: payload,
+      timeoutMs: ctx.jobTimeoutMs,
+    });
   },
   normalize: (responseBody, prompt) => normalizeImageResult(responseBody, prompt),
 };

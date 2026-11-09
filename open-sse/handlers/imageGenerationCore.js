@@ -34,6 +34,7 @@ export async function handleImageGenerationCore({
   credentials,
   log,
   action = "generations",
+  jobTimeoutMs,
   streamToClient = false,
   binaryOutput = false,
   onCredentialsRefreshed,
@@ -209,6 +210,8 @@ export async function handleImageGenerationCore({
         requestBody,
         model,
         body,
+        action,
+        jobTimeoutMs,
       });
       // Codex streaming case: returns an SSE Response directly
       if (parsed?.sseResponse) {

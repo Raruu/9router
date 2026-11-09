@@ -19,6 +19,7 @@ import { handleComboChat } from "open-sse/services/combo.js";
 import * as log from "../utils/logger.js";
 import { saveRequestUsage } from "@/lib/usageDb.js";
 import { parseImageEditRequestBody } from "./imageEditRequest.js";
+import { resolveImageJobTimeoutMs } from "open-sse/config/timeouts.js";
 
 // Providers that don't require credentials (noAuth)
 const NO_AUTH_PROVIDERS = new Set(["sdwebui", "comfyui", "veoaifree-web"]);
@@ -98,7 +99,18 @@ async function handleImageRequest(request, action) {
   const keyAccessDenied = await enforceKeyAccess(await getKeyAccessContext(request), modelStr);
   if (keyAccessDenied) return keyAccessDenied;
 
-  const singleOptions = { action, wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint: url.pathname };
+  // Async image-job poll timeout: per-provider override, else global default.
+  const providerTimeouts = settings.providerTimeouts || {};
+  const jobTimeoutFor = (provider) => resolveImageJobTimeoutMs(providerTimeouts[provider]);
+  const singleOptions = {
+    action,
+    wantsStream,
+    binaryOutput,
+    preferredConnectionId,
+    apiKey,
+    endpoint: url.pathname,
+    jobTimeoutFor,
+  };
 
   // Combo expansion: model may be a combo name → run fallback/round-robin across models
   const comboModels = await getComboModels(modelStr);
@@ -121,17 +133,19 @@ async function handleImageRequest(request, action) {
   return handleSingleModelImage(body, modelStr, singleOptions);
 }
 
-async function handleSingleModelImage(body, modelStr, { action = "generations", wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint } = {}) {
+async function handleSingleModelImage(body, modelStr, { action = "generations", wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint, jobTimeoutFor } = {}) {
   const modelInfo = await getModelInfo(modelStr);
   if (!modelInfo.provider) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid model format");
 
   const { provider, model } = modelInfo;
+  const jobTimeoutMs = typeof jobTimeoutFor === "function" ? jobTimeoutFor(provider) : undefined;
 
   // noAuth providers — no credential needed
   if (NO_AUTH_PROVIDERS.has(provider)) {
     const result = await handleImageGenerationCore({
       body,
       action,
+      jobTimeoutMs,
       modelInfo: { provider, model },
       credentials: null,
       binaryOutput,
@@ -178,6 +192,7 @@ async function handleSingleModelImage(body, modelStr, { action = "generations", 
     const result = await handleImageGenerationCore({
       body,
       action,
+      jobTimeoutMs,
       modelInfo: { provider, model },
       credentials: refreshedCredentials,
       streamToClient: wantsStream,
