@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { handleImageGenerationCore } from "../../open-sse/handlers/imageGenerationCore.js";
 
-// Async image jobs: nararouter-style custom nodes (and a unified SenseNova
-// gateway) answer POST /images/generations with
+// Async image jobs: custom nodes (and a built-in provider behind a gateway)
+// answer POST /images/generations with
 //   { object: "image.generation.job", status: "processing", id }
 // The gateway must poll the status endpoint and return the final image to the
 // client instead of forwarding the job handle.
@@ -181,7 +181,7 @@ describe("async image jobs", () => {
       log: null,
     });
 
-    // First poll after ~2s (xKiro recommends starting there)…
+    // First poll after ~2s (the recommended start)…
     await vi.advanceTimersByTimeAsync(2000);
     expect(global.fetch).toHaveBeenCalledTimes(2);
     // …then ~3s (×1.5 backoff), not another 2s.

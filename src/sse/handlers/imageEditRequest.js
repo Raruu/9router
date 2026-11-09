@@ -1,10 +1,10 @@
 // /v1/images/edits request parsing.
 //
-// OpenAI's edit contract is multipart/form-data: `image` (file), `prompt`, and
-// an edit-capable `model`; optional `mask`, `n`, `size`, `quality`,
+// The standard edit contract is multipart/form-data: `image` (file), `prompt`,
+// and an edit-capable `model`; optional `mask`, `n`, `size`, `quality`,
 // `background`, `input_fidelity`, and `response_format`. The upstream is the
-// provider's /images/edits endpoint, which on xKiro-style gateways answers with
-// the same async image job as generations.
+// provider's /images/edits endpoint, which on async gateways answers with the
+// same image job as generations.
 import { HTTP_STATUS } from "open-sse/config/runtimeConfig.js";
 
 export const IMAGE_EDIT_MAX_FILES = 10;

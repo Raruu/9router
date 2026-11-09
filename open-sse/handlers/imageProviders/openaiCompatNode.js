@@ -5,8 +5,8 @@
 // origin separate from chat) or the node's main baseUrl. The body is the
 // standard OpenAI request; a synchronous response passes through unchanged.
 //
-// Async upstreams (nararouter-style) answer with an image job handle instead of
-// an image — `{ object: "image.generation.job", status: "processing", id }`.
+// Async upstreams answer with an image job handle instead of an image —
+// `{ object: "image.generation.job", status: "processing", id }`.
 // Those are polled (same contract as the custom video adapter) and the terminal
 // payload is normalized to the OpenAI image shape.
 import { buildCompatKindUrl, resolveCompatKindBaseUrl } from "../../config/kindEndpoints.js";
@@ -21,8 +21,8 @@ function authHeaders(creds, extra = {}) {
   return headers;
 }
 
-// OpenAI edits body shape: model + prompt + the source image(s) as files, plus
-// the optional knobs both OpenAI and xKiro accept.
+// Edits body shape: model + prompt + the source image(s) as files, plus the
+// optional knobs the standard edit API accepts.
 const EDIT_FORM_FIELDS = ["n", "size", "quality", "background", "input_fidelity", "output_format", "response_format"];
 
 function buildEditForm(model, body) {
@@ -41,9 +41,9 @@ function buildEditForm(model, body) {
   return form;
 }
 
-// A gateway that runs image edits asynchronously retrieves the job from its
-// generations endpoint (xKiro documents `/v1/images/generations/{id}` even for
-// edits); a payload-supplied same-origin poll_url still wins in pollImageJob.
+// A gateway that runs image edits asynchronously may retrieve the job from its
+// generations endpoint; a payload-supplied same-origin poll_url still wins in
+// pollImageJob.
 function editPollBase(postUrl) {
   return String(postUrl || "").replace(/\/images\/edits\/?$/, "/images/generations");
 }

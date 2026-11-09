@@ -5,8 +5,8 @@ import { resolveImageJobTimeoutMs } from "../../config/timeouts.js";
 export const POLL_INTERVAL_MS = 1500;
 export const POLL_TIMEOUT_MS = 120000;
 
-// Async image jobs poll slower than task APIs: xKiro's docs recommend starting
-// around 2s and backing off to ~10s, since aggressive polling hits rate limits.
+// Async image jobs poll slower than task APIs: start around 2s and back off to
+// ~10s, since aggressive polling hits rate limits.
 export const IMAGE_JOB_POLL_START_MS = 2000;
 export const IMAGE_JOB_POLL_MAX_MS = 10000;
 
@@ -38,9 +38,8 @@ export function nowSec() {
 }
 
 // ─── Async image jobs ───────────────────────────────────────────────────────
-// Some OpenAI-shaped upstreams (notably the nararouter/bynara family that the
-// custom compatible nodes target) answer POST /images/generations with a job
-// handle instead of an image:
+// Some image upstreams answer POST /images/generations with a job handle
+// instead of an image:
 //   { "object": "image.generation.job", "status": "processing", "id": "…" }
 // The gateway has to poll the status endpoint and hand the client the final
 // image payload; adapters without this pass the job JSON through as a fake

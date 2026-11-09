@@ -44,8 +44,8 @@ export default function createOpenAIAdapter(providerId) {
     normalize: (responseBody) => responseBody,
   };
 
-  // Providers that expose OpenAI's multipart edit contract opt in through
-  // imageConfig.editsUrl (today: the built-in `openai` provider).
+  // Providers that expose the standard multipart edit contract opt in through
+  // imageConfig.editsUrl.
   if (cfg.editsUrl) {
     const editFields = ["n", "size", "quality", "background", "input_fidelity", "output_format", "response_format"];
     adapter.buildEditRequest = ({ model, body, credentials }) => {

@@ -1,8 +1,7 @@
-// SenseNova image generation — OpenAI-shaped /images/generations.
-//
-// The Token Plan API is synchronous for the U1.5 image models, but a unified
-// gateway in front of it may answer with an async job handle. Poll that the
-// same way the custom compatible nodes do, so both routes return an image.
+// Image generation adapter — OpenAI-shaped /images/generations with async job
+// polling. The direct API is synchronous, but a gateway in front of it may
+// answer with a job handle. Poll that the same way the custom compatible nodes
+// do, so both routes return an image.
 import createOpenAIAdapter from "./openai.js";
 import { isImageJob, normalizeImageResult, pollImageJob } from "./_base.js";
 

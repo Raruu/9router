@@ -5,9 +5,9 @@ import {
   parseImageEditRequestBody,
 } from "../../src/sse/handlers/imageEditRequest.js";
 
-// /v1/images/edits: OpenAI multipart contract, forwarded to OpenAI-shaped
-// providers. xKiro-style gateways execute it as an async job retrieved from
-// their generations endpoint.
+// /v1/images/edits: multipart contract forwarded to compatible providers.
+// Async gateways execute it as a job retrieved from their generations
+// endpoint.
 
 const originalFetch = global.fetch;
 const MEDIA_HOST = "https://img.test/v1";

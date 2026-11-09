@@ -58,8 +58,8 @@ export async function handleImageGenerationCore({
     );
   }
 
-  // Edits are opt-in per adapter (OpenAI-shaped providers today). Everything
-  // else keeps the JSON generations path, including its `image` field.
+  // Edits are opt-in per adapter. Everything else keeps the JSON generations
+  // path, including its `image` field.
   if (action === "edits" && typeof adapter.buildEditRequest !== "function") {
     return createErrorResult(
       HTTP_STATUS.BAD_REQUEST,

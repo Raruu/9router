@@ -17,8 +17,8 @@ export function resolveProviderTimeouts(raw) {
   return out;
 }
 
-// Async image jobs render for minutes on some gateways (xKiro documents tens of
-// seconds to a few minutes), so the job poller gets its own, longer default
+// Async image jobs render for minutes on some gateways (tens of seconds to a
+// few minutes), so the job poller gets its own, longer default
 // than the chat connect timeout. IMAGE_JOB_TIMEOUT_MS overrides it globally;
 // a provider's providerTimeouts.imageJobMs overrides it per provider.
 export const DEFAULT_IMAGE_JOB_TIMEOUT_MS = 300000;

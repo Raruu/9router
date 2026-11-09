@@ -10,7 +10,7 @@ export async function OPTIONS() {
   });
 }
 
-/** POST /v1/images/edits - OpenAI-compatible image edit (multipart/form-data) */
+/** POST /v1/images/edits - image edit (multipart/form-data) */
 export async function POST(request) {
   return await handleImageEdits(request);
 }
