@@ -1,3 +1,23 @@
+# v0.5.116-2 (2026-11-09)
+
+## Features
+- **Image**: add `POST /v1/images/edits` for OpenAI-shaped providers and custom
+  compatible nodes. Multipart `image`/`image[]` (up to 10 files, 25 MB each),
+  optional `mask`, and `n`/`size`/`quality`/`background`/`input_fidelity`; the
+  same API-key and combo rules as generations apply. Async edit jobs are polled
+  and returned as JSON or raw bytes (`?response_format=binary`).
+- **Providers**: the async image-job poll timeout is configurable per provider
+  (Providers → Timeouts → "Image job", seconds, default 300 s) or globally with
+  `IMAGE_JOB_TIMEOUT_MS`.
+
+## Fixes
+- **Image**: custom compatible nodes and the built-in SenseNova provider no
+  longer return the upstream `image.generation.job` handle as if it were the
+  generated image. The gateway polls the status endpoint (2 s → ×1.5 → 10 s
+  backoff, 300 s cap), normalizes `data[].url`/`b64_json`, supports binary
+  output, surfaces upstream job errors, and fails fast with the attempted URL
+  when the upstream exposes no status endpoint.
+
 # v0.5.116-1 (2026-11-08)
 
 Merged upstream v0.5.116 into the fork. This section includes the full upstream
