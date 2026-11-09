@@ -18,6 +18,7 @@ import { updateProviderCredentials, checkAndRefreshToken } from "../services/tok
 import { handleComboChat } from "open-sse/services/combo.js";
 import * as log from "../utils/logger.js";
 import { saveRequestUsage } from "@/lib/usageDb.js";
+import { parseImageEditRequestBody } from "./imageEditRequest.js";
 
 // Providers that don't require credentials (noAuth)
 const NO_AUTH_PROVIDERS = new Set(["sdwebui", "comfyui", "veoaifree-web"]);
@@ -47,11 +48,26 @@ function recordImageRequestUsage({ provider, model, connectionId, apiKey, endpoi
  * @param {Request} request
  */
 export async function handleImageGeneration(request) {
+  return await handleImageRequest(request, "generations");
+}
+
+/** Handle OpenAI-compatible image edits (multipart/form-data). */
+export async function handleImageEdits(request) {
+  return await handleImageRequest(request, "edits");
+}
+
+async function handleImageRequest(request, action) {
   let body;
-  try {
-    body = await request.json();
-  } catch {
-    return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid JSON body");
+  if (action === "edits") {
+    const parsed = await parseImageEditRequestBody(request);
+    if (parsed.error) return errorResponse(parsed.status || HTTP_STATUS.BAD_REQUEST, parsed.error);
+    body = parsed.body;
+  } else {
+    try {
+      body = await request.json();
+    } catch {
+      return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid JSON body");
+    }
   }
 
   const url = new URL(request.url);
@@ -82,6 +98,8 @@ export async function handleImageGeneration(request) {
   const keyAccessDenied = await enforceKeyAccess(await getKeyAccessContext(request), modelStr);
   if (keyAccessDenied) return keyAccessDenied;
 
+  const singleOptions = { action, wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint: url.pathname };
+
   // Combo expansion: model may be a combo name → run fallback/round-robin across models
   const comboModels = await getComboModels(modelStr);
   if (comboModels) {
@@ -92,7 +110,7 @@ export async function handleImageGeneration(request) {
     return handleComboChat({
       body,
       models: comboModels,
-      handleSingleModel: (b, m) => handleSingleModelImage(b, m, { wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint: url.pathname }),
+      handleSingleModel: (b, m) => handleSingleModelImage(b, m, singleOptions),
       log,
       comboName: modelStr,
       comboStrategy,
@@ -100,10 +118,10 @@ export async function handleImageGeneration(request) {
     });
   }
 
-  return handleSingleModelImage(body, modelStr, { wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint: url.pathname });
+  return handleSingleModelImage(body, modelStr, singleOptions);
 }
 
-async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint } = {}) {
+async function handleSingleModelImage(body, modelStr, { action = "generations", wantsStream, binaryOutput, preferredConnectionId, apiKey, endpoint } = {}) {
   const modelInfo = await getModelInfo(modelStr);
   if (!modelInfo.provider) return errorResponse(HTTP_STATUS.BAD_REQUEST, "Invalid model format");
 
@@ -113,6 +131,7 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
   if (NO_AUTH_PROVIDERS.has(provider)) {
     const result = await handleImageGenerationCore({
       body,
+      action,
       modelInfo: { provider, model },
       credentials: null,
       binaryOutput,
@@ -158,6 +177,7 @@ async function handleSingleModelImage(body, modelStr, { wantsStream, binaryOutpu
 
     const result = await handleImageGenerationCore({
       body,
+      action,
       modelInfo: { provider, model },
       credentials: refreshedCredentials,
       streamToClient: wantsStream,

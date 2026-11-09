@@ -33,6 +33,7 @@ export async function handleImageGenerationCore({
   modelInfo,
   credentials,
   log,
+  action = "generations",
   streamToClient = false,
   binaryOutput = false,
   onCredentialsRefreshed,
@@ -53,6 +54,15 @@ export async function handleImageGenerationCore({
     return createErrorResult(
       HTTP_STATUS.BAD_REQUEST,
       `Provider '${displayProvider}' does not support image generation`
+    );
+  }
+
+  // Edits are opt-in per adapter (OpenAI-shaped providers today). Everything
+  // else keeps the JSON generations path, including its `image` field.
+  if (action === "edits" && typeof adapter.buildEditRequest !== "function") {
+    return createErrorResult(
+      HTTP_STATUS.BAD_REQUEST,
+      `Provider '${displayProvider}' does not support image edits (use /v1/images/generations)`
     );
   }
 
@@ -103,9 +113,16 @@ export async function handleImageGenerationCore({
   let requestBody;
 
   try {
-    url = adapter.buildUrl(model, credentials, body);
-    requestBody = await adapter.buildBody(model, body);
-    headers = adapter.buildHeaders(credentials, requestBody, model, body);
+    if (action === "edits") {
+      const edit = await adapter.buildEditRequest({ model, body, credentials });
+      url = edit.url;
+      headers = edit.headers;
+      requestBody = edit.body;
+    } else {
+      url = adapter.buildUrl(model, credentials, body);
+      requestBody = await adapter.buildBody(model, body);
+      headers = adapter.buildHeaders(credentials, requestBody, model, body);
+    }
   } catch (error) {
     return createErrorResult(HTTP_STATUS.BAD_REQUEST, error.message || `Invalid ${displayProvider} image request`);
   }
@@ -145,9 +162,19 @@ export async function handleImageGenerationCore({
       if (onCredentialsRefreshed) await onCredentialsRefreshed(newCredentials);
 
       try {
-        const retryBody = await adapter.buildBody(model, body);
-        const retryHeaders = adapter.buildHeaders(credentials, retryBody, model, body);
-        const retryUrl = adapter.buildUrl(model, credentials, body);
+        let retryBody;
+        let retryHeaders;
+        let retryUrl;
+        if (action === "edits") {
+          const edit = await adapter.buildEditRequest({ model, body, credentials });
+          retryBody = edit.body;
+          retryHeaders = edit.headers;
+          retryUrl = edit.url;
+        } else {
+          retryBody = await adapter.buildBody(model, body);
+          retryHeaders = adapter.buildHeaders(credentials, retryBody, model, body);
+          retryUrl = adapter.buildUrl(model, credentials, body);
+        }
         providerResponse = await fetch(retryUrl, {
           method: "POST",
           headers: retryHeaders,

@@ -80,6 +80,9 @@ export default {
     format: "openai",
   },
   embeddingConfig: { baseUrl: "https://api.openai.com/v1/embeddings", authType: "apikey", authHeader: "bearer" },
-  imageConfig: { baseUrl: "https://api.openai.com/v1/images/generations" },
+  imageConfig: {
+    baseUrl: "https://api.openai.com/v1/images/generations",
+    editsUrl: "https://api.openai.com/v1/images/edits",
+  },
   searchViaChat: { defaultModel: "gpt-4o-mini", pricingUrl: "https://openai.com/api/pricing" },
 };
