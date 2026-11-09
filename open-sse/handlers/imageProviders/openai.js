@@ -6,7 +6,7 @@ const imageUrl = (id) => imageCfg(id).baseUrl;
 
 export default function createOpenAIAdapter(providerId) {
   const cfg = imageCfg(providerId);
-  return {
+  const adapter = {
     buildUrl: () => imageUrl(providerId),
     buildHeaders: (creds) => {
       const headers = { "Content-Type": "application/json", ...(cfg.headers || {}) };
@@ -43,4 +43,29 @@ export default function createOpenAIAdapter(providerId) {
     },
     normalize: (responseBody) => responseBody,
   };
+
+  // Providers that expose the standard multipart edit contract opt in through
+  // imageConfig.editsUrl.
+  if (cfg.editsUrl) {
+    const editFields = ["n", "size", "quality", "background", "input_fidelity", "output_format", "response_format"];
+    adapter.buildEditRequest = ({ model, body, credentials }) => {
+      const form = new FormData();
+      form.append("model", model);
+      form.append("prompt", body.prompt);
+      const files = Array.isArray(body.images) && body.images.length ? body.images : [body.image];
+      files.filter(Boolean).forEach((file, index) => {
+        form.append(index === 0 ? "image" : "image[]", file, file.name || `image-${index + 1}.png`);
+      });
+      if (body.mask) form.append("mask", body.mask, body.mask.name || "mask.png");
+      for (const field of editFields) {
+        if (body[field] !== undefined && body[field] !== "") form.append(field, String(body[field]));
+      }
+      const headers = { Accept: "application/json" };
+      const key = credentials?.apiKey || credentials?.accessToken;
+      if (key) headers["Authorization"] = `Bearer ${key}`;
+      return { url: cfg.editsUrl, headers, body: form };
+    };
+  }
+
+  return adapter;
 }

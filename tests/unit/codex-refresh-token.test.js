@@ -11,14 +11,27 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const originalFetch = global.fetch;
 
+// proxyAwareFetch fetches through the undici package instance, so the transport
+// stub must cover both surfaces (see proxy-keepalive-dead-socket.test.js).
+function stubFetch(fn) {
+  global.fetch = fn;
+  vi.doMock("undici", async () => ({
+    ...(await vi.importActual("undici")),
+    fetch: fn,
+  }));
+  return fn;
+}
+
 describe("Codex Refresh Token", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.resetModules();
+    vi.doUnmock("undici");
     global.fetch = originalFetch;
   });
 
   afterEach(() => {
+    vi.doUnmock("undici");
     global.fetch = originalFetch;
   });
 
@@ -27,8 +40,7 @@ describe("Codex Refresh Token", () => {
       ok: true,
       json: () => Promise.resolve(payload),
     });
-    global.fetch = fetchMock;
-    return fetchMock;
+    return stubFetch(fetchMock);
   }
 
   describe("refreshCodexToken", () => {

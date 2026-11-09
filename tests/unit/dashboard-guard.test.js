@@ -256,6 +256,32 @@ describe("dashboard guard local-only access", () => {
     expect(response).toBe(mocks.nextResponse);
   });
 
+  // Reads ~/.commandcode/auth.json and returns the API key — same class as the
+  // cursor/kiro/zed auto-import routes, so it must be local-only AND require a
+  // session even when requireLogin is off.
+  it("rejects commandcode auto-import from a non-loopback caller", async () => {
+    mocks.getSettings.mockResolvedValue({ requireLogin: false });
+
+    const response = await proxy(request("/api/oauth/commandcode/auto-import", {
+      host: "router.example.com",
+    }));
+
+    expect(response.status).toBe(403);
+    expect(response.body.error).toBe("Local only: CLI token required");
+  });
+
+  it("requires a session for commandcode auto-import even when requireLogin=false", async () => {
+    mocks.getSettings.mockResolvedValue({ requireLogin: false });
+
+    const response = await proxy(localRequest("/api/oauth/commandcode/auto-import", {
+      host: "localhost:20128",
+      origin: "http://localhost:20128",
+    }));
+
+    expect(response.status).toBe(401);
+    expect(response.body.error).toBe("Unauthorized");
+  });
+
   it("rejects local-only route from tunnel host even when requireLogin=false", async () => {
     mocks.getSettings.mockResolvedValue({ requireLogin: false });
 

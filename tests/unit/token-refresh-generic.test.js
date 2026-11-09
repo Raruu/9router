@@ -10,6 +10,19 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const originalFetch = global.fetch;
 
+// proxyAwareFetch now fetches through the undici package's own instance (undici
+// 8 rejects dispatchers from another copy), so a global.fetch stub alone no
+// longer intercepts it. Mock both: bare fetch() callers keep using the global,
+// transport callers get the same mock from "undici".
+function stubFetch(fn) {
+  global.fetch = fn;
+  vi.doMock("undici", async () => ({
+    ...(await vi.importActual("undici")),
+    fetch: fn,
+  }));
+  return fn;
+}
+
 function mockFetchOnce(payload, { ok = true, status = 200 } = {}) {
   const fn = vi.fn().mockResolvedValue({
     ok,
@@ -17,13 +30,12 @@ function mockFetchOnce(payload, { ok = true, status = 200 } = {}) {
     json: () => Promise.resolve(payload),
     text: () => Promise.resolve(JSON.stringify(payload)),
   });
-  global.fetch = fn;
-  return fn;
+  return stubFetch(fn);
 }
 
 describe("refreshAccessToken — config-driven profiles", () => {
-  beforeEach(() => { vi.clearAllMocks(); vi.resetModules(); global.fetch = originalFetch; });
-  afterEach(() => { global.fetch = originalFetch; });
+  beforeEach(() => { vi.clearAllMocks(); vi.resetModules(); vi.doUnmock("undici"); global.fetch = originalFetch; });
+  afterEach(() => { vi.doUnmock("undici"); global.fetch = originalFetch; });
 
   it("iflow: Basic Auth header from clientId:clientSecret, form body keeps client_secret", async () => {
     const fm = mockFetchOnce({ access_token: "if-acc", refresh_token: "if-rot", expires_in: 3600 });

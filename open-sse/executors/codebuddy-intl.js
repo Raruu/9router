@@ -189,6 +189,9 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
     // CodeBuddy Intl requires a leading system prompt + user content as typed
     // blocks, while preserving legitimate caller system/developer instructions
     // and neutralizing third-party agent identity strings that trigger 11128.
+    // (Upstream's base version merges every system message into one leading
+    // prompt; this ordered form keeps multi-system turns and the extra agent
+    // markers from #5342, and adds the official-client default below.)
     const NEUTRAL_PROMPT = "You are a helpful AI assistant that helps with software engineering tasks.";
     const AGENT_PATTERN = /you are claude code|claude.?code.+official.+cli|anthropic.+official.+cli|anxthxropic.+official.+cli|you are (?:cursor|windsurf|cline|aider|continue|copilot|cody)|you are an? (?:ai )?(?:coding |code )?agent|cc_entrypoint\s*=\s*(?:cli|vscode|jetbrains|gui)|claude.?code.+issues|give feedback.+claude.?code|you are .{0,30}(?:powerful )?ai agent|orchestration capabilities|OhMyOpenCode|you are zcode|powered by deepseek harness|codex cli is an open source project|x-anthropic-billing-header:|<agent-identity>|<Role>|<Behavior_Instructions>/i;
     const flatten = (content) =>
@@ -235,7 +238,9 @@ export class CodeBuddyIntlExecutor extends DefaultExecutor {
       }
     }
     if (outMessages.length === 0 || outMessages[0].role !== "system") {
-      outMessages.unshift({ role: "system", content: "You are a helpful assistant." });
+      // Official-client identity, matching the pre-#5342 default and upstream's
+      // system-prompt test; a caller-supplied system prompt still wins above.
+      outMessages.unshift({ role: "system", content: "You are CodeBuddy Code." });
     }
     transformed.messages = outMessages;
 

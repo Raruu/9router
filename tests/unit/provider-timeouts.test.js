@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveProviderTimeouts } from "../../open-sse/config/timeouts.js";
+import {
+  DEFAULT_IMAGE_JOB_TIMEOUT_MS,
+  defaultImageJobTimeoutMs,
+  resolveImageJobTimeoutMs,
+  resolveProviderTimeouts,
+} from "../../open-sse/config/timeouts.js";
 import { pipeWithDisconnect } from "../../open-sse/utils/streamHandler.js";
 
 describe("resolveProviderTimeouts", () => {
@@ -18,6 +23,38 @@ describe("resolveProviderTimeouts", () => {
     expect(resolveProviderTimeouts([])).toEqual({});
     expect(resolveProviderTimeouts("fast")).toEqual({});
     expect(resolveProviderTimeouts({ connectMs: "2000", stallMs: NaN })).toEqual({});
+  });
+
+  it("does not leak the image job timeout into the chat resolver", () => {
+    expect(resolveProviderTimeouts({ imageJobMs: 60000 })).toEqual({});
+  });
+});
+
+describe("resolveImageJobTimeoutMs", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it("defaults to 300s", () => {
+    expect(defaultImageJobTimeoutMs()).toBe(300000);
+    expect(DEFAULT_IMAGE_JOB_TIMEOUT_MS).toBe(300000);
+    expect(resolveImageJobTimeoutMs(null)).toBe(300000);
+  });
+
+  it("honours the IMAGE_JOB_TIMEOUT_MS env override", () => {
+    vi.stubEnv("IMAGE_JOB_TIMEOUT_MS", "45000");
+    expect(defaultImageJobTimeoutMs()).toBe(45000);
+    expect(resolveImageJobTimeoutMs(undefined)).toBe(45000);
+  });
+
+  it("prefers a per-provider imageJobMs override", () => {
+    expect(resolveImageJobTimeoutMs({ imageJobMs: 60000 }, 300000)).toBe(60000);
+  });
+
+  it("falls back for missing or invalid overrides", () => {
+    expect(resolveImageJobTimeoutMs({ imageJobMs: 0 }, 300000)).toBe(300000);
+    expect(resolveImageJobTimeoutMs({ imageJobMs: -1 }, 300000)).toBe(300000);
+    expect(resolveImageJobTimeoutMs({ imageJobMs: "60000" }, 300000)).toBe(300000);
+    expect(resolveImageJobTimeoutMs({ imageJobMs: Number.NaN }, 300000)).toBe(300000);
+    expect(resolveImageJobTimeoutMs("nope", 300000)).toBe(300000);
   });
 });
 

@@ -1,3 +1,87 @@
+# v0.5.116-2 (2026-11-09)
+
+## Features
+- **Image**: add `POST /v1/images/edits` for OpenAI-shaped providers and custom
+  compatible nodes. Multipart `image`/`image[]` (up to 10 files, 25 MB each),
+  optional `mask`, and `n`/`size`/`quality`/`background`/`input_fidelity`; the
+  same API-key and combo rules as generations apply. Async edit jobs are polled
+  and returned as JSON or raw bytes (`?response_format=binary`).
+- **Providers**: the async image-job poll timeout is configurable per provider
+  (Providers → Timeouts → "Image job", seconds, default 300 s) or globally with
+  `IMAGE_JOB_TIMEOUT_MS`.
+
+## Fixes
+- **Image**: custom compatible nodes and the built-in SenseNova provider no
+  longer return the upstream `image.generation.job` handle as if it were the
+  generated image. The gateway polls the status endpoint (2 s → ×1.5 → 10 s
+  backoff, 300 s cap), normalizes `data[].url`/`b64_json`, supports binary
+  output, surfaces upstream job errors, and fails fast with the attempted URL
+  when the upstream exposes no status endpoint.
+
+# v0.5.116-1 (2026-11-08)
+
+Merged upstream v0.5.116 into the fork. This section includes the full upstream
+release notes and the fork-side merge work.
+
+## Features
+- **CommandCode**: align data bridge with official CLI v1.88.5 and add credential auto-import
+- **Antigravity**: track and display a separate Gemini 4 Argon weekly/session quota
+- **Codex Image**: add GPT Image 2.6 models (`gpt-image-2.6-flare`, `gpt-image-2.6-sunburst`)
+- **SenseNova**: add `sensenova-6.8-flash` and `glm-5.3`
+
+## Fixes
+- **Transport**: claude provider survives DPI-shaped networks (happy-eyeballs, undici 8, configurable TLS curve)
+- **Lazy Runtime**: fix lost named exports when loading CJS deps from the runtime dir
+- **OpenCode Go**: send Claude reasoning on the Messages transport
+- **Codex Image**: use native OAuth image generation safely
+- **Thinking**: keep thinking config on OpenAI tool-result turns (#5171)
+- **OpenCode Free**: alias "terminal" tool names the free tier 429-rejects (#5319)
+- **TTS**: list public voices without dashboard self-fetch auth (#1551)
+- **Translator**: retain Claude cache markers for DashScope targets (#2069)
+- **CLI**: launcher startup ~2.5x faster via PID-file process handling
+- **Gemini**: send concrete MIME for remote images instead of `image/*`
+- **Translator**: keep all Gemini tool results and follow-up parts (#2393)
+- **Codex Image**: drop `reasoning.effort` on tool requests, surface real upstream errors
+- **CLI**: ship `deepseek-pow-hash.js` next to the PoW worker (#5460)
+- **Web Fetch**: forward the selected output format to Jina and Tavily (#2239)
+- **Kiro**: stop splicing unserved regions into service hostnames; add `KIRO_INTEGRITY_GATE=off`
+- **Thinking**: preserve explicit DeepSeek thinking budgets on compat nodes (#5108)
+- **Tray**: report a tray that never started instead of claiming success
+- **Fetch**: stop reusing dead keep-alive sockets silently dropped by upstream edges
+- **CodeBuddy**: preserve client system prompts and sanitize CLI agent identity (intl WAF)
+- **OpenCode Go**: use current inference endpoints (`/zen/go/v1` retired)
+- **CLI Tools**: Add All Active Models now includes no-auth, alias and custom models (#5449)
+- **Runtime**: pass `--global=false` so npm hooks can't create stray global installs (#5443)
+- **Dedupe**: drop `tool_reference` blocks naming tools stripped by MCP dedupe (z.ai 400)
+
+## Fork merge notes
+- `package.json` / `cli/package.json` stay on the fork version (`0.5.116-1`)
+  and keep the fork's `@raruu/9router` name. Upstream's `undici ^8.12.3` bump is
+  taken (node_modules refreshed locally; the lock is gitignored).
+- `thinkingUnified` passes both the fork's clamp-aware `effectiveCfg`
+  (`thinkingEnforce` opt-out) and upstream's new `budgetPassthrough` flag, so
+  DeepSeek budgets survive on compat nodes while the fork's enforce block and
+  precedence are untouched.
+- `codebuddy-intl` keeps the fork's ordered-system-prompt implementation from
+  #5342/#5217 (multi-system preservation, >2000-char neutralization, extra agent
+  markers, `max_completion_tokens` rename, session-id forwarding) and adopts
+  upstream's official-client fallback `"You are CodeBuddy Code."` when no
+  system prompt is supplied.
+- `build-cli.js` exports and runs both the fork's `.build-home` scrub + pre-pack
+  leak check and upstream's DeepSeek PoW copy/assert; the build-artifacts test
+  carries both suites.
+- **Security**: the new `/api/oauth/commandcode/auto-import` route reads
+  `~/.commandcode/auth.json` and returns the API key, so it now joins the
+  cursor/kiro/zed auto-import routes in `ALWAYS_PROTECTED` and
+  `LOCAL_ONLY_PATHS` (dashboard session required even with `requireLogin` off;
+  loopback or CLI token only), with guard tests pinning 403/401.
+- Transport tests were aligned with the undici-8 fetch path (global.fetch stubs
+  alone no longer intercept `proxyAwareFetch`); the direct no-proxy path now
+  carries an Agent dispatcher by design. The second got-scraping assertion is
+  recorded in `known-fails` because that JA3 path is disabled.
+- Providers/alias/OAuth-URL baselines verify byte-for-byte. No fork behaviour
+  was overwritten by the merge.
+
 # v0.5.112-3 (2026-11-06)
 
 ## Features

@@ -49,6 +49,7 @@ const TIMEOUT_FIELDS = [
   { msKey: "connectMs", stateKey: "connect", label: "Connect", defaultSec: 60, hint: "Abort if the upstream sends no response headers within this time." },
   { msKey: "firstChunkMs", stateKey: "firstChunk", label: "First token", defaultSec: 200, hint: "Abort if the first streamed chunk takes longer (streaming only)." },
   { msKey: "stallMs", stateKey: "stall", label: "Stall", defaultSec: 360, hint: "Abort if no data arrives for this long mid-stream (streaming only)." },
+  { msKey: "imageJobMs", stateKey: "imageJob", label: "Image job", defaultSec: 300, hint: "How long an async image job (custom nodes / SenseNova) may poll before failing." },
 ];
 
 const TIMEOUT_MIN_SEC = 1;
@@ -162,7 +163,7 @@ export default function ProviderDetailPage() {
   const [providerStrategy, setProviderStrategy] = useState(null);
   const [providerStickyLimit, setProviderStickyLimit] = useState("");
   const [thinkingMode, setThinkingMode] = useState("auto");
-  const [timeoutInputs, setTimeoutInputs] = useState({ connect: "", firstChunk: "", stall: "" });
+  const [timeoutInputs, setTimeoutInputs] = useState({ connect: "", firstChunk: "", stall: "", imageJob: "" });
   const [retryCfg, setRetryCfg] = useState({ enabled: false, tries: "", maxBackoffSeconds: "", mode: RETRY_MODE_MEMBER, statusMode: RETRY_STATUS_ALL, statusList: "" });
   const [autoPing, setAutoPing] = useState({ enabled: false, connections: {}, schedules: {} });
   const [scheduleConnection, setScheduleConnection] = useState(null);
@@ -434,6 +435,7 @@ export default function ProviderDetailPage() {
         connect: timeoutCfg.connectMs ? String(timeoutCfg.connectMs / 1000) : "",
         firstChunk: timeoutCfg.firstChunkMs ? String(timeoutCfg.firstChunkMs / 1000) : "",
         stall: timeoutCfg.stallMs ? String(timeoutCfg.stallMs / 1000) : "",
+        imageJob: timeoutCfg.imageJobMs ? String(timeoutCfg.imageJobMs / 1000) : "",
       });
       // Load per-provider combo retry config (off unless explicitly enabled)
       const retryCfgRaw = (settingsData.providerRetries || {})[providerId] || {};
@@ -2514,11 +2516,12 @@ const ids = [];
         <div className="mb-3 flex flex-col gap-1">
           <h2 className="text-lg font-semibold">Timeouts</h2>
           <p className="text-sm text-text-muted">
-            Per-provider chat timeouts in seconds. Empty uses the global default.
-            Applies to combo members served by this provider. First-token and stall apply to streaming only.
+            Per-provider timeouts in seconds. Empty uses the global default.
+            Applies to combo members served by this provider. First-token and stall apply to streaming only;
+            the image job timeout applies to async image jobs (custom nodes / SenseNova).
           </p>
         </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {TIMEOUT_FIELDS.map((field) => (
             <Input
               key={field.stateKey}
