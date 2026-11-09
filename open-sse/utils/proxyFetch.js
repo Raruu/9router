@@ -37,6 +37,25 @@ async function rawFetch(url, options) {
   return undiciFetch(url, options);
 }
 
+// npm-undici's fetch only understands the FormData class from its own module;
+// a FormData built from Node's global classes (Next requests, our handlers)
+// serializes as the string "[object FormData]" with a text/plain header, so
+// every multipart upload silently loses its files. Rebuild the body with
+// undici's FormData before handing it over. Values (File/Blob) are accepted
+// as-is by undici's serializer.
+let undiciFormDataType = null;
+export async function normalizeFormDataBody(body) {
+  if (typeof FormData === "undefined" || !(body instanceof FormData)) return body;
+  undiciFormDataType ??= (await import("undici")).FormData;
+  if (body instanceof undiciFormDataType) return body;
+  const normalized = new undiciFormDataType();
+  for (const [name, value] of body.entries()) {
+    if (typeof value === "string") normalized.append(name, value);
+    else normalized.append(name, value, value.name || "blob");
+  }
+  return normalized;
+}
+
 // ─── TLS fingerprinting via got-scraping (browser-like JA3) ───────────────
 // Disabled: not in use. Kept commented for future re-enable.
 // Restore the original block to re-enable per-host JA3 spoofing.
@@ -450,6 +469,11 @@ async function createBypassRequest(parsedUrl, realIP, options) {
 
 export async function proxyAwareFetch(url, options = {}, proxyOptions = null) {
   const targetUrl = typeof url === "string" ? url : url.toString();
+
+  if (options.body) {
+    const normalizedBody = await normalizeFormDataBody(options.body);
+    if (normalizedBody !== options.body) options = { ...options, body: normalizedBody };
+  }
 
   // Vercel relay: forward request via relay headers
   const vercelRelayUrl = normalizeString(proxyOptions?.vercelRelayUrl);

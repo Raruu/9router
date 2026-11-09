@@ -17,6 +17,8 @@ function resolveImageInput(input) {
 }
 
 export default {
+  // Edits reuse this adapter's source-image path (no separate edit endpoint).
+  editViaGeneration: true,
   buildUrl: (model, creds) => {
     const apiKey = creds?.apiKey || creds?.accessToken;
     const modelId = model.replace(/^models\//, "");

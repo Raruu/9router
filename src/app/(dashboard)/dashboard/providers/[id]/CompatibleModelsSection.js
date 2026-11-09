@@ -62,7 +62,7 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
             </p>
           )}
           <div className="flex flex-wrap gap-3">
-            {group.rows.map(({ id, name, alias, source, type, locked, transport, catalogRef }) => {
+            {group.rows.map(({ id, name, alias, source, type, locked, transport, catalogRef, nativeImageEdit }) => {
               const isCustom = source === "custom";
               return (
                 <ModelRow
@@ -73,7 +73,7 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
                   copied={copied}
                   onCopy={onCopy}
                   onDeleteAlias={() => isCustom ? onDeleteCustomModel(id, type) : onDeleteAlias(alias)}
-                  onEdit={isCustom ? () => onEditModel({ id, name, catalogRef, type, transport }) : undefined}
+                  onEdit={isCustom ? () => onEditModel({ id, name, catalogRef, type, transport, nativeImageEdit }) : undefined}
                   onToggleLock={isCustom ? () => onToggleLock(id, !locked, type) : undefined}
                   locked={locked}
                   removeTitle={isCustom ? undefined : "Remove alias"}

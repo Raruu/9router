@@ -14,6 +14,7 @@ import cloudflareAi from "./cloudflareAi.js";
 import antigravity from "./antigravity.js";
 import openaiCompatNode from "./openaiCompatNode.js";
 import sensenova from "./sensenova.js";
+import openrouter from "./openrouter.js";
 import { isCompatNodeProvider } from "../../config/kindEndpoints.js";
 import museWeb from "./muse-web.js";
 import chatgptWeb from "./chatgpt-web.js";
@@ -25,7 +26,7 @@ import ucWeb from "./uc-web.js";
 const ADAPTERS = {
   openai: createOpenAIAdapter("openai"),
   minimax: createOpenAIAdapter("minimax"),
-  openrouter: createOpenAIAdapter("openrouter"),
+  openrouter,
   recraft: createOpenAIAdapter("recraft"),
   "vercel-ai-gateway": createOpenAIAdapter("vercel-ai-gateway"),
   xai: createOpenAIAdapter("xai"),

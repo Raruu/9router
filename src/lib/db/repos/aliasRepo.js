@@ -40,7 +40,7 @@ export async function getCustomModels() {
 // differs from `type`, the old key is deleted inside the same transaction and
 // its metadata (name/caps/catalogRef/transport/locked) carries over to the new
 // key — a rename, not a duplicate.
-export async function addCustomModel({ providerAlias, id, type = "llm", name, caps, catalogRef, clearCatalogMetadata = false, locked, transport, previousType = null }) {
+export async function addCustomModel({ providerAlias, id, type = "llm", name, caps, catalogRef, clearCatalogMetadata = false, locked, transport, nativeImageEdit, previousType = null }) {
   const k = customKey(providerAlias, id, type);
   const oldKey = previousType && previousType !== type ? customKey(providerAlias, id, previousType) : null;
   const db = await getAdapter();
@@ -79,6 +79,14 @@ export async function addCustomModel({ providerAlias, id, type = "llm", name, ca
       } else if (typeof transport === "string") {
         next.transport = transport;
       }
+      // `nativeImageEdit` only applies to image models. An explicit false
+      // clears it; undefined leaves the stored marker untouched; a kind change
+      // away from image always drops it.
+      if (type !== "image" || nativeImageEdit === false) {
+        delete next.nativeImageEdit;
+      } else if (nativeImageEdit === true) {
+        next.nativeImageEdit = true;
+      }
       if (locked !== undefined) {
         if (locked) next.locked = true;
         else delete next.locked;
@@ -91,7 +99,7 @@ export async function addCustomModel({ providerAlias, id, type = "llm", name, ca
       );
       return;
     }
-    const value = stringifyJson({ providerAlias, id, type, name: name || id, ...(caps ? { caps } : {}), ...(catalogRef ? { catalogRef } : {}), ...(transport ? { transport } : {}), ...(locked ? { locked: true } : {}) });
+    const value = stringifyJson({ providerAlias, id, type, name: name || id, ...(caps ? { caps } : {}), ...(catalogRef ? { catalogRef } : {}), ...(transport ? { transport } : {}), ...(type === "image" && nativeImageEdit === true ? { nativeImageEdit: true } : {}), ...(locked ? { locked: true } : {}) });
     db.run(`INSERT INTO kv(scope, key, value) VALUES('customModels', ?, ?)`, [k, value]);
     added = true;
   });

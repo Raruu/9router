@@ -68,6 +68,11 @@ export async function POST(request) {
     const cleanType = isCustomModelType(type) ? type.trim() : normalizeCustomModelType(type);
     const cleanCaps = sanitizeCaps(caps);
     const cleanTransport = sanitizeTransport(transport, cleanType);
+    // Opt-in native edit endpoint, only meaningful on image-generation models.
+    // true/false are explicit (false clears); any other value is ignored.
+    const nativeImageEdit = cleanType === "image"
+      ? (body.nativeImageEdit === true ? true : body.nativeImageEdit === false ? false : undefined)
+      : undefined;
     const catalogRef = sanitizeCatalogRef(body.catalogRef);
     // `previousType` moves the record on a kind change instead of duplicating it.
     const previousType = isCustomModelType(body.previousType) ? body.previousType.trim() : null;
@@ -82,6 +87,7 @@ export async function POST(request) {
       // is silently dropped and leaves the stored marker alone (T14 — a typo
       // must not clobber a working transport). Non-stt types clear in the repo.
       ...(cleanTransport ? { transport: cleanTransport } : transport === "" ? { transport: "" } : {}),
+      ...(nativeImageEdit !== undefined ? { nativeImageEdit } : {}),
       ...(catalogRef ? { catalogRef } : {}),
       clearCatalogMetadata: Object.hasOwn(body, "catalogRef") && !catalogRef,
       previousType: previousType && previousType !== cleanType ? previousType : null,

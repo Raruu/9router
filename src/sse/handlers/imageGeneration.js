@@ -6,7 +6,7 @@ import {
   resolveProviderDisplayLabel,
   validateApiKeyWithRules,
 } from "../services/auth.js";
-import { getSettings } from "@/lib/localDb";
+import { getSettings, getCustomModels } from "@/lib/localDb";
 import { getModelInfo, getComboModels } from "../services/model.js";
 import { getKeyAccessContext, enforceKeyAccess } from "../services/keyAccess.js";
 import { handleImageGenerationCore } from "open-sse/handlers/imageGenerationCore.js";
@@ -23,6 +23,21 @@ import { resolveImageJobTimeoutMs } from "open-sse/config/timeouts.js";
 
 // Providers that don't require credentials (noAuth)
 const NO_AUTH_PROVIDERS = new Set(["sdwebui", "comfyui", "veoaifree-web"]);
+
+// Custom models may opt into the provider's native image edit endpoint
+// (e.g. Codex gpt-image models). Off by default; ignores DB failures.
+async function resolveNativeImageEdit(provider, model) {
+  try {
+    const customModels = await getCustomModels();
+    const hit = customModels.find((entry) => entry
+      && entry.type === "image"
+      && entry.providerAlias === provider
+      && entry.id === model);
+    return hit?.nativeImageEdit === true;
+  } catch {
+    return false;
+  }
+}
 
 function recordImageRequestUsage({ provider, model, connectionId, apiKey, endpoint, usage }) {
   if (!usage || typeof usage !== "object") return;
@@ -139,6 +154,7 @@ async function handleSingleModelImage(body, modelStr, { action = "generations", 
 
   const { provider, model } = modelInfo;
   const jobTimeoutMs = typeof jobTimeoutFor === "function" ? jobTimeoutFor(provider) : undefined;
+  const modelOptions = { nativeImageEdit: await resolveNativeImageEdit(provider, model) };
 
   // noAuth providers — no credential needed
   if (NO_AUTH_PROVIDERS.has(provider)) {
@@ -146,6 +162,7 @@ async function handleSingleModelImage(body, modelStr, { action = "generations", 
       body,
       action,
       jobTimeoutMs,
+      modelOptions,
       modelInfo: { provider, model },
       credentials: null,
       binaryOutput,
@@ -193,6 +210,7 @@ async function handleSingleModelImage(body, modelStr, { action = "generations", 
       body,
       action,
       jobTimeoutMs,
+      modelOptions,
       modelInfo: { provider, model },
       credentials: refreshedCredentials,
       streamToClient: wantsStream,
