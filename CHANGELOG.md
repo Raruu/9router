@@ -1,3 +1,29 @@
+# v0.5.116-3 (2026-11-09)
+
+## Features
+- **Custom Models**: custom image models can opt into "Use native image edit
+  endpoint" from the Edit Custom Model dialog (off by default). Codex then
+  sends reference-image edits to its native `images/edits` endpoint when the
+  requested output controls fit; custom compatible nodes send only the native
+  multipart shape instead of trying other dialects.
+
+## Fixes
+- **Image**: `/v1/images/edits` now works beyond OpenAI-shaped providers.
+  Gemini/Antigravity, Cloudflare (JSON and `flux-2-dev` multipart) and
+  HuggingFace reuse their source-image generation path; OpenRouter uses its
+  Image API `input_references`; custom nodes try multipart → JSON edits → JSON
+  img2img and only advance on format-class errors. Cloudflare multipart bodies
+  now carry the source image and mask instead of dropping them.
+- **Dashboard**: the Edit Custom Model dialog opens for every custom model
+  again — the new image-edit flag was referenced in the row callback without
+  being read from the row, throwing a ReferenceError before the dialog could
+  open.
+- **Transport**: multipart uploads (image edits, STT, …) reached upstreams
+  without their file because the patched global fetch handed Node's global
+  `FormData` to npm-undici's fetch, which serialized it as `text/plain`
+  `[object FormData]`. Bodies are now rebuilt with undici's `FormData` inside
+  `proxyAwareFetch`, and a regression test asserts the file bytes arrive.
+
 # v0.5.116-2 (2026-11-09)
 
 ## Features
