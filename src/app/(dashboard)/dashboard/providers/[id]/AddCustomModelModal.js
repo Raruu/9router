@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import PropTypes from "prop-types";
-import { Button, Modal, Select } from "@/shared/components";
+import { Button, Modal, Select, Toggle } from "@/shared/components";
 import { CUSTOM_MODEL_TYPES, STT_TRANSPORT_META, STT_TRANSPORTS, normalizeCustomModelType } from "@/shared/constants/models";
 import {
   AUTOMATIC_PATTERN_OPTION,
@@ -29,6 +29,9 @@ export default function AddCustomModelModal({ isOpen, providerAlias = "", existi
   // all three from props — no setState-in-effect needed.
   const [transport, setTransport] = useState(() => existingModel?.transport || "");
   const [type, setType] = useState(() => normalizeCustomModelType(existingModel?.type));
+  // Image-only opt-in: send edits to the provider's native /images/edits
+  // endpoint. Off by default, so existing models keep their current edit path.
+  const [nativeImageEdit, setNativeImageEdit] = useState(() => existingModel?.nativeImageEdit === true);
   const patternRef = useRef(null);
 
   const reset = () => {
@@ -40,6 +43,7 @@ export default function AddCustomModelModal({ isOpen, providerAlias = "", existi
     setTestError("");
     setTransport("");
     setType("llm");
+    setNativeImageEdit(false);
   };
 
   useEffect(() => {
@@ -135,7 +139,7 @@ export default function AddCustomModelModal({ isOpen, providerAlias = "", existi
       // honoured on type "stt" records (shared STT_TRANSPORT_META whitelist).
       // `previousType` lets the API move the record when the kind changed on
       // edit instead of leaving a duplicate behind under the old key.
-      await onSave(cleanId, selected?.ref || null, type, type === "stt" ? transport : null, existingModel?.type || null);
+      await onSave(cleanId, selected?.ref || null, type, type === "stt" ? transport : null, existingModel?.type || null, type === "image" ? nativeImageEdit : undefined);
       reset();
     } finally {
       setSaving(false);
@@ -257,6 +261,22 @@ export default function AddCustomModelModal({ isOpen, providerAlias = "", existi
           )}
         </div>
 
+        {existingModel && type === "image" && (
+          <div className="flex items-start justify-between gap-3 rounded-lg border border-border-subtle px-3 py-2.5">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-sm font-medium">Use native image edit endpoint</span>
+              <span className="text-xs text-text-muted">
+                Send edits to the provider&apos;s <code className="font-mono">/images/edits</code> endpoint
+                instead of its default edit path. Leave off unless the model documents native image edits.
+              </span>
+            </div>
+            <Toggle
+              checked={nativeImageEdit}
+              onChange={setNativeImageEdit}
+            />
+          </div>
+        )}
+
         {/* Test result */}
         {testStatus === "ok" && (
           <div className="flex items-center gap-2 text-sm text-green-600">
@@ -295,6 +315,7 @@ AddCustomModelModal.propTypes = {
     name: PropTypes.string,
     type: PropTypes.string,
     transport: PropTypes.string,
+    nativeImageEdit: PropTypes.bool,
     caps: PropTypes.object,
     catalogRef: PropTypes.shape({
       source: PropTypes.oneOf(["user", "openrouter", "hardcoded"]).isRequired,

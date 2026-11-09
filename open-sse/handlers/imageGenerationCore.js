@@ -35,6 +35,7 @@ export async function handleImageGenerationCore({
   log,
   action = "generations",
   jobTimeoutMs,
+  modelOptions = {},
   streamToClient = false,
   binaryOutput = false,
   onCredentialsRefreshed,
@@ -71,7 +72,7 @@ export async function handleImageGenerationCore({
   if (adapter.useExecutor && adapter.executeViaExecutor) {
     try {
       log?.debug?.("IMAGE", `${displayProvider.toUpperCase()} | ${model} | prompt="${body.prompt.slice(0, 50)}..." (executor)`);
-      const responseBody = await adapter.executeViaExecutor(model, body, credentials, log);
+      const responseBody = await adapter.executeViaExecutor(model, body, credentials, log, modelOptions);
       if (onRequestSuccess) await onRequestSuccess();
       const normalized = adapter.normalize(responseBody, body.prompt);
       const finalBody = (normalized.created && Array.isArray(normalized.data)) ? normalized : responseBody;
@@ -115,13 +116,13 @@ export async function handleImageGenerationCore({
 
   try {
     if (action === "edits") {
-      const edit = await adapter.buildEditRequest({ model, body, credentials });
+      const edit = await adapter.buildEditRequest({ model, body, credentials, options: modelOptions });
       url = edit.url;
       headers = edit.headers;
       requestBody = edit.body;
     } else {
-      url = adapter.buildUrl(model, credentials, body);
-      requestBody = await adapter.buildBody(model, body);
+      url = adapter.buildUrl(model, credentials, body, modelOptions);
+      requestBody = await adapter.buildBody(model, body, modelOptions);
       headers = adapter.buildHeaders(credentials, requestBody, model, body);
     }
   } catch (error) {
@@ -167,14 +168,14 @@ export async function handleImageGenerationCore({
         let retryHeaders;
         let retryUrl;
         if (action === "edits") {
-          const edit = await adapter.buildEditRequest({ model, body, credentials });
+          const edit = await adapter.buildEditRequest({ model, body, credentials, options: modelOptions });
           retryBody = edit.body;
           retryHeaders = edit.headers;
           retryUrl = edit.url;
         } else {
-          retryBody = await adapter.buildBody(model, body);
+          retryBody = await adapter.buildBody(model, body, modelOptions);
           retryHeaders = adapter.buildHeaders(credentials, retryBody, model, body);
-          retryUrl = adapter.buildUrl(model, credentials, body);
+          retryUrl = adapter.buildUrl(model, credentials, body, modelOptions);
         }
         providerResponse = await fetch(retryUrl, {
           method: "POST",

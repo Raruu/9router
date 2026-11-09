@@ -42,6 +42,8 @@ export function getProviderCustomModelRows({
       ...(model.catalogRef ? { catalogRef: model.catalogRef } : {}),
       // STT realtime dispatch marker — needed to prefill the edit dialog.
       ...(model.transport ? { transport: model.transport } : {}),
+      // Image-only opt-in native edit endpoint (prefills the edit dialog).
+      ...(model.nativeImageEdit === true ? { nativeImageEdit: true } : {}),
     });
   }
 

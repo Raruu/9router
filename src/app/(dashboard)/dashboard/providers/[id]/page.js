@@ -835,7 +835,7 @@ export default function ProviderDetailPage() {
   // snapshot; `transport` is the STT realtime dispatch marker (shared whitelist
   // STT_TRANSPORT_META, honoured only on type "stt"); `previousType` moves the
   // record on a kind change instead of leaving a duplicate under the old key.
-  const handleAddCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias, catalogRef, { name, quiet = false, skipRefresh = false, caps, transport, previousType } = {}) => {
+  const handleAddCustomModel = async (modelId, type = "llm", providerAliasOverride = providerStorageAlias, catalogRef, { name, quiet = false, skipRefresh = false, caps, transport, nativeImageEdit, previousType } = {}) => {
     try {
       const res = await fetch("/api/models/custom", {
         method: "POST",
@@ -850,6 +850,8 @@ export default function ProviderDetailPage() {
           // Always sent from the modal so a cleared marker clears; callers that
           // pass nothing leave the stored transport untouched.
           ...(transport !== undefined ? { transport } : {}),
+          // Image-only opt-in; undefined keeps the stored value untouched.
+          ...(nativeImageEdit !== undefined ? { nativeImageEdit } : {}),
           ...(previousType ? { previousType } : {}),
         }),
       });
@@ -1197,13 +1199,14 @@ export default function ProviderDetailPage() {
     setShowAddCustomModel(true);
   };
 
-  const handleSaveCompatModel = async (modelId, catalogRef, type, transport) => {
+  const handleSaveCompatModel = async (modelId, catalogRef, type, transport, nativeImageEdit) => {
     if (!editingCustomModel && compatModelRows.some((model) => model.id === modelId)) {
       alert("Model already exists for this provider.");
       return;
     }
     await handleAddCustomModel(modelId, type || "llm", providerStorageAlias, catalogRef, {
       transport,
+      nativeImageEdit,
       previousType: editingCustomModel?.type || null,
     });
     setShowAddCustomModel(false);
@@ -2859,13 +2862,14 @@ const ids = [];
         isOpen={showAddCustomModel}
         providerAlias={providerStorageAlias}
         existingModel={editingCustomModel}
-        onSave={async (modelId, catalogRef, type, transport, previousType) => {
+        onSave={async (modelId, catalogRef, type, transport, previousType, nativeImageEdit) => {
           if (isCompatible) {
-            await handleSaveCompatModel(modelId, catalogRef, type, transport);
+            await handleSaveCompatModel(modelId, catalogRef, type, transport, nativeImageEdit);
             return;
           }
           await handleAddCustomModel(modelId, type || "llm", providerStorageAlias, catalogRef, {
             transport,
+            nativeImageEdit,
             previousType,
           });
           setShowAddCustomModel(false);
