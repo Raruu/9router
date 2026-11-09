@@ -62,7 +62,7 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
             </p>
           )}
           <div className="flex flex-wrap gap-3">
-            {group.rows.map(({ id, name, alias, source, type, locked, transport, catalogRef }) => {
+            {group.rows.map(({ id, name, alias, source, type, locked, transport, catalogRef, nativeImageEdit }) => {
               const isCustom = source === "custom";
               return (
                 <ModelRow
