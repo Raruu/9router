@@ -43,6 +43,8 @@ async function sourceImage(body) {
 }
 
 export default {
+  // Edits reuse this adapter's source-image path (no separate edit endpoint).
+  editViaGeneration: true,
   buildUrl: (model, creds) => {
     const override = customBaseUrl(creds);
     if (override) {

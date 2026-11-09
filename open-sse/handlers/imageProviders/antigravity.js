@@ -38,6 +38,8 @@ function collectImageInputs(body) {
 }
 
 export default {
+  // Edits reuse this adapter's source-image path (no separate edit endpoint).
+  editViaGeneration: true,
   // Delegate to executor instead of building URL/headers/body manually
   useExecutor: true,
 

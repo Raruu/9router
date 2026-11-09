@@ -73,7 +73,7 @@ export default function CompatibleModelsSection({ providerStorageAlias, provider
                   copied={copied}
                   onCopy={onCopy}
                   onDeleteAlias={() => isCustom ? onDeleteCustomModel(id, type) : onDeleteAlias(alias)}
-                  onEdit={isCustom ? () => onEditModel({ id, name, catalogRef, type, transport }) : undefined}
+                  onEdit={isCustom ? () => onEditModel({ id, name, catalogRef, type, transport, nativeImageEdit }) : undefined}
                   onToggleLock={isCustom ? () => onToggleLock(id, !locked, type) : undefined}
                   locked={locked}
                   removeTitle={isCustom ? undefined : "Remove alias"}

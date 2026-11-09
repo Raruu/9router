@@ -90,6 +90,17 @@ async function buildJsonBody(body) {
   return req;
 }
 
+function dataUrlBlob(value) {
+  if (typeof value !== "string") return null;
+  const match = /^data:(image\/[^;]+);base64,(.+)$/i.exec(value.trim());
+  if (!match) return null;
+  try {
+    return new Blob([Buffer.from(match[2], "base64")], { type: match[1] });
+  } catch {
+    return null;
+  }
+}
+
 function buildMultipartBody(body) {
   const form = new FormData();
   form.append("prompt", body.prompt);
@@ -102,6 +113,13 @@ function buildMultipartBody(body) {
   addOptionalFields(form, body, (target, key, value) => {
     target.append(key, String(value));
   });
+
+  // The multipart worker models still need the source image; the caller has
+  // already converted uploads to data URLs.
+  const image = dataUrlBlob(body.image);
+  if (image) form.append("image", image, "image.png");
+  const mask = dataUrlBlob(body.mask_image || body.mask);
+  if (mask) form.append("mask", mask, "mask.png");
 
   return form;
 }
@@ -138,6 +156,9 @@ function normalizeCloudflareResponse(responseBody) {
 }
 
 export default {
+  // Edits reuse this adapter's JSON/multipart source-image path.
+  editViaGeneration: true,
+
   buildUrl: (model, creds) => {
     const accountId = creds?.providerSpecificData?.accountId;
     if (!accountId) throw new Error("cloudflare-ai requires accountId in providerSpecificData");

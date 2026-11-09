@@ -37,6 +37,43 @@ export function nowSec() {
   return Math.floor(Date.now() / 1000);
 }
 
+// ─── Edit image inputs ──────────────────────────────────────────────────────
+// Adapters that accept a source image on their normal generations/executor
+// path read strings (data URL / base64 / URL); multipart adapters need the
+// original File parts. These helpers convert only the former shape.
+
+export function isFileLike(value) {
+  return Boolean(value)
+    && typeof value === "object"
+    && typeof value.arrayBuffer === "function"
+    && typeof value.size === "number"
+    && typeof value.type === "string";
+}
+
+export async function fileToDataUrl(file) {
+  const type = file.type || "image/png";
+  const buffer = Buffer.from(await file.arrayBuffer());
+  return `data:${type};base64,${buffer.toString("base64")}`;
+}
+
+/** Copy of the edit body with File image/mask inputs converted to data URLs. */
+export async function withEditImageDataUrls(body) {
+  if (!body || typeof body !== "object") return body;
+  const rawImages = Array.isArray(body.images) && body.images.length ? body.images : [body.image];
+  const images = [];
+  for (const entry of rawImages) {
+    if (!entry) continue;
+    images.push(isFileLike(entry) ? await fileToDataUrl(entry) : entry);
+  }
+  let mask = body.mask ?? body.mask_image;
+  if (isFileLike(mask)) mask = await fileToDataUrl(mask);
+  return {
+    ...body,
+    ...(images.length > 0 ? { image: images[0], images } : {}),
+    ...(typeof mask === "string" && mask ? { mask, mask_image: mask } : {}),
+  };
+}
+
 // ─── Async image jobs ───────────────────────────────────────────────────────
 // Some image upstreams answer POST /images/generations with a job handle
 // instead of an image:

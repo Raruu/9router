@@ -4,6 +4,8 @@ import {
   IMAGE_EDIT_MAX_FILES,
   parseImageEditRequestBody,
 } from "../../src/sse/handlers/imageEditRequest.js";
+import openaiCompatNodeImageAdapter from "../../open-sse/handlers/imageProviders/openaiCompatNode.js";
+import { withEditImageDataUrls } from "../../open-sse/handlers/imageProviders/_base.js";
 
 // /v1/images/edits: multipart contract forwarded to compatible providers.
 // Async gateways execute it as a job retrieved from their generations
@@ -12,12 +14,13 @@ import {
 const originalFetch = global.fetch;
 const MEDIA_HOST = "https://img.test/v1";
 
-const compatCreds = () => ({
+const compatCreds = (specific = {}) => ({
   apiKey: "test-key",
   providerSpecificData: {
     prefix: "xk",
     baseUrl: "https://router.test/v1",
     kindBaseUrls: { image: MEDIA_HOST },
+    ...specific,
   },
 });
 
@@ -186,11 +189,179 @@ describe("image edits dispatch", () => {
     expect((await result.response.json()).data[0].url).toBe("https://cdn.test/openai.png");
   });
 
+  it("edits through Gemini's generateContent inline image path", async () => {
+    global.fetch.mockResolvedValueOnce(json({
+      candidates: [{ content: { parts: [{ inlineData: { mimeType: "image/png", data: "b3V0" } }] } }],
+    }));
+
+    const bytes = [137, 80, 78, 71];
+    const result = await handleImageGenerationCore({
+      action: "edits",
+      body: { model: "gemini-3.1-flash-image", prompt: "make it blue", image: new File([new Uint8Array(bytes)], "a.png", { type: "image/png" }) },
+      modelInfo: { provider: "gemini", model: "gemini-3.1-flash-image" },
+      credentials: { apiKey: "g-key" },
+      log: null,
+    });
+
+    expect(result.success).toBe(true);
+    const [url, init] = global.fetch.mock.calls[0];
+    expect(url).toContain("gemini-3.1-flash-image:generateContent");
+    const parts = JSON.parse(init.body).contents[0].parts;
+    expect(parts[0].inlineData).toEqual({ mimeType: "image/png", data: Buffer.from(bytes).toString("base64") });
+    expect((await result.response.json()).data[0].b64_json).toBe("b3V0");
+  });
+
+  it("edits through Cloudflare's JSON source-image path", async () => {
+    global.fetch.mockResolvedValueOnce(json({ result: { image: "aGVsbG8=" } }));
+
+    const bytes = [1, 2, 3, 4];
+    const result = await handleImageGenerationCore({
+      action: "edits",
+      body: { model: "@cf/black-forest-labs/flux-1-schnell", prompt: "edit", image: new File([new Uint8Array(bytes)], "a.png", { type: "image/png" }) },
+      modelInfo: { provider: "cloudflare-ai", model: "@cf/black-forest-labs/flux-1-schnell" },
+      credentials: { apiKey: "cf-key", providerSpecificData: { accountId: "acc" } },
+      log: null,
+    });
+
+    expect(result.success).toBe(true);
+    const [url, init] = global.fetch.mock.calls[0];
+    expect(url).toContain("/accounts/acc/ai/run/@cf/black-forest-labs/flux-1-schnell");
+    const upstream = JSON.parse(init.body);
+    expect(upstream.image).toEqual(bytes);
+    expect(upstream.image_b64).toBe(Buffer.from(bytes).toString("base64"));
+    expect((await result.response.json()).data[0].b64_json).toBe("aGVsbG8=");
+  });
+
+  it("edits through Cloudflare's multipart source-image path", async () => {
+    global.fetch.mockResolvedValueOnce(json({ result: { image: "aGVsbG8=" } }));
+
+    const bytes = [9, 8, 7];
+    const result = await handleImageGenerationCore({
+      action: "edits",
+      body: { model: "@cf/black-forest-labs/flux-2-dev", prompt: "edit", image: new File([new Uint8Array(bytes)], "a.png", { type: "image/png" }) },
+      modelInfo: { provider: "cloudflare-ai", model: "@cf/black-forest-labs/flux-2-dev" },
+      credentials: { apiKey: "cf-key", providerSpecificData: { accountId: "acc" } },
+      log: null,
+    });
+
+    expect(result.success).toBe(true);
+    const [url, init] = global.fetch.mock.calls[0];
+    expect(url).toContain("/ai/run/@cf/black-forest-labs/flux-2-dev");
+    expect(init.headers["Content-Type"]).toBeUndefined();
+    expect(init.body).toBeInstanceOf(FormData);
+    const imagePart = init.body.get("image");
+    expect(imagePart).toBeInstanceOf(Blob);
+    expect(imagePart.size).toBe(bytes.length);
+  });
+
+  it("edits through OpenRouter's input_references Image API", async () => {
+    global.fetch.mockResolvedValueOnce(json({ created: 1, data: [{ url: "https://cdn.test/or.png" }] }));
+
+    const result = await handleImageGenerationCore({
+      action: "edits",
+      body: { model: "openai/gpt-image-1", prompt: "edit", image: png(), images: [png()] },
+      modelInfo: { provider: "openrouter", model: "openai/gpt-image-1" },
+      credentials: { apiKey: "or-key" },
+      log: null,
+    });
+
+    expect(result.success).toBe(true);
+    const [url, init] = global.fetch.mock.calls[0];
+    expect(url).toBe("https://openrouter.ai/api/v1/images");
+    const upstream = JSON.parse(init.body);
+    expect(upstream.model).toBe("openai/gpt-image-1");
+    expect(upstream.input_references).toHaveLength(1);
+    expect(upstream.input_references[0]).toEqual({
+      type: "image_url",
+      image_url: { url: expect.stringMatching(/^data:image\/png;base64,/) },
+    });
+    expect((await result.response.json()).data[0].url).toBe("https://cdn.test/or.png");
+  });
+
+  it("falls back from multipart to a JSON edit job and polls it", async () => {
+    global.fetch
+      .mockResolvedValueOnce(json({ error: "invalid image edit request" }, 400))
+      .mockResolvedValueOnce(json({ object: "image.generation.job", status: "processing", id: "json-1" }, 202))
+      .mockResolvedValueOnce(json({ status: "completed", data: [{ url: "https://cdn.test/json-edit.png" }] }));
+
+    const pending = handleImageGenerationCore({
+      action: "edits",
+      body: { model: "gpt-image-2", prompt: "edit", image: png(), images: [png()] },
+      modelInfo: { provider: "openai-compatible-chat-nara", model: "gpt-image-2" },
+      credentials: compatCreds(),
+      log: null,
+    });
+    await vi.advanceTimersByTimeAsync(2000);
+    const result = await pending;
+
+    expect(result.success).toBe(true);
+    const [, jsonInit] = global.fetch.mock.calls[1];
+    expect(jsonInit.headers["Content-Type"]).toBe("application/json");
+    expect(JSON.parse(jsonInit.body).image).toMatch(/^data:image\/png;base64,/);
+    expect(global.fetch.mock.calls[2][0]).toBe(`${MEDIA_HOST}/images/generations/json-1`);
+    expect((await result.response.json()).data[0].url).toBe("https://cdn.test/json-edit.png");
+  });
+
+  it("falls back to img2img through generations when /images/edits is missing", async () => {
+    global.fetch
+      .mockResolvedValueOnce(json({ error: "not found" }, 404))
+      .mockResolvedValueOnce(json({ error: "not found" }, 404))
+      .mockResolvedValueOnce(json({ status: "completed", data: [{ url: "https://cdn.test/gen-edit.png" }] }));
+
+    const result = await handleImageGenerationCore({
+      action: "edits",
+      body: { model: "gpt-image-2", prompt: "edit", image: png(), images: [png()] },
+      modelInfo: { provider: "openai-compatible-chat-nara", model: "gpt-image-2" },
+      credentials: compatCreds(),
+      log: null,
+    });
+
+    expect(result.success).toBe(true);
+    expect(global.fetch.mock.calls[2][0]).toBe(`${MEDIA_HOST}/images/generations`);
+    expect((await result.response.json()).data[0].url).toBe("https://cdn.test/gen-edit.png");
+  });
+
+  it("pins a single edit shape via imageEditFormat", async () => {
+    global.fetch.mockResolvedValueOnce(json({ error: "invalid" }, 400));
+
+    const result = await handleImageGenerationCore({
+      action: "edits",
+      body: { model: "gpt-image-2", prompt: "edit", image: png(), images: [png()] },
+      modelInfo: { provider: "openai-compatible-chat-nara", model: "gpt-image-2" },
+      credentials: compatCreds({ imageEditFormat: "multipart" }),
+      log: null,
+    });
+
+    expect(result.success).toBe(false);
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the upload as a real multipart File for native edit gateways", async () => {
+    const bytes = [137, 80, 78, 71];
+    const form = new FormData();
+    form.append("model", "m");
+    form.append("prompt", "p");
+    form.append("image", new File([new Uint8Array(bytes)], "a.png", { type: "image/png" }), "a.png");
+
+    const parsed = await parseImageEditRequestBody(new Request("http://localhost/v1/images/edits", { method: "POST", body: form }));
+    const [candidate] = await openaiCompatNodeImageAdapter.buildEditRequests({
+      model: "m",
+      body: parsed.body,
+      credentials: compatCreds(),
+    });
+
+    expect(candidate.url).toBe(`${MEDIA_HOST}/images/edits`);
+    expect(candidate.pollBaseUrl).toBe(`${MEDIA_HOST}/images/generations`);
+    const file = candidate.body.get("image");
+    expect(file).toBeInstanceOf(File);
+    expect(new Uint8Array(await file.arrayBuffer())).toEqual(new Uint8Array(bytes));
+  });
+
   it("rejects edits on a provider without edit support", async () => {
     const result = await handleImageGenerationCore({
       action: "edits",
-      body: { model: "gemini-3-pro-image-preview", prompt: "edit", image: png(), images: [png()] },
-      modelInfo: { provider: "gemini", model: "gemini-3-pro-image-preview" },
+      body: { model: "sd3.5-large", prompt: "edit", image: png(), images: [png()] },
+      modelInfo: { provider: "stability-ai", model: "sd3.5-large" },
       credentials: { apiKey: "k" },
       log: null,
     });
@@ -199,5 +370,27 @@ describe("image edits dispatch", () => {
     expect(result.status).toBe(400);
     expect(result.error).toMatch(/does not support image edits/);
     expect(global.fetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("edit capability plumbing", () => {
+  it("marks image-input adapters for generation-path edits", async () => {
+    const modules = await Promise.all([
+      import("../../open-sse/handlers/imageProviders/gemini.js"),
+      import("../../open-sse/handlers/imageProviders/antigravity.js"),
+      import("../../open-sse/handlers/imageProviders/cloudflareAi.js"),
+      import("../../open-sse/handlers/imageProviders/huggingface.js"),
+    ]);
+    for (const mod of modules) expect(mod.default.editViaGeneration).toBe(true);
+  });
+
+  it("converts File image and mask inputs to data URLs", async () => {
+    const file = png();
+    const converted = await withEditImageDataUrls({ prompt: "p", image: file, images: [file], mask: file });
+
+    expect(converted.image).toMatch(/^data:image\/png;base64,/);
+    expect(converted.images).toEqual([converted.image]);
+    expect(converted.mask).toBe(converted.image);
+    expect(converted.mask_image).toBe(converted.image);
   });
 });

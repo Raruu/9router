@@ -4,6 +4,7 @@ import { HTTP_STATUS } from "../config/runtimeConfig.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
 import { getExecutor } from "../executors/index.js";
 import { getImageAdapter } from "./imageProviders/index.js";
+import { withEditImageDataUrls } from "./imageProviders/_base.js";
 import { urlToBase64 } from "./imageProviders/_base.js";
 
 function serializeRequestBody(requestBody) {
@@ -11,6 +12,11 @@ function serializeRequestBody(requestBody) {
   if (typeof requestBody === "string") return requestBody;
   return JSON.stringify(requestBody);
 }
+
+// A custom gateway may reject the edit shape (multipart vs JSON vs img2img)
+// with a format-class error. Those never created a job, so trying the next
+// candidate is safe; 429/5xx are not retried.
+const EDIT_FORMAT_RETRY_STATUSES = new Set([400, 404, 405, 415, 422]);
 
 /**
  * Core image generation handler — orchestrator only.
@@ -59,13 +65,21 @@ export async function handleImageGenerationCore({
     );
   }
 
-  // Edits are opt-in per adapter. Everything else keeps the JSON generations
-  // path, including its `image` field.
-  if (action === "edits" && typeof adapter.buildEditRequest !== "function") {
-    return createErrorResult(
-      HTTP_STATUS.BAD_REQUEST,
-      `Provider '${displayProvider}' does not support image edits (use /v1/images/generations)`
-    );
+  // Edits are opt-in per adapter: a native buildEditRequest(s), or the normal
+  // generations/executor path when the adapter consumes image inputs.
+  if (action === "edits") {
+    const canEdit = typeof adapter.buildEditRequest === "function"
+      || typeof adapter.buildEditRequests === "function"
+      || adapter.editViaGeneration === true;
+    if (!canEdit) {
+      return createErrorResult(
+        HTTP_STATUS.BAD_REQUEST,
+        `Provider '${displayProvider}' does not support image edits (use /v1/images/generations)`
+      );
+    }
+    // Multipart builders need the original File parts; image-input adapters
+    // need data URLs. Convert only for the latter, before the executor branch.
+    if (adapter.editViaGeneration) body = await withEditImageDataUrls(body);
   }
 
   // Executor-delegating adapters: skip manual URL/headers/body, use the proven executor flow
@@ -113,13 +127,22 @@ export async function handleImageGenerationCore({
   let url;
   let headers;
   let requestBody;
+  let pollBaseUrl;
+  let editCandidates = null;
+
+  const buildEditCandidates = async () => {
+    if (typeof adapter.buildEditRequests === "function") {
+      const list = await adapter.buildEditRequests({ model, body, credentials, options: modelOptions });
+      return Array.isArray(list) ? list.filter(Boolean) : [];
+    }
+    const single = await adapter.buildEditRequest({ model, body, credentials, options: modelOptions });
+    return single ? [single] : [];
+  };
 
   try {
-    if (action === "edits") {
-      const edit = await adapter.buildEditRequest({ model, body, credentials, options: modelOptions });
-      url = edit.url;
-      headers = edit.headers;
-      requestBody = edit.body;
+    if (action === "edits" && !adapter.editViaGeneration) {
+      editCandidates = await buildEditCandidates();
+      if (editCandidates.length === 0) throw new Error("No image edit request could be built");
     } else {
       url = adapter.buildUrl(model, credentials, body, modelOptions);
       requestBody = await adapter.buildBody(model, body, modelOptions);
@@ -131,13 +154,36 @@ export async function handleImageGenerationCore({
 
   log?.debug?.("IMAGE", `${displayProvider.toUpperCase()} | ${model} | prompt="${body.prompt.slice(0, 50)}..."`);
 
+  const sendRequest = async () => {
+    if (action !== "edits" || adapter.editViaGeneration) {
+      return await fetch(url, {
+        method: "POST",
+        headers,
+        body: serializeRequestBody(requestBody),
+      });
+    }
+    for (let index = 0; index < editCandidates.length; index += 1) {
+      const candidate = editCandidates[index];
+      ({ url, headers, body: requestBody } = candidate);
+      pollBaseUrl = candidate.pollBaseUrl;
+      const response = await fetch(url, {
+        method: "POST",
+        headers,
+        body: serializeRequestBody(requestBody),
+      });
+      const hasNext = index < editCandidates.length - 1;
+      if (hasNext && EDIT_FORMAT_RETRY_STATUSES.has(response.status)) {
+        log?.debug?.("IMAGE", `${displayProvider.toUpperCase()} | edit shape ${index + 1}/${editCandidates.length} rejected (HTTP ${response.status}); trying the next`);
+        continue;
+      }
+      return response;
+    }
+    throw new Error("No image edit request could be built");
+  };
+
   let providerResponse;
   try {
-    providerResponse = await fetch(url, {
-      method: "POST",
-      headers,
-      body: serializeRequestBody(requestBody),
-    });
+    providerResponse = await sendRequest();
   } catch (error) {
     const errMsg = formatProviderError(error, provider, model, HTTP_STATUS.BAD_GATEWAY);
     log?.debug?.("IMAGE", `Fetch error: ${errMsg}`);
@@ -164,24 +210,14 @@ export async function handleImageGenerationCore({
       if (onCredentialsRefreshed) await onCredentialsRefreshed(newCredentials);
 
       try {
-        let retryBody;
-        let retryHeaders;
-        let retryUrl;
-        if (action === "edits") {
-          const edit = await adapter.buildEditRequest({ model, body, credentials, options: modelOptions });
-          retryBody = edit.body;
-          retryHeaders = edit.headers;
-          retryUrl = edit.url;
+        if (action === "edits" && !adapter.editViaGeneration) {
+          editCandidates = await buildEditCandidates();
         } else {
-          retryBody = await adapter.buildBody(model, body, modelOptions);
-          retryHeaders = adapter.buildHeaders(credentials, retryBody, model, body);
-          retryUrl = adapter.buildUrl(model, credentials, body, modelOptions);
+          requestBody = await adapter.buildBody(model, body, modelOptions);
+          headers = adapter.buildHeaders(credentials, requestBody, model, body);
+          url = adapter.buildUrl(model, credentials, body, modelOptions);
         }
-        providerResponse = await fetch(retryUrl, {
-          method: "POST",
-          headers: retryHeaders,
-          body: serializeRequestBody(retryBody),
-        });
+        providerResponse = await sendRequest();
       } catch {
         log?.warn?.("TOKEN", `${displayProvider.toUpperCase()} | retry after refresh failed`);
       }
@@ -213,6 +249,7 @@ export async function handleImageGenerationCore({
         body,
         action,
         jobTimeoutMs,
+        pollBaseUrl,
       });
       // Codex streaming case: returns an SSE Response directly
       if (parsed?.sseResponse) {
