@@ -1,3 +1,17 @@
+# v0.5.116-4 (2026-11-10)
+
+## Features
+- **Antigravity**: per-connection admission control, ported from
+  luqman-v1/9router-go#1008. Each connection admits at most 3 concurrent
+  upstream calls; repeated 403/429 failures widen a jittered exponential
+  backoff (2s → 4s → 8s … capped at 60s), and 3 consecutive failures open a
+  per-connection circuit breaker for 30s followed by exactly one half-open
+  probe. A `403 TOS_VIOLATION` bypasses backoff and breaker (permanent, never
+  worth retrying). Over-limit/breaker refusals return 429/503 locally and
+  rotate to the next account without writing an account/model lock. State is
+  bounded (10k connections, LRU eviction) and is cleared on connection delete
+  and OAuth re-authentication.
+
 # v0.5.116-3 (2026-11-09)
 
 ## Features
