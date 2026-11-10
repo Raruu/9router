@@ -10,6 +10,7 @@ import {
 import { createProviderConnection } from "@/models";
 import { getProviderConnections } from "@/lib/localDb";
 import { requestLease, requestStatus, resolveLeaseEndpoint, resolveMcodeDataDir, AuthLeaseError } from "open-sse/services/minimaxCodeLease.js";
+import { closeAntigravityConnection } from "open-sse/services/antigravityConnectionLimit.js";
 import { readDesktopPassToken } from "open-sse/shared/mimoAccount.js";
 import {
   startCodexProxy,
@@ -537,6 +538,11 @@ export async function POST(request, { params }) {
           : null,
         testStatus: "active",
       });
+
+      // A fresh OAuth grant for this connection id is a re-authentication: drop
+      // any accumulated backoff/breaker state so the new credentials start
+      // clean. Routine token refreshes deliberately do NOT clear it.
+      closeAntigravityConnection(connection.id);
 
       return NextResponse.json({ 
         success: true, 

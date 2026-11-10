@@ -507,6 +507,16 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
 
       if (result.success) return result.response;
 
+      // Local per-connection admission refusal (Antigravity concurrency bound or
+      // circuit breaker): not an upstream quota error, and never a reason to
+      // persist a model/account lock. Break out so the account loop rotates to
+      // another connection without running the quota/mark-unavailable path.
+      if (result.admission) {
+        log.debug("ADMISSION", `${credentials.connectionName}: ${result.admission} — ${result.error}`);
+        failedResult = result;
+        break;
+      }
+
       // Antigravity 409/429: refresh live quota to get exact resetAt before locking
       let quotaResetMs = null;
       let resetsAtMs = result.resetsAtMs;
@@ -555,7 +565,11 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       break;
     }
 
-    log.warn("FALLBACK", `⇄ ACC:${credentials.connectionName} UNAVAILABLE (${failedResult.status}) → NEXT ACCOUNT`);
+    if (failedResult.admission) {
+      log.warn("ADMISSION", `⇄ ACC:${credentials.connectionName} ${failedResult.admission} → NEXT ACCOUNT`);
+    } else {
+      log.warn("FALLBACK", `⇄ ACC:${credentials.connectionName} UNAVAILABLE (${failedResult.status}) → NEXT ACCOUNT`);
+    }
     excludeConnectionIds.add(credentials.connectionId);
     lastError = failedResult.error;
     lastStatus = failedResult.status;

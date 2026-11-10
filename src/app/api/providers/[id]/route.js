@@ -6,6 +6,7 @@ import {
   deleteProviderConnection,
 } from "@/models";
 import { toProviderConnectionResponse, usesAwsCredentialForm } from "@/lib/providerConnectionResponse";
+import { closeAntigravityConnection } from "open-sse/services/antigravityConnectionLimit.js";
 
 function normalizeProxyConfig(body = {}) {
   const hasAnyProxyField =
@@ -177,6 +178,9 @@ export async function DELETE(request, { params }) {
     if (!deleted) {
       return NextResponse.json({ error: "Connection not found" }, { status: 404 });
     }
+
+    // Drop the connection's breaker/backoff entry so nothing leaks.
+    closeAntigravityConnection(id);
 
     return NextResponse.json({ message: "Connection deleted successfully" });
   } catch (error) {

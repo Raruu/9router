@@ -132,6 +132,19 @@ export const DEFAULT_RETRY_CONFIG = {
   504: { attempts: 2, delayMs: 3000 }
 };
 
+// Per-connection admission control for Antigravity. A single interactive turn
+// is one upstream call; light parallel tool use stays under the concurrency
+// bound, while a retry storm is capped instead of becoming an unbounded queue
+// that Google's abuse filters read as automated probing.
+export const ANTIGRAVITY_CONNECTION_LIMITS = Object.freeze({
+  concurrency: 3,
+  failureThreshold: 3,
+  coolDownMs: 30_000,
+  baseBackoffMs: 2_000,
+  maxBackoffMs: 60_000,
+  maxConnections: 10_000,
+});
+
 // Normalize a retry entry to { attempts, delayMs }
 export function resolveRetryEntry(entry) {
   if (entry == null) return { attempts: 0, delayMs: RETRY_CONFIG.delayMs };
