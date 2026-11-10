@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { convertProviderNodeType, deleteProviderConnectionsByProvider, deleteProviderNode, getProviderConnections, getProviderNodeById, updateProviderConnection, updateProviderNode } from "@/models";
 import { sanitizeKindBaseUrls } from "open-sse/config/kindEndpoints.js";
+import { closeAntigravityConnection } from "open-sse/services/antigravityConnectionLimit.js";
 
 // PUT /api/provider-nodes/[id] - Update provider node
 export async function PUT(request, { params }) {
@@ -132,8 +133,12 @@ export async function DELETE(request, { params }) {
       return NextResponse.json({ error: "Provider node not found" }, { status: 404 });
     }
 
+    // Connections go away with the node: snapshot them first so their
+    // admission state (breaker/backoff) is released too.
+    const connections = await getProviderConnections({ provider: id });
     await deleteProviderConnectionsByProvider(id);
     await deleteProviderNode(id);
+    for (const connection of connections) closeAntigravityConnection(connection.id);
 
     return NextResponse.json({ success: true });
   } catch (error) {

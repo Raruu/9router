@@ -8,6 +8,7 @@ import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { cleanJSONSchemaForAntigravity, normalizeGeminiContents } from "../translator/formats/gemini.js";
 import { DEFAULT_THINKING_AG_SIGNATURE } from "../config/defaultThinkingSignature.js";
 import { getGeminiThoughtSignatureSync } from "../services/thoughtSignatureStore.js";
+import { antigravityConnectionLimiter } from "../services/antigravityConnectionLimit.js";
 
 // Sanitize function name: Gemini requires [a-zA-Z_][a-zA-Z0-9_.:\-]{0,63}
 function sanitizeFunctionName(name) {
@@ -111,8 +112,80 @@ function buildIdeRequestId({ body, request, credentials, model, requestType }) {
 }
 
 export class AntigravityExecutor extends BaseExecutor {
-  constructor() {
+  constructor(connectionLimiter = antigravityConnectionLimiter) {
     super("antigravity", PROVIDERS.antigravity);
+    this.connectionLimiter = connectionLimiter;
+  }
+
+  /**
+   * Admission gate for one upstream attempt: circuit breaker, per-connection
+   * backoff, then a concurrency slot. A blocked attempt returns a synthesized
+   * 429/503 response with no upstream call; `admission` carries the kind to the
+   * handler so a local refusal is never persisted as an account/model lock.
+   */
+  async beforeUpstreamCall({ credentials, attempt, log, signal }) {
+    const connectionId = credentials?.connectionId;
+    if (!connectionId) return null;
+
+    const admission = await this.connectionLimiter.admit(connectionId, {
+      signal,
+      // BaseExecutor already spaces retries inside one execute() via
+      // computeRetryDelay; only the first attempt waits on the connection-wide
+      // backoff so the two delays do not stack.
+      wait: attempt === 0,
+    });
+
+    if (admission.blocked) {
+      log?.debug?.("AG_LIMIT", `${String(connectionId).slice(0, 8)} | ${admission.blocked.kind} — refusing upstream call`);
+      return { blocked: this.buildAdmissionResponse(admission.blocked), kind: admission.blocked.kind };
+    }
+    return { release: admission.release };
+  }
+
+  /**
+   * Charge each upstream response to the connection: 2xx releases the breaker
+   * and backoff, 403/429 widen it. ToS violations are detected from a clone of
+   * the 403 body and bypass the limiter (permanent, never worth retrying).
+   * Must stay fail-open and must not consume the body the error path reads.
+   */
+  async afterUpstreamCall({ response, credentials, log }) {
+    const connectionId = credentials?.connectionId;
+    if (!connectionId || !response) return;
+
+    const status = response.status;
+    if (status >= 200 && status < 300) {
+      this.connectionLimiter.recordSuccess(connectionId);
+      return;
+    }
+    if (status !== HTTP_STATUS.FORBIDDEN && status !== HTTP_STATUS.RATE_LIMITED) return;
+
+    let body = "";
+    if (status === HTTP_STATUS.FORBIDDEN && typeof response.clone === "function") {
+      try {
+        body = await response.clone().text();
+      } catch {
+        body = "";
+      }
+    }
+
+    const outcome = this.connectionLimiter.recordFailure(connectionId, status, body);
+    if (outcome?.opened) {
+      log?.warn?.("AG_LIMIT", `${String(connectionId).slice(0, 8)} | breaker OPEN after ${outcome.failures} consecutive ${status}s — cool-down ${Math.round(outcome.cooldownMs / 1000)}s`);
+    }
+  }
+
+  buildAdmissionResponse({ status, message, retryAfterMs }) {
+    const headers = { "content-type": "application/json" };
+    if (retryAfterMs > 0) {
+      headers["retry-after"] = String(Math.max(1, Math.ceil(retryAfterMs / 1000)));
+    }
+    return new Response(JSON.stringify({
+      error: {
+        message,
+        type: status === HTTP_STATUS.RATE_LIMITED ? "connection_limit" : "circuit_breaker_open",
+        code: status,
+      },
+    }), { status, headers });
   }
 
   // Parse Antigravity quota error to extract precise resetsAtMs from ErrorInfo/RetryInfo

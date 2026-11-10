@@ -94,14 +94,17 @@ export async function parseUpstreamError(response, executor = null) {
  * @param {number} statusCode - HTTP status code
  * @param {string} message - Error message
  * @param {number} [resetsAtMs] - Optional precise cooldown expiry (ms epoch) for provider-specific quota errors
- * @returns {{ success: false, status: number, error: string, response: Response, resetsAtMs?: number }}
+ * @param {object|null} [extraHeaders] - Headers forwarded on the error response
+ * @param {string|null} [admission] - Local admission rejection kind (never an upstream quota error)
+ * @returns {{ success: false, status: number, error: string, response: Response, resetsAtMs?: number, admission?: string }}
  */
-export function createErrorResult(statusCode, message, resetsAtMs, extraHeaders = null) {
+export function createErrorResult(statusCode, message, resetsAtMs, extraHeaders = null, admission = null) {
   return {
     success: false,
     status: statusCode,
     error: message,
     resetsAtMs,
+    ...(admission ? { admission } : {}),
     response: errorResponse(statusCode, message, extraHeaders)
   };
 }
