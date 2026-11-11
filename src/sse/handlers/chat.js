@@ -36,6 +36,7 @@ import { stripModelContextMarker } from "open-sse/utils/modelMarkers.js";
 import { getKeyAccessContext, enforceKeyAccess, filterAdapterModels } from "../services/keyAccess.js";
 import { applyThinkingClassifier } from "../services/thinkingClassifier.js";
 import { resolveSmartChoice } from "../services/systemoneRouter.js";
+import { isAborted, sleepUnlessAborted, abortedResponse } from "open-sse/utils/abort.js";
 
 /**
  * Handle chat completion request
@@ -43,6 +44,12 @@ import { resolveSmartChoice } from "../services/systemoneRouter.js";
  * Format detection and translation handled by translator
  */
 export async function handleChat(request, clientRawRequest = null) {
+  // The client can cancel before (or at any point during) the retry chain. The
+  // signal is threaded into combo/fusion and the core so no further member,
+  // account or upstream call is started for a response nobody will read.
+  const clientSignal = request?.signal ?? null;
+  if (isAborted(clientSignal)) return abortedResponse();
+
   let body;
   try {
     body = await request.json();
@@ -158,6 +165,7 @@ export async function handleChat(request, clientRawRequest = null) {
         comboName: modelStr,
         judgeModel: comboStrategies[modelStr]?.judgeModel,
         tuning: comboStrategies[modelStr]?.fusionTuning,
+        signal: clientSignal,
       });
     }
 
@@ -183,6 +191,7 @@ export async function handleChat(request, clientRawRequest = null) {
       smartPolicy: comboCfg.smartPolicy || "smart",
       sessionSticky: comboCfg.sessionSticky !== false,
       confidenceThreshold: typeof comboCfg.confidenceThreshold === "number" ? comboCfg.confidenceThreshold : 0.8,
+      signal: clientSignal,
       resolveSmartChoice: comboStrategy === "smart"
         ? (b, m) => resolveSmartChoice({
             body: b,
@@ -210,7 +219,8 @@ export async function handleChat(request, clientRawRequest = null) {
       log,
       comboName: modelStr,
       comboStrategy: getActiveAdapterStrategy(requiredCapabilities, settings),
-      resolveMemberRetries: memberRetryResolver(settings)
+      resolveMemberRetries: memberRetryResolver(settings),
+      signal: clientSignal
     });
   }
 
@@ -304,6 +314,11 @@ async function memberContextResolver(settings) {
   }
 }
 async function handleSingleModelChat(body, modelStr, clientRawRequest = null, request = null, apiKey = null, responseModelOverride = null, comboRetryContext = false, requestedModel = null, classifierDecision = null) {
+  // Same client signal as handleChat: every nested combo/fusion and every
+  // account attempt below must stop once the caller is gone.
+  const clientSignal = request?.signal ?? null;
+  if (isAborted(clientSignal)) return abortedResponse();
+
   const modelInfo = await getModelInfo(modelStr);
 
   // If provider is null, this might be a combo name - check and handle
@@ -340,6 +355,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
           comboName: modelStr,
           judgeModel: comboStrategies[modelStr]?.judgeModel,
           tuning: comboStrategies[modelStr]?.fusionTuning,
+          signal: clientSignal,
         });
       }
 
@@ -367,6 +383,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         smartPolicy: comboCfg.smartPolicy || "smart",
         sessionSticky: comboCfg.sessionSticky !== false,
         confidenceThreshold: typeof comboCfg.confidenceThreshold === "number" ? comboCfg.confidenceThreshold : 0.8,
+        signal: clientSignal,
         resolveSmartChoice: comboStrategy === "smart"
           ? (b, m) => resolveSmartChoice({
               body: b,
@@ -395,6 +412,8 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
   let lastHeaders = null;
 
   while (true) {
+    if (isAborted(clientSignal)) return abortedResponse();
+
     const credentials = await getProviderCredentials(provider, excludeConnectionIds, model, { requestedModel: requestedModel || model });
 
     // All accounts unavailable
@@ -460,6 +479,7 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
         log,
         clientRawRequest,
         connectionId: credentials.connectionId,
+        signal: clientSignal,
         userAgent,
         apiKey,
         // Echo the combo name back instead of the member that served the request.
@@ -506,6 +526,10 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       });
 
       if (result.success) return result.response;
+
+      // Client cancelled during the attempt: stop here so the quota refresh and
+      // account-lock paths below never run for a request nobody is waiting on.
+      if (isAborted(clientSignal)) return abortedResponse();
 
       // Local per-connection admission refusal (Antigravity concurrency bound or
       // circuit breaker): not an upstream quota error, and never a reason to
@@ -557,7 +581,9 @@ async function handleSingleModelChat(body, modelStr, clientRawRequest = null, re
       })) {
         keyAttempt += 1;
         log.warn("FALLBACK", `↻ KEY:${credentials.connectionName} transient ${result.status}, retry ${keyAttempt}/${providerRetryConfig.tries}`);
-        if (failure.cooldownMs > 0) await new Promise((resolve) => setTimeout(resolve, failure.cooldownMs));
+        if (failure.cooldownMs > 0 && !(await sleepUnlessAborted(failure.cooldownMs, clientSignal))) {
+          return abortedResponse();
+        }
         continue;
       }
 

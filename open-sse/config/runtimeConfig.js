@@ -11,7 +11,9 @@ export const HTTP_STATUS = {
   SERVER_ERROR: 500,
   BAD_GATEWAY: 502,
   SERVICE_UNAVAILABLE: 503,
-  GATEWAY_TIMEOUT: 504
+  GATEWAY_TIMEOUT: 504,
+  // Client closed the request before the response was complete (nginx convention).
+  CLIENT_CLOSED_REQUEST: 499
 };
 
 // Re-export error config (backward compat)

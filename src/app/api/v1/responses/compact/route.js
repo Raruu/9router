@@ -31,7 +31,9 @@ export async function POST(request) {
   const newRequest = new Request(request.url, {
     method: "POST",
     headers: request.headers,
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    // Keep client cancellation across the rebuilt request.
+    signal: request.signal
   });
   return await handleChat(newRequest);
 }

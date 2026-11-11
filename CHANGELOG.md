@@ -1,3 +1,25 @@
+# v0.5.116-5 (2026-11-11)
+
+## Fixes
+- **Combo**: a cancelled request now stops the whole retry chain. The client's
+  `request.signal` (which Next aborts on socket close as well as on explicit
+  cancel) is threaded through combos, fusion and the core, so no further
+  member, account, same-member retry, backoff/cooldown wait, empty-stream peek
+  or fusion judge runs after the client is gone; the in-flight upstream fetch
+  is aborted too and the request unwinds with 499 without writing an
+  account/model lock.
+- **Streaming**: empty tool-call deltas (all-null or index-only placeholders)
+  are dropped before id assignment, so clients no longer receive a phantom
+  tool call before the real one; id-only, name-only, argument fragments,
+  custom tools and provider extensions are preserved (decolua/9router#5349,
+  fixes #5345).
+- **Image**: `?response_format=binary` now labels raw image bytes with the
+  Content-Type sniffed from their magic bytes (PNG/JPEG/GIF/WebP/BMP) and
+  names the download accordingly. `output_format` is only a fallback for
+  unrecognized bytes, so providers that ignore the requested format (Cloudflare
+  FLUX, Leonardo) no longer return JPEG labelled `image/png`
+  (decolua/9router#5372, fixes #5363).
+
 # v0.5.116-4 (2026-11-10)
 
 ## Features

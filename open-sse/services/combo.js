@@ -5,10 +5,12 @@
 import { checkFallbackError, formatRetryAfter } from "./accountFallback.js";
 import { unavailableResponse } from "../utils/error.js";
 import { isRetryableStatus, MAX_RETRY_WAIT_MS, RETRY_MODE_PER_KEY } from "../config/retries.js";
+import { HTTP_STATUS } from "../config/runtimeConfig.js";
 import { getCapabilitiesForModel } from "../providers/capabilities.js";
 import { parseModel } from "./model.js";
 import { extractTextContent } from "../translator/formats/gemini.js";
 import { estimateRequestTokens, contextFitBudget } from "../utils/tokenEstimate.js";
+import { isAborted, sleepUnlessAborted, abortedResponse } from "../utils/abort.js";
 import { peekStreamForContent, reconstructStream, isNoRetryFinish } from "./emptyFailover.js";
 import {
   getStickyComboModel,
@@ -20,10 +22,16 @@ import {
 // Peek a 2xx combo response for real content. Returns null for non-SSE responses (leave
 // them untouched). For SSE, returns { outcome: "content"|"empty", finishReason, response }
 // where `response` is a faithful replay of the original stream (head buffer + live reader).
-async function peekComboResponse(result, log) {
+// `outcome: "aborted"` means the client cancelled: the reader is already handed back and
+// the caller must stop instead of failing over.
+async function peekComboResponse(result, log, signal = null) {
   const ct = (result.headers.get("content-type") || "").toLowerCase();
   if (!result.body || !ct.includes("text/event-stream")) return null;
-  const peeked = await peekStreamForContent(result.body);
+  const peeked = await peekStreamForContent(result.body, { signal });
+  if (peeked.outcome === "aborted") {
+    try { await peeked.reader?.cancel?.(); } catch { /* already closed */ }
+    return { outcome: "aborted" };
+  }
   const response = new Response(reconstructStream(peeked.head, peeked.reader, peeked.pendingRead), {
     status: result.status,
     statusText: result.statusText,
@@ -456,6 +464,10 @@ export async function handleComboChat({
   sessionSticky = true,
   confidenceThreshold = 0.8,
   resolveSmartChoice = null,
+  // Client abort signal (request.signal). Once aborted no further member,
+  // retry or wait may start — the caller is gone and every extra upstream call
+  // is pure waste. Absent for standalone engine use, where behaviour is unchanged.
+  signal = null,
 }) {
   let rotatedModels = models;
   let activeStickyModel = null;
@@ -571,7 +583,16 @@ export async function handleComboChat({
   let lastStatus = null;
   let requestScopedResult = null;
 
+  if (isAborted(signal)) {
+    log.info("COMBO", `Combo "${comboName}" cancelled by the client before the first attempt`);
+    return abortedResponse();
+  }
+
   for (let i = 0; i < rotatedModels.length; i++) {
+    if (isAborted(signal)) {
+      log.info("COMBO", `Client aborted — stopping retries before model ${i + 1}/${rotatedModels.length}`);
+      return abortedResponse();
+    }
     const modelStr = rotatedModels[i];
     log.info("COMBO", `Trying model ${i + 1}/${rotatedModels.length}: ${modelStr}`);
 
@@ -584,6 +605,14 @@ export async function handleComboChat({
     while (!advancing) {
     try {
       const result = await handleSingleModel(body, modelStr);
+
+      // The client can vanish at any point during the attempt. Do not peek,
+      // retry or fail over: cancel whatever came back and unwind with 499.
+      if (isAborted(signal)) {
+        try { await result?.body?.cancel?.(); } catch { /* already closed */ }
+        log.info("COMBO", `Client aborted during ${modelStr} — stopping retries`);
+        return abortedResponse();
+      }
       
       // Success (2xx). A 2xx is necessary but NOT sufficient: Gemini aborts (e.g.
       // MALFORMED_FUNCTION_CALL) still return 200 and stream empty content, which would
@@ -592,7 +621,7 @@ export async function handleComboChat({
       if (result.ok) {
         let peeked = null;
         try {
-          peeked = await peekComboResponse(result, log);
+          peeked = await peekComboResponse(result, log, signal);
         } catch (peekErr) {
           // peekStreamForContent is written not to throw; if reconstruction/Response
           // construction ever does, result.body is already locked by getReader() and can no
@@ -603,6 +632,14 @@ export async function handleComboChat({
             status: 200,
             headers: { "Content-Type": "text/event-stream" },
           });
+        }
+
+        // The peek ends early when the client aborts; never fail over from here.
+        if (peeked?.outcome === "aborted" || isAborted(signal)) {
+          try { await peeked?.response?.body?.cancel?.(); } catch { /* already closed */ }
+          try { await result.body?.cancel?.(); } catch { /* locked by the peek */ }
+          log.info("COMBO", `Client aborted during ${modelStr} — stopping retries`);
+          return abortedResponse();
         }
 
         if (!peeked) {
@@ -633,11 +670,22 @@ export async function handleComboChat({
             }
           }
 
+          if (isAborted(signal)) {
+            try { await result.body?.cancel?.(); } catch { /* already closed */ }
+            log.info("COMBO", `Client aborted during ${modelStr} — stopping retries`);
+            return abortedResponse();
+          }
+
           log.info("COMBO", `Model ${modelStr} succeeded`);
           return result;
         }
 
         if (peeked.outcome === "content") {
+          if (isAborted(signal)) {
+            try { await peeked.response.body?.cancel?.(); } catch { /* already closed */ }
+            log.info("COMBO", `Client aborted during ${modelStr} — stopping retries`);
+            return abortedResponse();
+          }
           log.info("COMBO", `Model ${modelStr} succeeded${peeked.timedOut ? " (peek deadline; committed)" : ""}`);
           return peeked.response;
         }
@@ -648,6 +696,11 @@ export async function handleComboChat({
         const reasonLabel = peeked.finishReason || "no-content";
         const isLast = i === rotatedModels.length - 1;
         if (isNoRetryFinish(peeked.finishReason) || isLast) {
+          if (isAborted(signal)) {
+            try { await peeked.response.body?.cancel?.(); } catch { /* already closed */ }
+            log.info("COMBO", `Client aborted during ${modelStr} — stopping retries`);
+            return abortedResponse();
+          }
           log.warn("COMBO", `Model ${modelStr} returned empty (${reasonLabel}) — ${isNoRetryFinish(peeked.finishReason) ? "no-retry class" : "last candidate"}, returning as-is`);
           return peeked.response;
         }
@@ -664,6 +717,15 @@ export async function handleComboChat({
         // re-running a member that keeps producing empty generations.
         advancing = true;
         continue;
+      }
+
+      // A member that reports the request as cancelled is terminal: the client is
+      // gone, so every remaining member would be a wasted upstream call. This must
+      // be checked before `checkFallbackError`, which classifies 499 as a
+      // request-scoped fault and would otherwise fall through to the next member.
+      if (result.status === HTTP_STATUS.CLIENT_CLOSED_REQUEST) {
+        log.info("COMBO", `Model ${modelStr} aborted (499) — stopping retries`);
+        return result;
       }
 
       // If the model that failed was the session-sticky model, clear it so next turns re-evaluate
@@ -726,7 +788,10 @@ export async function handleComboChat({
         if (waitMs <= retryConfig.maxBackoffMs) {
           attempt += 1;
           log.info("COMBO", `↻ Model ${modelStr} transient ${underlying}, retry ${attempt}/${retryConfig.tries} after ${formatWaitMs(waitMs)}`);
-          if (waitMs > 0) await new Promise(r => setTimeout(r, waitMs));
+          if (waitMs > 0 && !(await sleepUnlessAborted(waitMs, signal))) {
+            log.info("COMBO", `Client aborted during the ${modelStr} retry wait — stopping retries`);
+            return abortedResponse();
+          }
           continue;
         }
         // Configured but the account lock outlasts the wait cap: surface the skip
@@ -741,7 +806,10 @@ export async function handleComboChat({
       if (cooldownMs && cooldownMs > 0 && cooldownMs <= 5000 &&
           (result.status === 503 || result.status === 502 || result.status === 504)) {
         log.info("COMBO", `↻ Model ${modelStr} transient ${result.status}, waiting ${formatWaitMs(cooldownMs)} before next`);
-        await new Promise(r => setTimeout(r, cooldownMs));
+        if (!(await sleepUnlessAborted(cooldownMs, signal))) {
+          log.info("COMBO", `Client aborted during the ${modelStr} cooldown — stopping retries`);
+          return abortedResponse();
+        }
       }
 
       // Fallback to next model
@@ -750,6 +818,12 @@ export async function handleComboChat({
       log.warn("COMBO", `Model ${modelStr} failed, trying next`, { status: underlying });
       advancing = true;
     } catch (error) {
+      // A client cancellation surfaces as AbortError from the member; it must stop
+      // the combo instead of being treated as one more transient failure.
+      if (isAborted(signal) || error?.name === "AbortError") {
+        log.info("COMBO", `Client aborted during ${modelStr} — stopping retries`);
+        return abortedResponse();
+      }
       // Catch unexpected exceptions to ensure fallback continues
       if (comboStrategy === "smart" && sessionId && modelStr === activeStickyModel) {
         clearStickyComboSession(comboName, sessionId);
@@ -904,21 +978,33 @@ function withTimeout(promise, ms) {
  * still preferring a full panel when everyone is fast. Bounded by a hard timeout.
  * Returns a sparse array aligned to `calls` (undefined = not yet / dropped).
  */
-function collectPanel(calls, { minPanel, stragglerGraceMs, panelHardTimeoutMs }) {
+function collectPanel(calls, { minPanel, stragglerGraceMs, panelHardTimeoutMs, signal = null }) {
   return new Promise((resolve) => {
     const out = new Array(calls.length);
     let settled = 0;
     let ok = 0;
     let finished = false;
     let graceTimer = null;
+    let abortListener = null;
     const finish = () => {
       if (finished) return;
       finished = true;
       clearTimeout(hardTimer);
       if (graceTimer) clearTimeout(graceTimer);
+      if (abortListener) {
+        signal.removeEventListener("abort", abortListener);
+        abortListener = null;
+      }
       resolve(out);
     };
     const hardTimer = setTimeout(finish, panelHardTimeoutMs);
+    // A client abort ends collection immediately; the caller turns that into 499.
+    // Registered after hardTimer so the early-abort path cannot hit its TDZ.
+    if (signal) {
+      if (signal.aborted) { finish(); return; }
+      abortListener = () => finish();
+      signal.addEventListener("abort", abortListener, { once: true });
+    }
     calls.forEach((p, i) => {
       Promise.resolve(p)
         .then((v) => { out[i] = v; })
@@ -954,15 +1040,21 @@ function collectPanel(calls, { minPanel, stragglerGraceMs, panelHardTimeoutMs })
  * @param {string} [options.comboName] - Combo name (logging)
  * @param {string} [options.judgeModel] - Judge model; falls back to panel[0]
  * @param {Object} [options.tuning] - Override FUSION_DEFAULTS (minPanel, grace, timeout)
+ * @param {AbortSignal} [options.signal] - Client abort signal; stops panel collection and the judge
  * @returns {Promise<Response>}
  */
-export async function handleFusionChat({ body, models, handleSingleModel, log, comboName, judgeModel, tuning }) {
+export async function handleFusionChat({ body, models, handleSingleModel, log, comboName, judgeModel, tuning, signal = null }) {
   const panel = Array.isArray(models) ? models.filter(Boolean) : [];
   if (panel.length === 0) {
     return new Response(
       JSON.stringify({ error: { message: "Fusion combo has no models" } }),
       { status: 400, headers: { "Content-Type": "application/json" } }
     );
+  }
+
+  if (isAborted(signal)) {
+    log.info("FUSION", `Combo "${comboName}" cancelled by the client before the panel ran`);
+    return abortedResponse();
   }
 
   // A single-model fusion has nothing to fuse — just answer directly.
@@ -991,8 +1083,14 @@ export async function handleFusionChat({ body, models, handleSingleModel, log, c
 
   const t0 = Date.now();
   const calls = panel.map((m) => withTimeout(handleSingleModel(panelBody, m, true), cfg.panelHardTimeoutMs));
-  const settled = await collectPanel(calls, { ...cfg, minPanel });
+  const settled = await collectPanel(calls, { ...cfg, minPanel, signal });
   log.info("FUSION", `fan-out collected in ${Date.now() - t0}ms`);
+
+  // Collection ends early on abort; never synthesize or judge for a gone client.
+  if (isAborted(signal)) {
+    log.info("FUSION", `Combo "${comboName}" cancelled by the client during the panel — skipping the judge`);
+    return abortedResponse();
+  }
 
   // 2. Collect successful answers.
   const answers = [];
@@ -1015,6 +1113,11 @@ export async function handleFusionChat({ body, models, handleSingleModel, log, c
     } catch (e) {
       log.warn("FUSION", `Panel ${model} unparseable`, { error: e.message || String(e) });
     }
+  }
+
+  if (isAborted(signal)) {
+    log.info("FUSION", `Combo "${comboName}" cancelled by the client — skipping the judge`);
+    return abortedResponse();
   }
 
   // 3. Degrade gracefully when the panel is too thin to fuse.

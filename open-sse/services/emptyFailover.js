@@ -149,7 +149,11 @@ export function isNoRetryFinish(finishReason) {
 // possibly-valid slow stream). Returns the decision, the buffered head bytes, the live reader,
 // and — if the deadline fired mid-read — the still-pending read() (`pendingRead`) so the caller
 // can resume from it WITHOUT abandoning the chunk it will deliver.
-export async function peekStreamForContent(body, { deadlineMs = EMPTY_PEEK_DEADLINE_MS } = {}) {
+//
+// With a client `signal`, an aborted request resolves immediately with
+// `outcome: "aborted"` and the reader handed back for the caller to cancel: a
+// disconnect must not keep a 45s peek (and its upstream stream) alive.
+export async function peekStreamForContent(body, { deadlineMs = EMPTY_PEEK_DEADLINE_MS, signal = null } = {}) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
   const headChunks = [];
@@ -161,14 +165,29 @@ export async function peekStreamForContent(body, { deadlineMs = EMPTY_PEEK_DEADL
   const validDeadline = Number.isFinite(deadlineMs) && deadlineMs > 0 ? deadlineMs : EMPTY_PEEK_DEADLINE_MS;
   let timer = null;
   const deadline = new Promise((resolve) => { timer = setTimeout(() => resolve("__deadline__"), validDeadline); });
-  const settle = (ret) => { if (timer) { clearTimeout(timer); timer = null; } return ret; };
+
+  // Client cancellation races the read like the deadline does. The listener is
+  // removed on every settle path so a long-lived request signal stays clean.
+  let abortListener = null;
+  const aborted = new Promise((resolve) => {
+    if (!signal) return;
+    if (signal.aborted) { resolve("__aborted__"); return; }
+    abortListener = () => resolve("__aborted__");
+    signal.addEventListener("abort", abortListener, { once: true });
+  });
+
+  const settle = (ret) => {
+    if (timer) { clearTimeout(timer); timer = null; }
+    if (abortListener) { signal.removeEventListener("abort", abortListener); abortListener = null; }
+    return ret;
+  };
 
   let pendingRead = null;
   while (true) {
     if (!pendingRead) pendingRead = reader.read();
     let res;
     try {
-      res = await Promise.race([pendingRead, deadline]);
+      res = await Promise.race([pendingRead, deadline, aborted]);
     } catch (err) {
       // Upstream errored mid-peek. Body is locked to this reader; hand it back so the caller
       // can reconstruct (the replay will surface the same error). The failed read is consumed.
@@ -179,6 +198,13 @@ export async function peekStreamForContent(body, { deadlineMs = EMPTY_PEEK_DEADL
       // Fail-open: commit whatever we have. Hand the STILL-PENDING read to the caller so its
       // chunk is replayed, not dropped (fixes the content-dropping deadline race).
       return settle({ outcome: "content", timedOut: true, head: headChunks, reader, pendingRead, finishReason: state.finishReason });
+    }
+    if (res === "__aborted__") {
+      // Client is gone: abandon the in-flight read (swallow its rejection so it
+      // cannot surface as an unhandled rejection after the request ended) and
+      // hand the reader back for cancellation.
+      pendingRead?.catch?.(() => {});
+      return settle({ outcome: "aborted", timedOut: false, head: headChunks, reader, pendingRead: null, finishReason: state.finishReason });
     }
     const { done, value } = res;
     pendingRead = null;

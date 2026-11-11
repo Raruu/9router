@@ -142,6 +142,7 @@ async function handleImageRequest(request, action) {
       comboName: modelStr,
       comboStrategy,
       comboStickyLimit,
+      signal: request?.signal ?? null,
     });
   }
 
