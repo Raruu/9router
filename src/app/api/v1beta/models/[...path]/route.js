@@ -102,6 +102,9 @@ export async function POST(request, { params }) {
       method: "POST",
       headers: request.headers,
       body: JSON.stringify(convertedBody),
+      // Keep client cancellation: without the signal a disconnect would only be
+      // noticed once a response was already being written.
+      signal: request.signal,
     });
 
     const response = await handleChat(newRequest);

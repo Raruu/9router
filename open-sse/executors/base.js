@@ -4,6 +4,7 @@ import { proxyAwareFetch } from "../utils/proxyFetch.js";
 import { dbg } from "../utils/debugLog.js";
 import { ANTHROPIC_API_VERSION, OPENAI_COMPAT_BASE, ANTHROPIC_COMPAT_BASE } from "../providers/shared.js";
 import { resolveOpenAICompatibleApiType } from "../services/provider.js";
+import { sleepUnlessAborted, abortError } from "../utils/abort.js";
 
 /**
  * BaseExecutor - Base class for provider executors
@@ -143,7 +144,9 @@ export class BaseExecutor {
       }
       retryAttemptsByUrl[urlIndex]++;
       log?.debug?.("RETRY", `${reason} retry ${retryAttemptsByUrl[urlIndex]}/${attempts} after ${waitMs / 1000}s`);
-      await new Promise(resolve => setTimeout(resolve, waitMs));
+      // A cancelled request must not wake up and dial upstream again: end the
+      // retry chain with AbortError, which the caller reports as 499.
+      if (!(await sleepUnlessAborted(waitMs, signal))) throw abortError(signal);
       return true;
     };
 

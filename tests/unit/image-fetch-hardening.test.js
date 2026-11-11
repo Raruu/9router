@@ -90,3 +90,52 @@ describe("fetchImageAsBase64 hardening", () => {
     expect(await fetchImageAsBase64("https://example.com/404.png")).toBeNull();
   });
 });
+
+// A caller-supplied signal (client cancellation) must add cancellation, not
+// replace the internal timeout: a stalled image fetch still has to end.
+function mockHangingFetch(state) {
+  globalThis.fetch = vi.fn((url, opts) => new Promise((_resolve, reject) => {
+    const fail = () => {
+      state.aborted = true;
+      reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+    };
+    // fetch rejects immediately for an already-aborted signal; the mock must too.
+    if (opts.signal.aborted) { fail(); return; }
+    opts.signal.addEventListener("abort", fail, { once: true });
+  }));
+}
+
+describe("fetchImageAsBase64 cancellation", () => {
+  it("keeps the timeout when an external signal is supplied", async () => {
+    vi.useFakeTimers();
+    try {
+      const state = { aborted: false };
+      mockHangingFetch(state);
+
+      const pending = fetchImageAsBase64("https://example.com/slow.png", {
+        signal: new AbortController().signal,
+        timeoutMs: 50,
+      });
+      await vi.advanceTimersByTimeAsync(60);
+
+      await expect(pending).resolves.toBeNull();
+      expect(state.aborted).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("aborts as soon as the external signal aborts", async () => {
+    const ac = new AbortController();
+    const state = { aborted: false };
+    mockHangingFetch(state);
+
+    const pending = fetchImageAsBase64("https://example.com/slow.png", { signal: ac.signal, timeoutMs: 60_000 });
+    // Let the async preamble reach fetch, then cancel like a disconnecting client.
+    await Promise.resolve();
+    ac.abort();
+
+    await expect(pending).resolves.toBeNull();
+    expect(state.aborted).toBe(true);
+  });
+});

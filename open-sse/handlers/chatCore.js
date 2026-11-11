@@ -12,6 +12,7 @@ import { createRequestLogger } from "../utils/requestLogger.js";
 import { getModelTargetFormat, getModelSupportedFormats, getModelStrip, getModelUpstreamId, getModelType, PROVIDER_ID_TO_ALIAS } from "../config/providerModels.js";
 import { PROVIDERS } from "../config/providers.js";
 import { createErrorResult, parseUpstreamError, formatProviderError } from "../utils/error.js";
+import { isAborted } from "../utils/abort.js";
 import { upstreamResponseHeaders } from "../utils/upstreamHeaders.js";
 import { HTTP_STATUS, TOKEN_SAVER_HEADER } from "../config/runtimeConfig.js";
 import { handleBypassRequest } from "../utils/bypassHandler.js";
@@ -64,8 +65,13 @@ export function stripContinuityFields(body) {
   return body;
 }
 
-export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, responseModelOverride, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, customPromptEnabled, customPrompt, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, timeoutOverrides, providerOverrides, classifierDecision }) {
+export async function handleChatCore({ body, modelInfo, credentials, log, onCredentialsRefreshed, onRequestSuccess, onDisconnect, clientRawRequest, connectionId, userAgent, apiKey, responseModelOverride, ccFilterNaming, rtkEnabled, headroomEnabled, headroomUrl, headroomCompressUserMessages, headroomTimeoutMs, cavemanEnabled, cavemanLevel, ponytailEnabled, ponytailLevel, customPromptEnabled, customPrompt, pxpipeEnabled, pxpipeMinChars, pxpipeTimeoutMs, pxpipeTransform, onPxpipeEvent, sourceFormatOverride, providerThinking, timeoutOverrides, providerOverrides, classifierDecision, signal = null }) {
   const { provider, model } = modelInfo;
+
+  // The client is gone before any work started: nothing downstream can matter.
+  if (isAborted(signal)) {
+    return createErrorResult(HTTP_STATUS.CLIENT_CLOSED_REQUEST, "Request aborted");
+  }
 
   // Thinking observability: the client's requested intent is captured BEFORE
   // translateRequest mutates `body` in place (same-format requests), so a
@@ -200,7 +206,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     }
     // Convert remote image URLs to base64 for targets that can't fetch URLs.
     try {
-      const n = await prefetchRemoteImages(body, sourceFormat, targetFormat, { signal: undefined });
+      const n = await prefetchRemoteImages(body, sourceFormat, targetFormat, { signal });
       if (n > 0) log?.debug?.("MODALITY", `prefetched ${n} remote image(s) for ${targetFormat}`);
     } catch (e) { log?.warn?.("MODALITY", `image prefetch failed: ${e.message}`); }
   }
@@ -394,6 +400,16 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
     log, provider: displayProvider, model, reqTag
   });
 
+  // Client cancellation (request.signal) must cancel the upstream call itself,
+  // not just the response stream: without this an aborted request keeps its
+  // fetch (and every executor retry) alive until the provider answers.
+  // handleDisconnect also runs the usage/disconnect bookkeeping exactly once.
+  if (signal) {
+    if (signal.aborted) streamController.handleDisconnect("client_aborted");
+    else signal.addEventListener("abort", () => streamController.handleDisconnect("client_aborted"), { once: true });
+  }
+  const requestSignal = signal ? AbortSignal.any([streamController.signal, signal]) : streamController.signal;
+
   const proxyOptions = {
     connectionProxyEnabled: credentials?.providerSpecificData?.connectionProxyEnabled === true,
     connectionProxyUrl: credentials?.providerSpecificData?.connectionProxyUrl || "",
@@ -448,7 +464,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       credentials,
       providerSessionId: sessionSeed,
       clientTool,
-      signal: streamController.signal,
+      signal: requestSignal,
       log,
       proxyOptions,
       timeoutMs: timeoutOverrides?.connectMs,
@@ -465,6 +481,12 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
       toolNameMap = new Map([...(toolNameMap || []), ...renamedToolNames]);
     }
     reqLogger.logTargetRequest(providerUrl, providerHeaders, finalBody);
+    // Aborted while the upstream was answering: release the body instead of
+    // streaming a response nobody will read.
+    if (isAborted(signal)) {
+      try { await providerResponse.body?.cancel?.(); } catch { /* already closed */ }
+      return createErrorResult(HTTP_STATUS.CLIENT_CLOSED_REQUEST, "Request aborted");
+    }
   } catch (error) {
     trackPendingRequest(model, provider, connectionId, false, true);
     appendRequestLog({ model, provider, connectionId, status: `FAILED ${error.name === "AbortError" ? 499 : HTTP_STATUS.BAD_GATEWAY}` }).catch(() => { });
@@ -513,6 +535,9 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
         if (onCredentialsRefreshed) {
           try { await onCredentialsRefreshed(newCredentials); } catch (e) { log?.warn?.("TOKEN", `onCredentialsRefreshed failed: ${e.message}`); }
         }
+        if (isAborted(signal)) {
+          return createErrorResult(HTTP_STATUS.CLIENT_CLOSED_REQUEST, "Request aborted");
+        }
         try {
           const retryResult = await executor.execute({
             model,
@@ -521,7 +546,7 @@ export async function handleChatCore({ body, modelInfo, credentials, log, onCred
             credentials,
             providerSessionId: sessionSeed,
             clientTool,
-            signal: streamController.signal,
+            signal: requestSignal,
             log,
             proxyOptions,
             timeoutMs: timeoutOverrides?.connectMs,

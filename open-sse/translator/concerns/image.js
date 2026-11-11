@@ -85,8 +85,11 @@ export async function fetchImageAsBase64(imageUrl, options = {}) {
   if (!pinnedIps) return null;
 
   const controller = new AbortController();
-  const timeout = signal ? null : setTimeout(() => controller.abort(), timeoutMs);
-  const fetchSignal = signal || controller.signal;
+  // The timeout always applies: an external (client) signal adds cancellation
+  // instead of replacing the cap, so a cancelled request and a stalled image
+  // fetch are both bounded.
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  const fetchSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
 
   // Pin connect to the validated IP so no second DNS resolution can rebind (TOCTOU fix).
   const dispatcher = new Agent({
