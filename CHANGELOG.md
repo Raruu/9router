@@ -1,13 +1,17 @@
-# v0.5.119 (2026-11-11)
+# v0.5.119-1 (2026-11-13)
+
+Merged upstream v0.5.119 into the fork. This section includes the full upstream
+release notes and the fork-side merge work.
 
 ## Features
 - **Synthetic**: add Synthetic (`syn`) — OpenAI-compatible upstream on `api.synthetic.new` with the always-on `hf:` models as a static fallback, model passthrough, live model discovery, and a usage tracker reading `GET /v2/quotas`
-- **Claude**: add Claude Fable 5.2 ($8/$40) as the Fable flagship and `claude-haiku-5-5` ($0.10/$0.50, 1M/128K); the advertised Claude Code version now auto-tracks the latest npm release (floor 2.1.322, pin with `CLAUDE_CLI_VERSION`), and the dashboard lists live models through the OAuth bearer
+- **Claude**: add Claude Fable 5.2 ($8/$40) as the Fable flagship and `claude-haiku-5-5` ($0.10/$0.50, 1M/128K); the advertised Claude Code version now auto-tracks the latest npm release (floor 2.1.323, pin with `CLAUDE_CLI_VERSION`), and the dashboard lists live models through the OAuth bearer
 - **Antigravity**: add Gemini 4 Carbon in low/medium/high tiers plus a bare alias resolving to medium, and track the tiers in the usage quota list
 - **CommandCode**: add `google/gemini-4-carbon` and `claude-fable-5-2`, and resolve the model list from the CLI's live catalog (`GET /provider/v1/models?view=client`) in the dashboard and `GET /v1/models`
 - **ClinePass**: add a quota tracker mapping the five-hour/weekly/monthly plan windows into the usage-limits dashboard
 - **Proxy Pools**: All/Enabled/Disabled status filter and Shift+click range selection; bulk actions and Select All now target only visible rows
 - **Models**: `/v1/models` publishes `thinking_levels`, and opencode settings derive the effort variants from the same source
+- **CLI identities**: advertise the latest Claude Code (`2.1.323`, live npm lookup with a `CLAUDE_CLI_VERSION` pin) and Codex CLI (`0.169.0`) builds.
 
 ## Fixes
 - **Transport**: keep undici on 7.30.2 — undici 8 requires Node 22.19+, so 0.5.116 crashed every outbound `fetch` on older runtimes (`createZstdDecompress.bind` is undefined below Node 22.15). 7.30.2 carries the same security fixes and the stale-socket/happy-eyeballs transport work.
@@ -19,8 +23,8 @@
 - **Stream**: emit a single framed `[DONE]` sentinel in passthrough streams instead of `data: [DONE]data: [DONE]` (strict SSE clients errored out)
 - **OpenCode**: keep the selected Proxy Pool on the wreq-js transport, with the session cache keyed by proxy so rotation takes effect; retry the free-lane "overloaded" 429 with backoff and drop rejected session ids
 - **Qoder**: keep catalog entries marked `enable:false` (still usable in the IDE) and sync upstream display names
-- **Codex Image**: send GPT Image edits to the native `images/edits` endpoint, and fall back to `gpt-5.6-terra` when the account rejects `gpt-6-sol` before it locks the model
-- **Codex**: advertise Codex CLI 0.167.1 — the backend rejects `0.159.0` identities with 400
+- **Codex Image**: send GPT Image edits to the native `images/edits` endpoint when a custom model opts in, and fall back to `gpt-5.6-terra` when the account rejects `gpt-6-sol` before it locks the model
+- **Codex**: advertise Codex CLI 0.169.0 (upstream shipped 0.167.1) — the backend rejects `0.159.0` identities with 400
 - **STT**: build multipart bodies with undici's `FormData` so fetch serializes the file and model fields instead of sending `[object FormData]`
 - **Muse Web**: accept Cookie-Editor JSON exports for credentials, normalized on read
 - **Fal**: validate new API keys through the model catalog instead of failing with "Provider validation not supported"
@@ -37,6 +41,15 @@
 - **Usage**: show usage for a MiniMax Code desktop lease connection (`authType: "mcode-lease"`) in Provider Limits and the usage route, and forward `authType` through the dispatch so lease mode is detected instead of answering "Usage API not implemented"
 - **Dashboard**: replace the custom model capability toggle with an explicit Model type selector (Chat / LLM by default) — enabling Speech to text no longer flips a chat model to STT and drops it from Available Models (#5602)
 - **UI**: link explicit input ids to their labels
+- **Providers**: keep per-provider custom header overrides when converting a compatible node between OpenAI- and Anthropic-compatible types — the conversion now migrates the `providerOverrides` settings bucket along with models, combos and usage.
+
+## Fork merge notes
+- **Codex native image edits stay opt-in per custom model.** Upstream made reference-image requests use the native `images/edits` endpoint by default; the fork keeps that path behind the per-model `nativeImageEdit` flag while taking upstream's output-control gating and `gpt-5.6-terra` fallback.
+- **Transport**: `undici ^7.30.2` and `engines.node >=20.18.1` are taken from upstream (the fork was on undici 8.12.3); the fork's multipart `FormData` normalization is retained.
+- **Custom model UI**: the fork's richer Edit Custom Model dialog (catalog pattern picker, explicit service type, image native-edit toggle, typed test call) is kept; upstream's smaller model-type change is already covered.
+- **Qoder**: upstream display-name syncing is kept, and the fork's import dialog now strips `qoder/`/`qoder-cn/` prefixes and saves the live display name.
+- **Catalogs**: live Claude and CommandCode model lists are adopted on the provider page; providers/alias baselines and URL-header snapshots were regenerated for the merged registry and CLI identities.
+- **Versioning**: upstream's root manifest still said `0.5.116` while its CLI said `0.5.119`; this fork release sets both packages to `0.5.119-1`.
 
 # v0.5.116-5 (2026-11-11)
 
