@@ -31,6 +31,7 @@ const ADAPTERS = {
   "vercel-ai-gateway": createOpenAIAdapter("vercel-ai-gateway"),
   xai: createOpenAIAdapter("xai"),
   sensenova,
+  "sensenova-intl": createOpenAIAdapter("sensenova-intl"),
   gemini,
   codex,
   sdwebui,

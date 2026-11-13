@@ -78,6 +78,7 @@ describe("checkFallbackError — request-scoped vs account-scoped failures", () 
     expect(checkFallbackError(400, message)).toEqual({
       shouldFallback: true,
       cooldownMs: 120000,
+      modelScoped: false,
     });
   });
 
@@ -92,6 +93,7 @@ describe("checkFallbackError — request-scoped vs account-scoped failures", () 
     ).toEqual({
       shouldFallback: true,
       cooldownMs: 1800000,
+      modelScoped: false,
     });
   });
 });

@@ -30,8 +30,7 @@ describe("DefaultExecutor.buildHeaders() — claude provider", () => {
       headers["Anthropic-Version"] === "2023-06-01" ||
       headers["anthropic-version"] === "2023-06-01";
     expect(hasVersion).toBe(true);
-    // Derived, not pinned: the literal went stale when upstream bumped
-    // CLAUDE_CLI_VERSION to 2.1.280 in v0.5.86.
+    // Derived, not pinned: a stale literal fails on every upstream CLI bump.
     expect(headers["User-Agent"]).toBe(`claude-cli/${CLAUDE_CLI_VERSION} (external, sdk-cli)`);
   });
 
