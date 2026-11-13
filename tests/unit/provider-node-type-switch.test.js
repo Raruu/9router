@@ -49,6 +49,9 @@ async function seedOpenAiNode(db, id = "openai-compatible-chat-seed") {
     quotaVisibility: { [node.id]: { hidden: [] } },
     providerTimeouts: { [node.id]: { connectMs: 2000 } },
     providerRetries: { [node.id]: { enabled: true, tries: 3 } },
+    // Dispatch-time custom headers are keyed by provider id too; converting the
+    // node type must move them or the Custom Headers card looks reset.
+    providerOverrides: { [node.id]: { headers: { "X-Custom-Auth": "secret" } } },
     capacityAdapter: { vision: { enabled: true, models: [`${node.id}/seed-model`, "other-p/other-model"] } },
   });
   await db.updatePricing({ [node.id]: { "seed-model": { input: 1.5, output: 3 } } });
@@ -118,6 +121,9 @@ describe("convertProviderNodeType", () => {
     expect(settings.quotaVisibility).toEqual({ [converted.id]: { hidden: [] } });
     expect(settings.providerTimeouts).toEqual({ [converted.id]: { connectMs: 2000 } });
     expect(settings.providerRetries).toEqual({ [converted.id]: { enabled: true, tries: 3 } });
+    expect(settings.providerOverrides).toEqual({
+      [converted.id]: { headers: { "X-Custom-Auth": "secret" } },
+    });
     expect(settings.capacityAdapter.vision.models).toEqual([`${converted.id}/seed-model`, "other-p/other-model"]);
 
     const combos = await db.getCombos();
@@ -150,6 +156,41 @@ describe("convertProviderNodeType", () => {
     expect(blob.byModel[`seed-model|${converted.id}`]?.provider).toBe(converted.id);
     expect(blob.byModel[`other-model|other-p`]?.requests).toBe(1);
     expect(blob.requests).toBe(3);
+  });
+
+  it("keeps custom header overrides through the real conversion route", async () => {
+    const db = await import("../../src/lib/db/index.js");
+    const node = await seedOpenAiNode(db);
+
+    const { PUT } = await import("../../src/app/api/provider-nodes/[id]/route.js");
+    const convertedRes = await PUT(new Request(`http://localhost/api/provider-nodes/${node.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Seed AC",
+        prefix: "oc-seed",
+        baseUrl: "https://api.anthropic.com/v1/",
+        type: "anthropic-compatible",
+      }),
+    }), { params: Promise.resolve({ id: node.id }) });
+    const convertedBody = await convertedRes.json();
+
+    expect(convertedRes.status).toBe(200);
+    expect(convertedBody.converted).toBe(true);
+    expect(convertedBody.node.id).toMatch(/^anthropic-compatible-/);
+
+    // The provider page's Custom Headers card loads this endpoint after the redirect.
+    const { GET } = await import("../../src/app/api/providers/[id]/overrides/route.js");
+    const overridesRes = await GET(
+      new Request(`http://localhost/api/providers/${convertedBody.node.id}/overrides`),
+      { params: Promise.resolve({ id: convertedBody.node.id }) },
+    );
+    const overrides = await overridesRes.json();
+    expect(overrides.headers).toEqual({ "X-Custom-Auth": "secret" });
+
+    // No ghost entry under the old id.
+    const settings = await db.getSettings();
+    expect(settings.providerOverrides[node.id]).toBeUndefined();
   });
 
   it("moves an Anthropic node to OpenAI with the requested apiType", async () => {

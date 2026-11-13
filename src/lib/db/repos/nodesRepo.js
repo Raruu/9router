@@ -300,7 +300,10 @@ export async function convertProviderNodeType(id, payload) {
     if (settingsRow) {
       const settings = parseJson(settingsRow.data, {});
       let changed = false;
-      for (const key of ["providerStrategies", "providerThinking", "quotaVisibility", "providerTimeouts", "providerRetries"]) {
+      // Per-provider settings are keyed by provider id: move them so the
+      // converted node keeps its strategy, thinking, quota visibility,
+      // timeouts, retry config and dispatch-time header overrides.
+      for (const key of ["providerStrategies", "providerThinking", "quotaVisibility", "providerTimeouts", "providerRetries", "providerOverrides"]) {
         if (settings[key] && Object.prototype.hasOwnProperty.call(settings[key], id)) {
           settings[key] = { ...settings[key], [newId]: settings[key][id] };
           delete settings[key][id];
