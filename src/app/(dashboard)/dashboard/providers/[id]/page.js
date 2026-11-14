@@ -12,7 +12,7 @@ import { useCopyToClipboard } from "@/shared/hooks/useCopyToClipboard";
 import { useModelCaps } from "@/shared/hooks/useModelCaps";
 import { translate } from "@/i18n/runtime";
 import { fetchSuggestedModels } from "@/shared/utils/providerModelsFetcher";
-import { getProviderCustomModelRows, groupProviderModelsByKind } from "@/shared/utils/providerCustomModels";
+import { applyQoderModelNames, getProviderCustomModelRows, groupProviderModelsByKind } from "@/shared/utils/providerCustomModels";
 import { filterCombosUsingModel, stripModelsFromComboMembers } from "@/shared/utils/comboMembers";
 import { buildUsedFormSet, flattenReferenceMap, pricingTableForms, capacityAdapterForms, partitionRowsByUsage } from "@/shared/utils/modelUsage";
 import { buildCatalogRuleBody, buildCatalogRuleBodyFromRaw, saveCatalogRule } from "@/shared/utils/importCatalogSnapshot";
@@ -37,6 +37,11 @@ import { getScheduleSlotLabels } from "@/shared/services/quotaPingSchedule";
 const ONE_BY_ONE_DELAY_MS = 1000;
 
 const MCODE_LEASE_PROVIDERS = new Set(["minimax-code", "minimax-code-global"]);
+
+// Providers whose registry list is only an offline fallback: the dashboard
+// renders the live per-connection catalog from GET /api/providers/[id]/models
+// when one resolves, and falls back to the static rows otherwise.
+const LIVE_MODEL_CATALOG_PROVIDERS = new Set(["cursor", "zed", "claude", "commandcode"]);
 
 const AUTO_PING_SETTINGS_KEYS = {
   claude: "claudeAutoPing",
@@ -253,9 +258,9 @@ export default function ProviderDetailPage() {
   const supportsApiKeyAuth = !!APIKEY_PROVIDERS[providerId] || authModes.includes("apikey");
   const isFreeNoAuth = !!FREE_PROVIDERS[providerId]?.noAuth;
   const staticModels = getModelsByProviderId(providerId);
-  const models = (providerId === "cursor" || providerId === "zed") && liveModels.length > 0
+  const models = LIVE_MODEL_CATALOG_PROVIDERS.has(providerId) && liveModels.length > 0
     ? liveModels
-    : staticModels;
+    : applyQoderModelNames(staticModels, customModels, getProviderAlias(providerId));
   const providerAlias = getProviderAlias(providerId);
   
   const isOpenAICompatible = isOpenAICompatibleProvider(providerId);
@@ -743,7 +748,7 @@ export default function ProviderDetailPage() {
   // the provider id or connection list changes — no polling, no loop.
   // Cursor path is statement-identical to before; zed adds error surfacing.
   useEffect(() => {
-    const isLiveCatalog = providerId === "cursor" || providerId === "zed";
+    const isLiveCatalog = LIVE_MODEL_CATALOG_PROVIDERS.has(providerId);
     if (!isLiveCatalog) {
       setLiveModels([]);
       return;
@@ -1231,10 +1236,16 @@ export default function ProviderDetailPage() {
         alert("No models returned from /models.");
         return null;
       }
-const ids = [];
+      const ids = [];
       const entriesById = {};
       for (const model of fetched) {
-        const modelId = model.id || model.name || model.model;
+        const rawId = model.id || model.name || model.model;
+        if (!rawId) continue;
+        // Qoder's live catalog ids may carry the provider prefix; stored custom
+        // models use the bare id.
+        const modelId = (providerId === "qoder" || providerId === "qoder-cn")
+          ? rawId.replace(/^(qoder-cn|qoder)\//, "")
+          : rawId;
         if (!modelId || ids.includes(modelId)) continue;
         ids.push(modelId);
         if (model && typeof model === "object") entriesById[modelId] = model;
@@ -1334,7 +1345,16 @@ const ids = [];
         const catalogRef = fetchCapabilities
           ? await saveModelCatalogRule(modelId, { raw: importEntriesById[modelId], mapping, currencyRate })
           : null;
-        const added = await handleAddCustomModel(modelId, "llm", providerStorageAlias, catalogRef, { quiet: true, skipRefresh: true });
+        // Qoder's live catalog supplies human display names; the dialog flow
+        // otherwise imports only the bare id.
+        const displayName = (providerId === "qoder" || providerId === "qoder-cn")
+          ? importEntriesById[modelId]?.name
+          : undefined;
+        const added = await handleAddCustomModel(modelId, "llm", providerStorageAlias, catalogRef, {
+          quiet: true,
+          skipRefresh: true,
+          ...(displayName ? { name: displayName } : {}),
+        });
         if (!added) continue;
         importedCount += 1;
         if (catalogRef) catalogCount += 1;
