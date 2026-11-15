@@ -1,3 +1,13 @@
+# v0.5.119-2 (2026-11-15)
+
+Merged the custom-provider thinking-parameter work into labor.
+
+## Features
+- **Providers**: OpenAI-compatible Chat Completions nodes expose a Thinking parameter setting — Default (unchanged), `reasoning_effort` (top-level), or `reasoning.effort` (nested). It is stored on the provider node, copied to its connections, and hidden/cleared for Responses- and Anthropic-compatible nodes.
+
+## Fixes
+- **Responses API**: custom `apiType: "responses"` nodes now send effort as `reasoning:{effort,summary:"auto"}` and drop the Chat-only top-level `reasoning_effort`, so strict upstreams no longer reject it with 400. Existing `reasoning.summary`/`mode` is preserved. Ported from decolua/9router#5669.
+
 # v0.5.119-1 (2026-11-13)
 
 Merged upstream v0.5.119 into the fork. This section includes the full upstream
