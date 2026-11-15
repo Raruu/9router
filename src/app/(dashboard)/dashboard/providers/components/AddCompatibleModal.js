@@ -57,6 +57,7 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
   const [validationResult, setValidationResult] = useState(null);
   const [iconFile, setIconFile] = useState(null);
   const [iconError, setIconError] = useState("");
+  const supportsThinkingParam = !selectedIsAnthropic && formData.apiType === "chat";
 
   // Reset everything when opened; baseUrl resets are handled in the
   // type/apiType change handlers below (no render-chasing effects).
@@ -101,7 +102,7 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
           ...(config.hasApiType ? { apiType: formData.apiType } : {}),
           baseUrl: formData.baseUrl,
           ...(Object.values(kindBaseUrls).some((v) => (v || "").trim()) ? { kindBaseUrls } : {}),
-          ...(thinkingParam ? { thinkingParam } : {}),
+          ...(supportsThinkingParam && thinkingParam ? { thinkingParam } : {}),
           type: config.type,
         }),
       });
@@ -242,7 +243,7 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
           placeholder={config.defaultBaseUrl}
           hint={config.baseUrlHint}
         />
-        {!selectedIsAnthropic && (
+        {supportsThinkingParam && (
           <Select
             label="Thinking parameter"
             options={THINKING_PARAM_OPTIONS}

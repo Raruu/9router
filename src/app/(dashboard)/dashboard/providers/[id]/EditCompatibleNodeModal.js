@@ -45,6 +45,7 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose 
   }, [node]);
 
   const selectedIsAnthropic = formData.type === "anthropic-compatible";
+  const supportsThinkingParam = !selectedIsAnthropic && formData.apiType === "chat";
   const typeChanged = Boolean(node) && formData.type !== node.type;
 
   const apiTypeOptions = [
@@ -64,8 +65,9 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose 
         // Always sent so clearing a field persists: the API treats an explicit
         // empty map as "no overrides" and an omitted field as "leave as is".
         kindBaseUrls,
-        // Always sent: an empty value clears the stored override.
-        thinkingParam,
+        // Always sent: Responses/Anthropic nodes send "" so a previously
+        // stored Chat-only override is cleared.
+        thinkingParam: supportsThinkingParam ? thinkingParam : "",
       };
       if (!selectedIsAnthropic) {
         payload.apiType = formData.apiType;
@@ -175,7 +177,7 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose 
           placeholder={selectedIsAnthropic ? "https://api.anthropic.com/v1" : "https://api.openai.com/v1"}
           hint={`Use the base URL (ending in /v1) for your ${selectedIsAnthropic ? "Anthropic" : "OpenAI"}-compatible API.`}
         />
-        {!selectedIsAnthropic && (
+        {supportsThinkingParam && (
           <Select
             label="Thinking parameter"
             options={THINKING_PARAM_OPTIONS}

@@ -22,3 +22,14 @@ export function isValidThinkingParam(value) {
 export function normalizeThinkingParam(value) {
   return THINKING_PARAM_VALUES.includes(value) ? value : null;
 }
+
+// Only OpenAI-compatible Chat Completions nodes support the override. Legacy
+// nodes without apiType use the id segment as the same fallback as
+// resolveOpenAICompatibleApiType().
+export function supportsThinkingParamNode(node) {
+  if (!node || node.type !== "openai-compatible") return false;
+  const apiType = node.apiType === "chat" || node.apiType === "responses"
+    ? node.apiType
+    : String(node.id || "").includes("-responses-") ? "responses" : "chat";
+  return apiType === "chat";
+}

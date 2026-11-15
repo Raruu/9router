@@ -2,7 +2,7 @@ import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { sanitizeKindBaseUrls } from "open-sse/config/kindEndpoints.js";
-import { normalizeThinkingParam } from "open-sse/config/thinkingParams.js";
+import { normalizeThinkingParam, supportsThinkingParamNode } from "open-sse/config/thinkingParams.js";
 
 function rowToNode(row) {
   if (!row) return null;
@@ -141,9 +141,12 @@ export async function createProviderNode(data) {
   const db = await getAdapter();
   const now = new Date().toISOString();
   const kindBaseUrls = normalizeKindBaseUrls(data.kindBaseUrls);
-  const thinkingParam = normalizeThinkingParam(data.thinkingParam);
+  const id = data.id || uuidv4();
+  const thinkingParam = supportsThinkingParamNode({ ...data, id })
+    ? normalizeThinkingParam(data.thinkingParam)
+    : null;
   const node = {
-    id: data.id || uuidv4(),
+    id,
     type: data.type,
     name: data.name,
     prefix: data.prefix,
@@ -173,12 +176,17 @@ export async function updateProviderNode(id, data) {
       if (kindBaseUrls) merged.kindBaseUrls = kindBaseUrls;
       else delete merged.kindBaseUrls;
     }
-    // Same omitted-vs-empty contract: the API only sends this field when the
-    // edit form includes the select, and an empty value clears the override.
-    if ("thinkingParam" in data) {
-      const thinkingParam = normalizeThinkingParam(data.thinkingParam);
-      if (thinkingParam) merged.thinkingParam = thinkingParam;
-      else delete merged.thinkingParam;
+    // Same omitted-vs-empty contract: the edit form sends this field when the
+    // node is a Chat Completions node, and an empty value clears the override.
+    // Responses/Anthropic nodes never keep a stale hidden value.
+    if (supportsThinkingParamNode(merged)) {
+      if ("thinkingParam" in data) {
+        const thinkingParam = normalizeThinkingParam(data.thinkingParam);
+        if (thinkingParam) merged.thinkingParam = thinkingParam;
+        else delete merged.thinkingParam;
+      }
+    } else {
+      delete merged.thinkingParam;
     }
     upsert(db, merged);
     result = merged;
@@ -248,11 +256,14 @@ export async function convertProviderNodeType(id, payload) {
     const nextKindBaseUrls = kindBaseUrlsProvided
       ? normalizeKindBaseUrls(payload.kindBaseUrls)
       : normalizeKindBaseUrls(node.kindBaseUrls);
-    // Type conversion preserves the thinking-control wire shape unless the edit
-    // explicitly sent a new value (or cleared it).
-    const nextThinkingParam = "thinkingParam" in payload
-      ? normalizeThinkingParam(payload.thinkingParam)
-      : normalizeThinkingParam(node.thinkingParam);
+    // Type conversion preserves the thinking-control wire shape only when the
+    // target is an OpenAI-compatible Chat Completions node; Responses/Anthropic
+    // targets cannot use it, so a stale value is cleared.
+    const nextThinkingParam = supportsThinkingParamNode({ type, apiType, id: newId })
+      ? ("thinkingParam" in payload
+        ? normalizeThinkingParam(payload.thinkingParam)
+        : normalizeThinkingParam(node.thinkingParam))
+      : null;
 
     const newNode = {
       id: newId,

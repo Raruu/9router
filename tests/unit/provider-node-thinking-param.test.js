@@ -65,7 +65,7 @@ describe("nodesRepo thinkingParam", () => {
     expect((await db.getProviderNodeById(node.id)).thinkingParam).toBeUndefined();
   });
 
-  it("preserves the value and connection copy through type conversion", async () => {
+  it("clears the value and connection copy when converting away from Chat Completions", async () => {
     const db = await import("../../src/lib/db/index.js");
     await db.initDb();
     const node = await makeNode(db, { thinkingParam: "reasoning.effort" });
@@ -82,9 +82,9 @@ describe("nodesRepo thinkingParam", () => {
       prefix: "amd-cn",
       baseUrl: "https://developer.amd.com.cn/radeon/api/v1",
     });
-    expect(converted.thinkingParam).toBe("reasoning.effort");
+    expect(converted.thinkingParam).toBeUndefined();
     const storedConn = await db.getProviderConnectionById(conn.id);
-    expect(storedConn.providerSpecificData.thinkingParam).toBe("reasoning.effort");
+    expect(storedConn.providerSpecificData.thinkingParam).toBeUndefined();
   });
 });
 
@@ -110,6 +110,29 @@ describe("provider-nodes API thinkingParam", () => {
     expect(res.status).toBe(201);
     expect(body.node.thinkingParam).toBe("reasoning_effort");
     expect((await db.getProviderNodeById(body.node.id)).thinkingParam).toBe("reasoning_effort");
+  });
+
+  it("does not store the value on a Responses node", async () => {
+    const db = await import("../../src/lib/db/index.js");
+    await db.initDb();
+    const { POST } = await import("../../src/app/api/provider-nodes/route.js");
+
+    const res = await POST(new Request("http://localhost/api/provider-nodes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: "Responses Node",
+        prefix: "resp-node",
+        apiType: "responses",
+        baseUrl: "https://api.openai.com/v1",
+        type: "openai-compatible",
+        thinkingParam: "reasoning_effort",
+      }),
+    }));
+    const body = await res.json();
+    expect(res.status).toBe(201);
+    expect(body.node.thinkingParam).toBeUndefined();
+    expect((await db.getProviderNodeById(body.node.id)).thinkingParam).toBeUndefined();
   });
 
   it("rejects an unknown value", async () => {
@@ -176,7 +199,34 @@ describe("provider-nodes API thinkingParam", () => {
     expect((await db.getProviderConnectionById(conn.id)).providerSpecificData.thinkingParam).toBeUndefined();
   });
 
-  it("keeps the value through the real type-conversion route", async () => {
+  it("clears the value when a chat node switches to Responses", async () => {
+    const db = await import("../../src/lib/db/index.js");
+    await db.initDb();
+    const node = await makeNode(db, { thinkingParam: "reasoning_effort" });
+    const conn = await db.createProviderConnection({
+      provider: node.id,
+      authType: "apikey",
+      name: "key-1",
+      providerSpecificData: { prefix: "amd-cn", baseUrl: node.baseUrl, thinkingParam: "reasoning_effort" },
+    });
+    const { PUT } = await import("../../src/app/api/provider-nodes/[id]/route.js");
+
+    const res = await PUT(new Request(`http://localhost/api/provider-nodes/${node.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        name: node.name,
+        prefix: node.prefix,
+        apiType: "responses",
+        baseUrl: node.baseUrl,
+      }),
+    }), { params: Promise.resolve({ id: node.id }) });
+    expect(res.status).toBe(200);
+    expect((await db.getProviderNodeById(node.id)).thinkingParam).toBeUndefined();
+    expect((await db.getProviderConnectionById(conn.id)).providerSpecificData.thinkingParam).toBeUndefined();
+  });
+
+  it("clears the value through the real type-conversion route", async () => {
     const db = await import("../../src/lib/db/index.js");
     await db.initDb();
     const node = await makeNode(db, { thinkingParam: "reasoning_effort" });
@@ -201,8 +251,8 @@ describe("provider-nodes API thinkingParam", () => {
     const body = await res.json();
     expect(res.status).toBe(200);
     expect(body.converted).toBe(true);
-    expect(body.node.thinkingParam).toBe("reasoning_effort");
-    expect((await db.getProviderConnectionById(conn.id)).providerSpecificData.thinkingParam).toBe("reasoning_effort");
+    expect(body.node.thinkingParam).toBeUndefined();
+    expect((await db.getProviderConnectionById(conn.id)).providerSpecificData.thinkingParam).toBeUndefined();
   });
 
   it("copies the node value to a new connection", async () => {
