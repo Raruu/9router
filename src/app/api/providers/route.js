@@ -142,6 +142,7 @@ export async function POST(request) {
         apiType: node.apiType,
         baseUrl: node.baseUrl,
         ...(node.kindBaseUrls ? { kindBaseUrls: node.kindBaseUrls } : {}),
+        ...(node.thinkingParam ? { thinkingParam: node.thinkingParam } : {}),
         nodeName: node.name,
       };
     } else if (isAnthropicCompatibleProvider(provider)) {
