@@ -268,6 +268,33 @@ function stripAll(body) {
   }
 }
 
+// Custom OpenAI-compatible nodes can declare the exact thinking-control field
+// their endpoint accepts. Applied after stripAll so exactly one field is emitted
+// and no `thinking`/`output_config` scaffolding leaks through.
+function applyThinkingParam(param, body, cfg, caps, supportedLevels) {
+  if (param !== "reasoning_effort" && param !== "reasoning.effort") return false;
+  const canDisable = caps.thinkingCanDisable !== false;
+  const effective = caps.thinkingEnforce === true ? cfg : clampLevelToSupport(cfg, supportedLevels);
+
+  let level;
+  if (effective.mode === "none") {
+    // Match the canonical disable semantics: explicit "none" when the model can
+    // disable, otherwise the cheapest supported level.
+    level = canDisable ? "none" : "minimal";
+  } else if (effective.mode === "auto") {
+    // "auto" is not a valid effort value; let the upstream apply its default.
+    return true;
+  } else {
+    level = toLevel(effective);
+  }
+  if (!level) return true;
+
+  level = normalizeOpenAILevel(level, supportedLevels);
+  if (param === "reasoning_effort") body.reasoning_effort = level;
+  else body.reasoning = { effort: level };
+  return true;
+}
+
 // Apply unified thinking config to body in the resolved provider-native format.
 function applyFormat(fmt, body, cfg, caps, supportedLevels, display, model = "", budgetPassthrough = false) {
   const none = cfg.mode === "none";
@@ -545,7 +572,7 @@ export function clampLevelToSupport(cfg, supportedLevels) {
 // Mutates and returns body. No-op when model has no reasoning capability.
 // `intent` is a pre-captured config (from captureThinking on the original body);
 // falls back to extracting from the current body when omitted.
-export function applyThinking(targetFormat, model, body, provider = null, intent = undefined) {
+export function applyThinking(targetFormat, model, body, provider = null, intent = undefined, thinkingParam = null) {
   if (!body || typeof body !== "object") return body;
 
   const { cleanModel, override } = parseSuffix(model);
@@ -574,6 +601,11 @@ export function applyThinking(targetFormat, model, body, provider = null, intent
   // An OpenAI-shaped client's ask arrives via the captured intent instead.
   const display = typeof body.thinking?.display === "string" ? body.thinking.display : intent?.display;
   stripAll(body);
+  // Explicit custom-node wire shape wins for Chat Completions: the endpoint has
+  // told us which field it accepts (AMD Radeon and similar reject `thinking`).
+  if (targetFormat === "openai" && applyThinkingParam(thinkingParam, body, effectiveCfg, caps, supportedLevels)) {
+    return body;
+  }
   // effectiveCfg is the fork's clamp-aware config (thinkingEnforce opts out);
   // budgetPassthrough is upstream's DeepSeek budget passthrough for compat nodes.
   applyFormat(fmt, body, effectiveCfg, caps, supportedLevels, display, cleanModel, isOpenAICompatibleNode(provider));

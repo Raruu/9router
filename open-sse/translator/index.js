@@ -66,7 +66,7 @@ function detectClientLastRole(body) {
 }
 
 // Translate request: source -> openai -> target
-export function translateRequest(sourceFormat, targetFormat, model, body, stream = true, credentials = null, provider = null, reqLogger = null, stripList = [], connectionId = null, clientTool = null) {
+export function translateRequest(sourceFormat, targetFormat, model, body, stream = true, credentials = null, provider = null, reqLogger = null, stripList = [], connectionId = null, clientTool = null, thinkingParam = null) {
   ensureInitialized();
   let result = body;
   // Role the client actually ended on, before any translator drops an emptied turn.
@@ -139,7 +139,7 @@ export function translateRequest(sourceFormat, targetFormat, model, body, stream
     targetFormat === FORMATS.KIRO &&
     (sourceFormat === FORMATS.OPENAI || sourceFormat === FORMATS.CLAUDE);
   if (!kiroThinkingMappedByTranslator) {
-    applyThinking(targetFormat, model, result, provider, thinkingIntent);
+    applyThinking(targetFormat, model, result, provider, thinkingIntent, thinkingParam);
   }
 
   // Always normalize to clean OpenAI format when target is OpenAI

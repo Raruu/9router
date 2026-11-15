@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { convertProviderNodeType, deleteProviderConnectionsByProvider, deleteProviderNode, getProviderConnections, getProviderNodeById, updateProviderConnection, updateProviderNode } from "@/models";
 import { sanitizeKindBaseUrls } from "open-sse/config/kindEndpoints.js";
+import { isValidThinkingParam, normalizeThinkingParam } from "open-sse/config/thinkingParams.js";
 import { closeAntigravityConnection } from "open-sse/services/antigravityConnectionLimit.js";
 
 // PUT /api/provider-nodes/[id] - Update provider node
@@ -8,7 +9,7 @@ export async function PUT(request, { params }) {
   try {
     const { id } = await params;
     const body = await request.json();
-    const { name, prefix, apiType, baseUrl, type, kindBaseUrls } = body;
+    const { name, prefix, apiType, baseUrl, type, kindBaseUrls, thinkingParam } = body;
     const node = await getProviderNodeById(id);
 
     if (!node) {
@@ -27,6 +28,11 @@ export async function PUT(request, { params }) {
     // that omits the field must keep the stored overrides (and their
     // connection copies) untouched. An explicitly empty map clears them.
     const kindOverrides = "kindBaseUrls" in body ? sanitizeKindBaseUrls(kindBaseUrls) : null;
+    const thinkingParamProvided = "thinkingParam" in body;
+    if (thinkingParamProvided && !isValidThinkingParam(thinkingParam)) {
+      return NextResponse.json({ error: "Invalid thinking parameter" }, { status: 400 });
+    }
+    const normalizedThinkingParam = normalizeThinkingParam(thinkingParam);
 
     // Switching between OpenAI and Anthropic compatible moves the node to a
     // new id (the kind is keyed off the id prefix) and migrates every
@@ -50,6 +56,7 @@ export async function PUT(request, { params }) {
         prefix,
         baseUrl,
         ...(kindOverrides !== null ? { kindBaseUrls: kindOverrides } : {}),
+        ...(thinkingParamProvided ? { thinkingParam: normalizedThinkingParam } : {}),
       });
       if (!converted) {
         return NextResponse.json({ error: "Provider node not found" }, { status: 404 });
@@ -97,24 +104,30 @@ export async function PUT(request, { params }) {
     if (kindOverrides !== null) {
       updates.kindBaseUrls = kindOverrides;
     }
+    if (thinkingParamProvided) {
+      updates.thinkingParam = normalizedThinkingParam;
+    }
 
     const updated = await updateProviderNode(id, updates);
 
     const connections = await getProviderConnections({ provider: id });
-    await Promise.all(connections.map((connection) => (
-      updateProviderConnection(connection.id, {
-        providerSpecificData: {
-          ...(connection.providerSpecificData || {}),
-          prefix: prefix.trim(),
-          apiType: node.type === "openai-compatible" ? apiType : undefined,
-          baseUrl: sanitizedBaseUrl,
-          ...(kindOverrides !== null
-            ? { kindBaseUrls: Object.keys(kindOverrides).length ? kindOverrides : undefined }
-            : {}),
-          nodeName: updated.name,
-        }
-      })
-    )));
+    await Promise.all(connections.map((connection) => {
+      const providerSpecificData = {
+        ...(connection.providerSpecificData || {}),
+        prefix: prefix.trim(),
+        apiType: node.type === "openai-compatible" ? apiType : undefined,
+        baseUrl: sanitizedBaseUrl,
+        ...(kindOverrides !== null
+          ? { kindBaseUrls: Object.keys(kindOverrides).length ? kindOverrides : undefined }
+          : {}),
+        nodeName: updated.name,
+      };
+      if (thinkingParamProvided) {
+        if (normalizedThinkingParam) providerSpecificData.thinkingParam = normalizedThinkingParam;
+        else delete providerSpecificData.thinkingParam;
+      }
+      return updateProviderConnection(connection.id, { providerSpecificData });
+    }));
 
     return NextResponse.json({ node: updated });
   } catch (error) {

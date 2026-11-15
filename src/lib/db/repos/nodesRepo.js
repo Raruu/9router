@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from "uuid";
 import { getAdapter } from "../driver.js";
 import { parseJson, stringifyJson } from "../helpers/jsonCol.js";
 import { sanitizeKindBaseUrls } from "open-sse/config/kindEndpoints.js";
+import { normalizeThinkingParam } from "open-sse/config/thinkingParams.js";
 
 function rowToNode(row) {
   if (!row) return null;
@@ -140,6 +141,7 @@ export async function createProviderNode(data) {
   const db = await getAdapter();
   const now = new Date().toISOString();
   const kindBaseUrls = normalizeKindBaseUrls(data.kindBaseUrls);
+  const thinkingParam = normalizeThinkingParam(data.thinkingParam);
   const node = {
     id: data.id || uuidv4(),
     type: data.type,
@@ -148,6 +150,7 @@ export async function createProviderNode(data) {
     apiType: data.apiType,
     baseUrl: data.baseUrl,
     ...(kindBaseUrls ? { kindBaseUrls } : {}),
+    ...(thinkingParam ? { thinkingParam } : {}),
     createdAt: now,
     updatedAt: now,
   };
@@ -169,6 +172,13 @@ export async function updateProviderNode(id, data) {
       const kindBaseUrls = normalizeKindBaseUrls(data.kindBaseUrls);
       if (kindBaseUrls) merged.kindBaseUrls = kindBaseUrls;
       else delete merged.kindBaseUrls;
+    }
+    // Same omitted-vs-empty contract: the API only sends this field when the
+    // edit form includes the select, and an empty value clears the override.
+    if ("thinkingParam" in data) {
+      const thinkingParam = normalizeThinkingParam(data.thinkingParam);
+      if (thinkingParam) merged.thinkingParam = thinkingParam;
+      else delete merged.thinkingParam;
     }
     upsert(db, merged);
     result = merged;
@@ -238,6 +248,11 @@ export async function convertProviderNodeType(id, payload) {
     const nextKindBaseUrls = kindBaseUrlsProvided
       ? normalizeKindBaseUrls(payload.kindBaseUrls)
       : normalizeKindBaseUrls(node.kindBaseUrls);
+    // Type conversion preserves the thinking-control wire shape unless the edit
+    // explicitly sent a new value (or cleared it).
+    const nextThinkingParam = "thinkingParam" in payload
+      ? normalizeThinkingParam(payload.thinkingParam)
+      : normalizeThinkingParam(node.thinkingParam);
 
     const newNode = {
       id: newId,
@@ -247,6 +262,7 @@ export async function convertProviderNodeType(id, payload) {
       ...(type === COMPATIBLE_CHAT_NODE_TYPE ? { apiType } : {}),
       baseUrl: sanitizedBaseUrl,
       ...(nextKindBaseUrls ? { kindBaseUrls: nextKindBaseUrls } : {}),
+      ...(nextThinkingParam ? { thinkingParam: nextThinkingParam } : {}),
       ...(node.iconVersion ? { iconVersion: node.iconVersion } : {}),
       createdAt: row.createdAt,
       updatedAt: now,
@@ -264,6 +280,8 @@ export async function convertProviderNodeType(id, payload) {
       } else {
         delete specific.kindBaseUrls;
       }
+      if (nextThinkingParam) specific.thinkingParam = nextThinkingParam;
+      else delete specific.thinkingParam;
       if (type === COMPATIBLE_CHAT_NODE_TYPE) {
         specific.apiType = apiType;
       } else {

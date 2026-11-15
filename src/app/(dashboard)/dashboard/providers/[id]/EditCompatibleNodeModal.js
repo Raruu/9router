@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import { Button, Badge, Input, KindBaseUrlsEditor, Modal, Select } from "@/shared/components";
 import { COMPATIBLE_NODE_TYPES } from "@/shared/constants/providers";
+import { THINKING_PARAM_OPTIONS } from "open-sse/config/thinkingParams.js";
 import ProviderIconUpload from "@/shared/components/ProviderIconUpload";
 
 export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose }) {
@@ -15,6 +16,7 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose 
     baseUrl: "https://api.openai.com/v1",
   });
   const [kindBaseUrls, setKindBaseUrls] = useState({});
+  const [thinkingParam, setThinkingParam] = useState("");
   const [saving, setSaving] = useState(false);
   const [checkKey, setCheckKey] = useState("");
   const [checkModelId, setCheckModelId] = useState("");
@@ -35,6 +37,7 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose 
         baseUrl: node.baseUrl || (nodeType === "anthropic-compatible" ? "https://api.anthropic.com/v1" : "https://api.openai.com/v1"),
       });
       setKindBaseUrls(node.kindBaseUrls && typeof node.kindBaseUrls === "object" ? { ...node.kindBaseUrls } : {});
+      setThinkingParam(node.thinkingParam || "");
       setIconFile(null);
       setRemoveIcon(false);
       setIconError("");
@@ -61,6 +64,8 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose 
         // Always sent so clearing a field persists: the API treats an explicit
         // empty map as "no overrides" and an omitted field as "leave as is".
         kindBaseUrls,
+        // Always sent: an empty value clears the stored override.
+        thinkingParam,
       };
       if (!selectedIsAnthropic) {
         payload.apiType = formData.apiType;
@@ -170,6 +175,15 @@ export default function EditCompatibleNodeModal({ isOpen, node, onSave, onClose 
           placeholder={selectedIsAnthropic ? "https://api.anthropic.com/v1" : "https://api.openai.com/v1"}
           hint={`Use the base URL (ending in /v1) for your ${selectedIsAnthropic ? "Anthropic" : "OpenAI"}-compatible API.`}
         />
+        {!selectedIsAnthropic && (
+          <Select
+            label="Thinking parameter"
+            options={THINKING_PARAM_OPTIONS}
+            value={thinkingParam}
+            onChange={(e) => setThinkingParam(e.target.value)}
+            hint="Chat Completions only. Pick the field this endpoint accepts when it rejects `thinking`. Default leaves the model's native format unchanged."
+          />
+        )}
         <KindBaseUrlsEditor value={kindBaseUrls} onChange={setKindBaseUrls} disabled={saving} />
         <details className="rounded-lg border border-border-subtle px-3 py-2">
           <summary className="cursor-pointer text-sm font-medium text-text-muted hover:text-primary">
