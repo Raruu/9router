@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import PropTypes from "prop-types";
 import { Badge, Button, Input, KindBaseUrlsEditor, Modal, Select } from "@/shared/components";
 import { COMPATIBLE_NODE_TYPES } from "@/shared/constants/providers";
+import { THINKING_PARAM_OPTIONS } from "open-sse/config/thinkingParams.js";
 import ProviderIconUpload from "@/shared/components/ProviderIconUpload";
 
 const VARIANT_CONFIG = {
@@ -48,6 +49,7 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
 
   const [formData, setFormData] = useState(initialFormData);
   const [kindBaseUrls, setKindBaseUrls] = useState({});
+  const [thinkingParam, setThinkingParam] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [checkKey, setCheckKey] = useState("");
   const [checkModelId, setCheckModelId] = useState("");
@@ -55,6 +57,7 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
   const [validationResult, setValidationResult] = useState(null);
   const [iconFile, setIconFile] = useState(null);
   const [iconError, setIconError] = useState("");
+  const supportsThinkingParam = !selectedIsAnthropic && formData.apiType === "chat";
 
   // Reset everything when opened; baseUrl resets are handled in the
   // type/apiType change handlers below (no render-chasing effects).
@@ -63,6 +66,7 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
     setNodeType("openai-compatible");
     setFormData({ name: "", prefix: "", apiType: "chat", baseUrl: VARIANT_CONFIG.openai.defaultBaseUrl });
     setKindBaseUrls({});
+    setThinkingParam("");
     setValidationResult(null);
     setCheckKey("");
     setCheckModelId("");
@@ -98,6 +102,7 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
           ...(config.hasApiType ? { apiType: formData.apiType } : {}),
           baseUrl: formData.baseUrl,
           ...(Object.values(kindBaseUrls).some((v) => (v || "").trim()) ? { kindBaseUrls } : {}),
+          ...(supportsThinkingParam && thinkingParam ? { thinkingParam } : {}),
           type: config.type,
         }),
       });
@@ -238,6 +243,15 @@ function AddCompatibleModal({ isOpen, onClose, onCreated }) {
           placeholder={config.defaultBaseUrl}
           hint={config.baseUrlHint}
         />
+        {supportsThinkingParam && (
+          <Select
+            label="Thinking parameter"
+            options={THINKING_PARAM_OPTIONS}
+            value={thinkingParam}
+            onChange={(e) => setThinkingParam(e.target.value)}
+            hint="Chat Completions only. Pick the field this endpoint accepts when it rejects `thinking`. Default leaves the model's native format unchanged."
+          />
+        )}
         <KindBaseUrlsEditor value={kindBaseUrls} onChange={setKindBaseUrls} disabled={submitting} />
         <details className="rounded-lg border border-border-subtle px-3 py-2">
           <summary className="cursor-pointer text-sm font-medium text-text-muted hover:text-primary">

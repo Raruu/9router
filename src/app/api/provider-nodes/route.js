@@ -3,6 +3,7 @@ import { buildCompatibleNodeId, createProviderNode, getProviderNodes } from "@/m
 import { CUSTOM_EMBEDDING_PREFIX } from "@/shared/constants/providers";
 import { generateId } from "@/shared/utils";
 import { sanitizeKindBaseUrls } from "open-sse/config/kindEndpoints.js";
+import { isValidThinkingParam, normalizeThinkingParam } from "open-sse/config/thinkingParams.js";
 
 export const dynamic = "force-dynamic";
 
@@ -33,7 +34,7 @@ export async function GET() {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { name, prefix, apiType, baseUrl, type, kindBaseUrls } = body;
+    const { name, prefix, apiType, baseUrl, type, kindBaseUrls, thinkingParam } = body;
 
     if (!name?.trim()) {
       return NextResponse.json({ error: "Name is required" }, { status: 400 });
@@ -42,6 +43,11 @@ export async function POST(request) {
     if (!prefix?.trim()) {
       return NextResponse.json({ error: "Prefix is required" }, { status: 400 });
     }
+
+    if (!isValidThinkingParam(thinkingParam)) {
+      return NextResponse.json({ error: "Invalid thinking parameter" }, { status: 400 });
+    }
+    const normalizedThinkingParam = normalizeThinkingParam(thinkingParam);
 
     // Optional per-kind endpoint overrides (image/video on a different host, …)
     const kindOverrides = sanitizeKindBaseUrls(kindBaseUrls);
@@ -61,6 +67,7 @@ export async function POST(request) {
         apiType,
         baseUrl: (baseUrl || OPENAI_COMPATIBLE_DEFAULTS.baseUrl).trim(),
         ...(Object.keys(kindOverrides).length ? { kindBaseUrls: kindOverrides } : {}),
+        ...(normalizedThinkingParam ? { thinkingParam: normalizedThinkingParam } : {}),
         name: name.trim(),
       });
       return NextResponse.json({ node }, { status: 201 });
@@ -99,6 +106,7 @@ export async function POST(request) {
         // Per-kind endpoint overrides apply to both compatible node types —
         // their media endpoints are OpenAI-shaped regardless of the chat API.
         ...(Object.keys(kindOverrides).length ? { kindBaseUrls: kindOverrides } : {}),
+        ...(normalizedThinkingParam ? { thinkingParam: normalizedThinkingParam } : {}),
         name: name.trim(),
       });
       return NextResponse.json({ node }, { status: 201 });
