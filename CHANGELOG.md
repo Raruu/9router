@@ -1,4 +1,8 @@
-# v0.5.123 (2026-11-22)
+# v0.5.123-1 (2026-11-23)
+
+Merged upstream v0.5.123 into the fork. This section includes the full upstream
+release notes and the fork-side merge work.
+
 
 ## Features
 - **Antigravity**: add Gemini 4 Hydrogen in low/medium/high/xhigh tiers plus a bare alias resolving to high, and track the tiers in the usage quota list; run CONTINUATION hops so a `max_tokens` above 64K can reach 1M output in one turn. Hydrogen is the only Gemini 4 model with an xhigh thinking level, so `xhigh` is advertised for Hydrogen only and downgrades to `high` on Carbon/Argon.
@@ -30,6 +34,14 @@
 - **Proxy Pools**: upload the Cloudflare worker as a hand-built multipart body with an explicit boundary and Content-Type, instead of a `FormData` the patched fetch serialized as `[object FormData]` (415); add the missing id on the status filter select.
 - **CLI Tools**: configure Pi model input, reasoning and thinking-level maps from `/api/models` caps while leaving unsupported levels unset; offer commandcode and claude live catalogs in the Combo and CLI-tool pickers from one shared provider list.
 - **i18n**: translate the leftover Vietnamese quota labels, status messages and auth hints to English.
+
+## Fork merge notes
+- **Thinking parameter**: kept the Chat-Completions-only `thinkingParam` provider setting and the Responses `reasoning:{effort,summary:"auto"}` nesting from v0.5.119-2. Responses- and Anthropic-compatible nodes still reject the setting.
+- **Combo picker**: Cline/ClinePass stay on the configured list (`modelSelectCatalog.js`) to avoid the account-wide catalog; the CLI-tool cards keep upstream's shared live list. Claude and CommandCode live catalogs are added to both paths.
+- **Custom models**: upstream `upstreamModelId` is persisted alongside the fork's type/catalog/native-edit fields, and `/api/models` publishes both `thinkingLevels` and `thinking_levels`.
+- **Engine**: kept fork abort-aware retries, per-connection Antigravity admission, custom-header `providerOverrides`, `kindBaseUrls`, and the opt-in Codex native image-edit path. The upstream Antigravity prompt-retry skips the admission breaker because a bare RESOURCE_EXHAUSTED is request-scoped.
+- **Toolchain**: adopted Next 16.4.6, node-forge 1.4.3 and Vitest 4.1.12; CLI identities stay Claude Code 2.1.323 and Codex 0.169.0.
+- **Baselines**: regenerated the provider and alias snapshots; the full suite is 5,488 passed, 17 known failures, 27 pending and 1 todo.
 
 # v0.5.119-2 (2026-11-15)
 
