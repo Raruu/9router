@@ -30,7 +30,10 @@ export function resolveComboMember(member, ctx) {
 
   const separator = fullModel.indexOf("/");
   const prefix = fullModel.slice(0, separator);
-  const modelId = fullModel.slice(separator + 1).trim();
+  // A combo seat may carry a trailing thinking-level override such as
+  // "model(max)" or "model(high)"; it is not part of the model id and would
+  // make provider-scoped capability lookups miss and fall back to 1M defaults.
+  const modelId = fullModel.slice(separator + 1).replace(/\([^()]+\)\s*$/, "").trim();
   if (!modelId) return null;
 
   return {

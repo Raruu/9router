@@ -70,14 +70,14 @@ describe("opencode Free tool_choice auto-only", () => {
     ["future 1.4-Free", "muse-spark-1.4-contributor-free"],
     ["Go id", "muse-spark-1.3-contributor"],
     ["non-Muse", "big-pickle"],
-  ])("không đổi tool_choice của %s", (_label, model) => {
+  ])("does not change tool_choice for %s", (_label, model) => {
     const choice = { type: "function", name: "get_weather" };
     const body = responsesBody(model, structuredClone(choice));
     const out = new OpenCodeExecutor().transformRequest(model, body, true, CREDS);
     expect(out.tool_choice).toEqual(choice);
   });
 
-  it("wire: execute gửi choice auto tới /inference/v1/responses", async () => {
+  it("wire: execute sends the auto choice to /inference/v1/responses", async () => {
     proxyAwareFetch.mockClear();
     const ex = new OpenCodeExecutor();
     const body = responsesBody(FREE_13, { type: "function", name: "get_weather" });

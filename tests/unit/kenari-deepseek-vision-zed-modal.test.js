@@ -50,7 +50,11 @@ describe("deepseek-v4-1-flash capabilities (#4293)", () => {
 import fs from "fs";
 import { LIVE_CATALOG_PROVIDERS } from "../../src/shared/utils/modelSelectCatalog.js";
 
-describe("ModelSelectModal LIVE_CATALOG_PROVIDERS includes zed (#4244)", () => {
+// #4244 added zed to the picker's live-catalog list. That list now lives in
+// selectableModels so the Combo picker, the CLI-tool cards and
+// /api/providers/[id]/models share one definition; this guards the same intent
+// without pinning it to a string inside ModelSelectModal.
+describe("LIVE_CATALOG_PROVIDERS includes zed (#4244)", () => {
   let src;
   beforeAll(() => {
     const fileUrl = new URL("../../src/shared/components/ModelSelectModal.js", import.meta.url);
@@ -61,8 +65,10 @@ describe("ModelSelectModal LIVE_CATALOG_PROVIDERS includes zed (#4244)", () => {
     expect(LIVE_CATALOG_PROVIDERS).toContain("zed");
   });
 
-  it("still includes cursor and drops cline/clinepass (configured list)", () => {
-    expect(LIVE_CATALOG_PROVIDERS).toContain("cursor");
+  it("includes cursor and the new upstream live providers, but drops cline/clinepass (configured list)", () => {
+    expect(LIVE_CATALOG_PROVIDERS).toEqual(
+      expect.arrayContaining(["cursor", "zed", "claude", "commandcode"])
+    );
     expect(LIVE_CATALOG_PROVIDERS).not.toContain("cline");
     expect(LIVE_CATALOG_PROVIDERS).not.toContain("clinepass");
   });

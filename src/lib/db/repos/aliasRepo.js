@@ -34,16 +34,21 @@ export async function getCustomModels() {
 // `locked` is only overwritten when explicitly provided, so edits never drop it.
 // `transport` (STT realtime dispatch marker) is persisted when provided and
 // otherwise left untouched, matching caps/name semantics.
+// `upstreamModelId` is likewise persisted when provided and preserved on
+// partial updates (custom System One selectors).
 //
 // `previousType` (edit flow): the kind is part of the KV key, so changing it
 // would otherwise write a second record and orphan the old one. When it
 // differs from `type`, the old key is deleted inside the same transaction and
-// its metadata (name/caps/catalogRef/transport/locked) carries over to the new
-// key — a rename, not a duplicate.
-export async function addCustomModel({ providerAlias, id, type = "llm", name, caps, catalogRef, clearCatalogMetadata = false, locked, transport, nativeImageEdit, previousType = null }) {
+// its metadata (name/caps/catalogRef/transport/locked/upstreamModelId) carries
+// over to the new key — a rename, not a duplicate.
+export async function addCustomModel({ providerAlias, id, type = "llm", name, caps, catalogRef, clearCatalogMetadata = false, locked, transport, nativeImageEdit, upstreamModelId, previousType = null }) {
   const k = customKey(providerAlias, id, type);
   const oldKey = previousType && previousType !== type ? customKey(providerAlias, id, previousType) : null;
   const db = await getAdapter();
+  const cleanUpstream = typeof upstreamModelId === "string" && upstreamModelId.trim()
+    ? upstreamModelId.trim()
+    : null;
   let added = false;
   db.transaction(() => {
     // A type change moves the record: read the old row first so its metadata
@@ -57,7 +62,7 @@ export async function addCustomModel({ providerAlias, id, type = "llm", name, ca
       const prev = parseJson(prevRow.value) || {};
       // `type` is part of the record as well as the key — on a rename it must
       // track the new key, or getModelKind() would still report the old kind.
-      const next = { ...prev, type, ...(name ? { name } : {}) };
+      const next = { ...prev, type, ...(name ? { name } : {}), ...(cleanUpstream ? { upstreamModelId: cleanUpstream } : {}) };
       if (clearCatalogMetadata) {
         delete next.caps;
         delete next.catalogRef;
@@ -99,7 +104,7 @@ export async function addCustomModel({ providerAlias, id, type = "llm", name, ca
       );
       return;
     }
-    const value = stringifyJson({ providerAlias, id, type, name: name || id, ...(caps ? { caps } : {}), ...(catalogRef ? { catalogRef } : {}), ...(transport ? { transport } : {}), ...(type === "image" && nativeImageEdit === true ? { nativeImageEdit: true } : {}), ...(locked ? { locked: true } : {}) });
+    const value = stringifyJson({ providerAlias, id, type, name: name || id, ...(caps ? { caps } : {}), ...(catalogRef ? { catalogRef } : {}), ...(transport ? { transport } : {}), ...(cleanUpstream ? { upstreamModelId: cleanUpstream } : {}), ...(type === "image" && nativeImageEdit === true ? { nativeImageEdit: true } : {}), ...(locked ? { locked: true } : {}) });
     db.run(`INSERT INTO kv(scope, key, value) VALUES('customModels', ?, ?)`, [k, value]);
     added = true;
   });

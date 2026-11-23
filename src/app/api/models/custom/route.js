@@ -44,6 +44,13 @@ function sanitizeTransport(transport, type) {
   return transport.trim();
 }
 
+function sanitizeUpstreamModelId(upstreamModelId) {
+  if (typeof upstreamModelId !== "string") return null;
+  const trimmed = upstreamModelId.trim();
+  if (!trimmed || trimmed.length > 256 || /[\r\n\0]/.test(trimmed)) return null;
+  return trimmed;
+}
+
 // GET /api/models/custom - List all custom models
 export async function GET() {
   try {
@@ -59,7 +66,7 @@ export async function GET() {
 export async function POST(request) {
   try {
     const body = await request.json();
-    const { providerAlias, id, type, name, caps, transport } = body;
+    const { providerAlias, id, type, name, caps, transport, upstreamModelId } = body;
     if (!providerAlias || !id) {
       return NextResponse.json({ error: "providerAlias and id required" }, { status: 400 });
     }
@@ -68,6 +75,7 @@ export async function POST(request) {
     const cleanType = isCustomModelType(type) ? type.trim() : normalizeCustomModelType(type);
     const cleanCaps = sanitizeCaps(caps);
     const cleanTransport = sanitizeTransport(transport, cleanType);
+    const cleanUpstreamModelId = sanitizeUpstreamModelId(upstreamModelId);
     // Opt-in native edit endpoint, only meaningful on image-generation models.
     // true/false are explicit (false clears); any other value is ignored.
     const nativeImageEdit = cleanType === "image"
@@ -87,6 +95,7 @@ export async function POST(request) {
       // is silently dropped and leaves the stored marker alone (T14 — a typo
       // must not clobber a working transport). Non-stt types clear in the repo.
       ...(cleanTransport ? { transport: cleanTransport } : transport === "" ? { transport: "" } : {}),
+      ...(cleanUpstreamModelId ? { upstreamModelId: cleanUpstreamModelId } : {}),
       ...(nativeImageEdit !== undefined ? { nativeImageEdit } : {}),
       ...(catalogRef ? { catalogRef } : {}),
       clearCatalogMetadata: Object.hasOwn(body, "catalogRef") && !catalogRef,

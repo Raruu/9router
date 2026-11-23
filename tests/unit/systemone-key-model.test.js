@@ -36,7 +36,10 @@ vi.mock("../../src/sse/services/tokenRefresh.js", () => ({
   checkAndRefreshToken: async (_provider, credentials) => credentials,
 }));
 vi.mock("@/lib/usageDb.js", () => ({ saveRequestUsage: vi.fn() }));
-vi.mock("open-sse/handlers/systemoneCore.js", () => ({ handleSystemoneCore: mocks.handleSystemoneCore }));
+vi.mock("open-sse/handlers/systemoneCore.js", () => ({
+  handleSystemoneCore: mocks.handleSystemoneCore,
+  validateSystemonePayload: vi.fn(() => null),
+}));
 
 const { handleSystemone } = await import("../../src/sse/handlers/systemone.js");
 

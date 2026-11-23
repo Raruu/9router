@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { getCapabilitiesForModel } from "../../open-sse/providers/capabilities.js";
 import { mergeMemberCapabilities } from "../../src/app/api/v1/models/route.js";
+import { resolveComboMember, comboMemberCapabilities } from "../../open-sse/providers/comboCapabilities.js";
 
 // A combo advertises what its BEST member delivers. Merging conservatively
 // (min limits / AND booleans) let one small text-only fallback erase the
@@ -103,6 +104,20 @@ describe("combo capability merge", () => {
 
     expect(merged.thinkingRange).toBeNull();
     expect(merged.thinkingFormat).toBeNull();
+  });
+
+  it("strips a trailing thinking-level suffix from a combo seat", () => {
+    const ctx = {
+      providerIdByPrefix: new Map([["dv", "devin-cli"]]),
+      comboByName: new Map(),
+      modelAliases: {},
+    };
+    expect(resolveComboMember("dv/gpt-5.5-high(max)", ctx)).toMatchObject({
+      providerId: "devin-cli",
+      modelId: "gpt-5.5-high",
+    });
+    const member = comboMemberCapabilities("dv/gpt-5.5-high(max)", ctx, 0, new Set());
+    expect(member.contextWindow).toBe(getCapabilitiesForModel("devin-cli", "gpt-5.5-high").contextWindow);
   });
 
   it("returns null for a combo with no resolvable members", () => {

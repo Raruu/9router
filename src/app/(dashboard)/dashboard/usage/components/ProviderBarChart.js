@@ -12,14 +12,8 @@ import {
   ResponsiveContainer,
   Cell,
 } from "recharts";
-
+import { fmtCompactTokens } from "./tokenDisplay";
 const COLORS = ["#6366f1", "#14b8a6", "#f59e0b", "#ef4444", "#8b5cf6", "#06b6d4", "#10b981", "#f97316"];
-
-const fmtTokens = (n) => {
-  if (n >= 1000000) return `${(n / 1000000).toFixed(1)}M`;
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}K`;
-  return String(n || 0);
-};
 
 const truncate = (s, max) => (s && s.length > max ? s.slice(0, max) + "…" : s || "");
 
@@ -52,7 +46,7 @@ export default function ProviderBarChart({ byProvider }) {
       .sort((a, b) => b[viewMode] - a[viewMode]);
   }, [byProvider, viewMode]);
 
-  const fmt = viewMode === "tokens" ? fmtTokens : String;
+  const fmt = viewMode === "tokens" ? fmtCompactTokens : String;
   const label = viewMode === "tokens" ? "Tokens" : "Requests";
   const height = Math.max(140, chartData.length * 24 + 40);
   const width = labelWidth(chartData);
