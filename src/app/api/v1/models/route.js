@@ -63,6 +63,38 @@ const ALIAS_TO_PROVIDER_ID = {
 // returns { models: [{ id, name? }, ...] } | null on failure.
 // Adding a provider here makes /v1/models prefer the live catalog for it.
 const LIVE_MODEL_RESOLVERS = {
+  opencode: async (conn) => {
+    try {
+      const res = await fetch("https://opencode.ai/zen/v1/models", {
+        headers: { "x-opencode-client": "desktop" },
+        cache: "no-store",
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      const raw = Array.isArray(data?.models) ? data.models : Array.isArray(data?.data) ? data.data : [];
+      const KNOWN_FREE = new Set(["big-pickle"]);
+      const DEAD = new Set(["deepseek-v4-flash-free"]);
+      const models = raw
+        .filter((m) => {
+          const id = m?.id || m?.name;
+          if (typeof id !== "string") return false;
+          return id.endsWith("-free") || KNOWN_FREE.has(id);
+        })
+        .filter((m) => !DEAD.has(m?.id || m?.name))
+        .map((m) => {
+          const id = m.id || m.name;
+          const caps = {};
+          if (m.limit?.context) caps.contextWindow = m.limit.context;
+          if (m.limit?.output) caps.maxOutput = m.limit.output;
+          if (m.capabilities?.reasoning?.supported) caps.reasoning = true;
+          if (m.capabilities?.tools?.supported) caps.tools = true;
+          return { id, name: m.name || id, capabilities: Object.keys(caps).length ? caps : undefined };
+        });
+      return models.length ? { models } : null;
+    } catch {
+      return null;
+    }
+  },
   kiro: async (conn) => {
     const result = await resolveKiroModels({
       accessToken: conn.accessToken,

@@ -4,6 +4,19 @@ import { HTTP_STATUS, FETCH_CONNECT_TIMEOUT_MS } from "../config/runtimeConfig.j
 import { getExecutor } from "../executors/index.js";
 import { refreshWithRetry } from "../services/tokenRefresh.js";
 import { getEmbeddingAdapter } from "./embeddingProviders/index.js";
+import { PROVIDER_ID_TO_ALIAS, getModelParams } from "../config/providerModels.js";
+import { resolveInputType } from "../config/embeddingParams.js";
+
+/**
+ * Resolve `input_type` for models that declare it (registry `models[].params`).
+ * NVIDIA's asymmetric embedding models answer HTTP 400 when it is missing.
+ * The client value wins when it is one of the accepted values; anything else
+ * (empty, unknown) falls back to the default.
+ */
+function resolveDeclaredInputType(provider, model, body) {
+  const alias = PROVIDER_ID_TO_ALIAS[provider] || provider;
+  return resolveInputType(getModelParams(alias, model), body?.input_type);
+}
 
 /**
  * Core embeddings handler — orchestrator only. Provider-specific URL/headers/body/normalize
@@ -43,6 +56,10 @@ export async function handleEmbeddingsCore({
   }
 
   const ctx = { input };
+  // Models that declare extra request params (e.g. NVIDIA's asymmetric embedding
+  // models need `input_type`) — resolved once here so the 401/403 retry below
+  // reuses the same payload.
+  const inputType = resolveDeclaredInputType(provider, model, body);
   // buildUrl/buildHeaders/buildBody were called bare. An adapter that rejects a
   // misconfigured connection — selfhosted-embedding throws when no baseUrl is set
   // rather than silently falling back to api.openai.com — would have escaped this
@@ -56,13 +73,14 @@ export async function handleEmbeddingsCore({
       input,
       encoding_format: body.encoding_format || "float",
       dimensions: body.dimensions,
+      ...(inputType ? { input_type: inputType } : {}),
     });
   } catch (error) {
     log?.debug?.("EMBEDDINGS", `Request build failed: ${error.message}`);
     return createErrorResult(HTTP_STATUS.BAD_REQUEST, `[${tag}] ${error.message}`);
   }
 
-  log?.debug?.("EMBEDDINGS", `${displayProvider.toUpperCase()} | ${model} | input_type=${Array.isArray(input) ? `array[${input.length}]` : "string"}`);
+  log?.debug?.("EMBEDDINGS", `${displayProvider.toUpperCase()} | ${model} | input=${Array.isArray(input) ? `array[${input.length}]` : "string"}${inputType ? ` | input_type=${inputType}` : ""}`);
 
   let providerResponse;
   try {

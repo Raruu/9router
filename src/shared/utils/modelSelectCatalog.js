@@ -9,9 +9,10 @@
 // ids), while the provider page shows the configured list (static registry +
 // models the user imported via "Import from /models"). The combo picker must
 // mirror that configured list — otherwise it offers models the user never
-// added, which is exactly the reported mismatch.
+// added, which is exactly the reported mismatch. Claude and CommandCode were
+// added by upstream v0.5.123 and are safe per-account catalogs.
 
-export const LIVE_CATALOG_PROVIDERS = ["cursor", "zed"];
+export const LIVE_CATALOG_PROVIDERS = ["cursor", "zed", "claude", "commandcode"];
 
 // Pick the model list a provider's picker group should render: the live
 // account catalog when the provider is opted in AND the fetch produced rows,

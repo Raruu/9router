@@ -52,6 +52,9 @@ export async function GET() {
           alias: modelAliases[fullModel] || m.model,
           caps: c,
           ...(levels ? { thinkingLevels: levels } : {}),
+          // Same per-model set /v1/models already publishes, so CLI-tool cards can
+          // seed thinking levels instead of guessing them (Pi, opencode).
+          ...(Array.isArray(levels) && levels.length > 0 ? { thinking_levels: levels } : {}),
         };
       });
 
@@ -93,6 +96,7 @@ export async function GET() {
         alias: modelAliases[fullModel] || m.id,
         caps,
         ...(levels ? { thinkingLevels: levels } : {}),
+        ...(Array.isArray(levels) && levels.length > 0 ? { thinking_levels: levels } : {}),
       });
     }
 

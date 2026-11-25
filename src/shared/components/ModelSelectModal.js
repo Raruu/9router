@@ -16,7 +16,7 @@ import { filterModelSelectGroups } from "@/shared/utils/modelSelectFilter";
 import { LIVE_CATALOG_PROVIDERS, pickProviderCatalog } from "@/shared/utils/modelSelectCatalog";
 import { parseSearchQuery, matchesSearch } from "@/shared/utils/modelSearchFilter";
 import { getDeactivatedProviderIds } from "@/shared/utils/connectionStatus";
-import { NO_AUTH_PROVIDER_IDS } from "@/shared/utils/selectableModels";
+import { NO_AUTH_PROVIDER_IDS, liveModelCaps } from "@/shared/utils/selectableModels";
 
 // Provider order: OAuth first, then Free Tier, then API Key (matches dashboard/providers)
 const PROVIDER_ORDER = [
@@ -157,9 +157,14 @@ export default function ModelSelectModal({
   }, [filteredActiveProviders]);
   const cursorConnectionIds = liveConnectionIdsByProvider.cursor;
   const zedConnectionIds = liveConnectionIdsByProvider.zed;
+  const claudeConnectionIds = liveConnectionIdsByProvider.claude;
+  const commandcodeConnectionIds = liveConnectionIdsByProvider.commandcode;
 
   const cursorModels = useLiveProviderModels(isOpen, cursorConnectionIds, "Cursor");
   const zedModels = useLiveProviderModels(isOpen, zedConnectionIds, "Zed");
+  const claudeModels = useLiveProviderModels(isOpen, claudeConnectionIds, "Claude");
+  const commandcodeModels = useLiveProviderModels(isOpen, commandcodeConnectionIds, "CommandCode");
+
 
   const fetchCombos = async () => {
     try {
@@ -230,6 +235,14 @@ export default function ModelSelectModal({
   // Group models by provider with priority order
   const groupedModels = useMemo(() => {
     const groups = {};
+    // Keyed by provider id so a provider added to LIVE_CATALOG_PROVIDERS only needs
+    // its connection ids above, not another ternary.
+    const liveModelsByProvider = {
+      cursor: cursorModels,
+      zed: zedModels,
+      claude: claudeModels,
+      commandcode: commandcodeModels,
+    };
 
     // Strict mode (key permission editor): the LLM view must not mix in typed
     // custom models, so non-LLM entries are dropped there too. The kind tables
@@ -439,7 +452,7 @@ export default function ModelSelectModal({
         // to match the provider page. See modelSelectCatalog.js.
         const hardcodedModels = pickProviderCatalog({
           providerId,
-          liveModelsByProvider: { cursor: cursorModels, zed: zedModels },
+          liveModelsByProvider,
           staticModels: getModelsByProviderId(providerId),
         });
         const hardcodedIds = new Set(hardcodedModels.map((m) => m.id));
@@ -465,7 +478,7 @@ export default function ModelSelectModal({
           .map((m) => ({ id: m.id, name: m.name || m.id, value: `${alias}/${m.id}`, isCustom: true }));
 
         const merged = [
-          ...applyQoderModelNames(hardcodedModels, customModels, alias).map((m) => ({ id: m.id, name: m.name, value: `${alias}/${m.id}`, kind: getModelKind(m) })),
+          ...applyQoderModelNames(hardcodedModels, customModels, alias).map((m) => ({ id: m.id, name: m.name, value: `${alias}/${m.id}`, kind: getModelKind(m), caps: liveModelCaps(m) })),
           ...customAliasModels,
           ...customRegisteredModels,
         ];
@@ -532,7 +545,7 @@ export default function ModelSelectModal({
     });
 
     return groups;
-  }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, disabledModels, effectiveKind, strict, effectiveConnections, deactivatedProviderIds, cursorModels, zedModels]);
+  }, [filteredActiveProviders, modelAliases, allProviders, providerNodes, customModels, disabledModels, effectiveKind, strict, effectiveConnections, deactivatedProviderIds, cursorModels, zedModels, claudeModels, commandcodeModels]);
 
   // Parse search query into structured query (regex, positive tokens, negative tokens)
   const parsedQuery = useMemo(() => parseSearchQuery(searchQuery), [searchQuery]);

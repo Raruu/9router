@@ -24,8 +24,8 @@ const staticCursor = [
 ];
 
 describe("LIVE_CATALOG_PROVIDERS", () => {
-  it("contains cursor and zed — cline/clinepass use the configured list", () => {
-    expect(LIVE_CATALOG_PROVIDERS).toEqual(["cursor", "zed"]);
+  it("contains cursor, zed and the new live providers — cline/clinepass use the configured list", () => {
+    expect(LIVE_CATALOG_PROVIDERS).toEqual(["cursor", "zed", "claude", "commandcode"]);
     expect(LIVE_CATALOG_PROVIDERS).not.toContain("cline");
     expect(LIVE_CATALOG_PROVIDERS).not.toContain("clinepass");
   });
@@ -84,6 +84,21 @@ describe("pickProviderCatalog", () => {
       staticModels: openai,
     });
     expect(result).toBe(openai);
+  });
+
+  it("uses the live catalog for claude and commandcode", () => {
+    const liveClaude = [{ id: "claude-sonnet-5-5", name: "Claude Sonnet 5.5" }];
+    const liveCommandCode = [{ id: "deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash" }];
+    expect(pickProviderCatalog({
+      providerId: "claude",
+      liveModelsByProvider: { claude: liveClaude },
+      staticModels: [],
+    })).toBe(liveClaude);
+    expect(pickProviderCatalog({
+      providerId: "commandcode",
+      liveModelsByProvider: { commandcode: liveCommandCode },
+      staticModels: [],
+    })).toBe(liveCommandCode);
   });
 
   it("handles missing/undefined inputs without throwing", () => {
